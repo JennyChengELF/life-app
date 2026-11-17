@@ -6,7 +6,10 @@ export function LogEditor(props: {
   time: number | null;
   amount: number | null;
   unit: 'ml' | 'kg';
-  onSave: (time: number, amount: number) => void;
+  /** 有給 drinks 才顯示「喝什麼」 */
+  drink?: string;
+  drinks?: string[];
+  onSave: (time: number, amount: number, drink?: string) => void;
   onCancel?: () => void;
   onDelete?: () => void;
   deleteLabel?: string;
@@ -14,19 +17,31 @@ export function LogEditor(props: {
   const [time, setTime] = useState(props.time != null ? toInputDateTime(props.time) : toInputDateTime(Date.now()));
   const [amount, setAmount] = useState(props.amount != null ? String(props.amount) : '');
   const [err, setErr] = useState('');
+  const [drink, setDrink] = useState(props.drink ?? props.drinks?.[0] ?? '');
+  // 舊紀錄的飲品已從清單刪除時，仍可保留原名稱
+  const options = props.drinks && drink && !props.drinks.includes(drink) ? [...props.drinks, drink] : props.drinks;
 
   const save = () => {
     const t = parseDateTimeText(time);
     const a = Number(amount);
     if (t == null) return setErr('請選擇時間');
     if (!Number.isFinite(a) || a <= 0) return setErr(`請輸入 ${props.unit}`);
-    props.onSave(t, props.unit === 'ml' ? Math.round(a) : a);
+    props.onSave(t, props.unit === 'ml' ? Math.round(a) : a, options ? drink : undefined);
   };
 
   return (
     <div className="editor">
       <div className="editor-fields">
         <input type="datetime-local" value={time} onChange={(e) => setTime(e.target.value)} />
+        {options && (
+          <select value={drink} onChange={(e) => setDrink(e.target.value)} aria-label="喝什麼">
+            {options.map((d) => (
+              <option key={d} value={d}>
+                {d}
+              </option>
+            ))}
+          </select>
+        )}
         <label className="amount">
           <input
             type="number"

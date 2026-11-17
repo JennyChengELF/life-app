@@ -27,7 +27,8 @@ export function useWater() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<Toast | null>(null);
-  const initialized = useRef(false);
+  /** 初始化（確認試算表）只做一次；同時呼叫的會共用同一個 */
+  const initPromise = useRef<Promise<void> | null>(null);
   const toastTimer = useRef<number>();
 
   const showToast = useCallback((t: Omit<Toast, 'id'>, ms = 6000) => {
@@ -49,10 +50,13 @@ export function useWater() {
   );
 
   const load = useCallback(async () => {
-    if (!initialized.current) {
-      await backend.init();
-      initialized.current = true;
+    if (!initPromise.current) {
+      initPromise.current = backend.init().catch((e) => {
+        initPromise.current = null; // 失敗的話下次再試
+        throw e;
+      });
     }
+    await initPromise.current;
     const s = await store.load();
     setSnap(s);
     setStatus('ready');
@@ -134,7 +138,7 @@ export function useWater() {
 
   const signOut = useCallback(() => {
     auth?.signOut();
-    initialized.current = false;
+    initPromise.current = null;
     setSnap(null);
     setStatus('need-connect');
   }, [auth]);

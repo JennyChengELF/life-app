@@ -3,7 +3,8 @@
  * 第一列是欄位名稱（英文），APP 依欄位名稱找欄位，所以使用者調整欄位順序也沒關係。
  */
 
-export const SCHEMA_VERSION = 1;
+/** 2：喝水紀錄加「drink」、新增飲品清單（2026-11-17） */
+export const SCHEMA_VERSION = 2;
 
 export type ColType = 'datetime' | 'date' | 'number' | 'text' | 'bool' | 'any';
 
@@ -47,6 +48,7 @@ export const TABLES = {
     columns: [
       { name: 'time', type: 'datetime', label: '喝完的時間（必填）' },
       { name: 'ml', type: 'number', label: '喝了多少 ml（必填）' },
+      { name: 'drink', type: 'text', label: '喝什麼（填飲品清單裡的名稱；空白 = 清單第一個，預設是開水）' },
       { name: 'note', type: 'text', label: '備註' },
       { name: 'date', type: 'date', label: '日期（APP 依 time 自動填）' },
       { name: 'createdVia', type: 'text', label: '在哪裡輸入（water = 喝水 APP、sheet = 直接在試算表）' },
@@ -76,6 +78,15 @@ export const TABLES = {
       { name: 'name', type: 'text', label: '名稱（例：保溫瓶）' },
       { name: 'ml', type: 'number', label: '容量 ml' },
       { name: 'sort', type: 'number', label: '排序' },
+      ...systemCols,
+    ],
+  },
+  waterDrinks: {
+    file: 'water',
+    description: '飲品清單（記錄時選喝什麼）。第一個是預設飲品。目前所有飲品都算 100% 喝水量。請在 APP 裡修改。',
+    columns: [
+      { name: 'name', type: 'text', label: '名稱（例：開水、茶）' },
+      { name: 'sort', type: 'number', label: '排序（最小的是預設飲品）' },
       ...systemCols,
     ],
   },

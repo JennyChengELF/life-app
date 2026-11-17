@@ -2,12 +2,14 @@ import { useState } from 'react';
 import type { Cup, WaterSnapshot } from '@life/db';
 import { computeGoal, FACTOR_MAX, FACTOR_MIN, latestWeight, toDateKey, toHHmm } from '@life/db';
 import type { WaterApi } from '../useWater';
+import { drinkColor } from '../drinkColors';
 
 export function SettingsView({ api, snap }: { api: WaterApi; snap: WaterSnapshot }) {
   return (
     <div className="settings">
       <WeightCard api={api} snap={snap} />
       <GoalCard api={api} snap={snap} />
+      <DrinksCard api={api} snap={snap} />
       <CupsCard api={api} snap={snap} />
       <DataCard api={api} />
       <p className="muted small center-text">喝水目標僅供參考，不能取代醫療建議；有醫囑限水請依醫師指示。</p>
@@ -105,6 +107,84 @@ function GoalCard({ api, snap }: { api: WaterApi; snap: WaterSnapshot }) {
       <button className="primary" onClick={save} disabled={!valid || !dirty}>
         儲存設定
       </button>
+    </section>
+  );
+}
+
+function DrinksCard({ api, snap }: { api: WaterApi; snap: WaterSnapshot }) {
+  const [name, setName] = useState('');
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
+
+  const add = async () => {
+    const n = name.trim();
+    if (!n) return;
+    setName('');
+    await api.run((s) => s.addDrink(n, snap.drinks));
+  };
+
+  return (
+    <section className="card">
+      <h2>飲品清單</h2>
+      <p className="muted small">記錄時可以選喝什麼；第一個是預設（記完會自動回到它）。目前所有飲品都算進喝水量。</p>
+      <ul className="cup-list">
+        {snap.drinks.map((d, i) =>
+          editing === d.id ? (
+            <li key={d.id} className="editor">
+              <div className="row">
+                <input value={draft} onChange={(e) => setDraft(e.target.value)} />
+              </div>
+              <div className="editor-actions">
+                <button
+                  className="primary"
+                  disabled={!draft.trim()}
+                  onClick={() => {
+                    setEditing(null);
+                    api.run((s) => s.renameDrink(d, draft, snap.drinks));
+                  }}
+                >
+                  儲存
+                </button>
+                <button onClick={() => setEditing(null)}>取消</button>
+                <button
+                  className="danger"
+                  disabled={snap.drinks.length <= 1}
+                  onClick={() => {
+                    setEditing(null);
+                    api.run((s) => s.deleteDrink(d, snap.drinks));
+                  }}
+                >
+                  刪除
+                </button>
+              </div>
+              <p className="muted small">改名時，用舊名稱的紀錄會一起改；刪除後舊紀錄保留原本的名稱。</p>
+            </li>
+          ) : (
+            <li key={d.id} className="log-row">
+              <span className="drink-tag log-ml">
+                <i className="dot" style={{ background: drinkColor(d.name, snap.drinks) }} />
+                {d.name}
+                {i === 0 && <span className="badge">預設</span>}
+              </span>
+              <button
+                className="link"
+                onClick={() => {
+                  setDraft(d.name);
+                  setEditing(d.id);
+                }}
+              >
+                修改
+              </button>
+            </li>
+          ),
+        )}
+      </ul>
+      <div className="row">
+        <input placeholder="新增飲品（例：茶）" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} />
+        <button className="primary" onClick={add} disabled={!name.trim()}>
+          新增
+        </button>
+      </div>
     </section>
   );
 }

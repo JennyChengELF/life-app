@@ -4,6 +4,7 @@ import {
   computeGoal,
   decodeCell,
   DEFAULT_SETTINGS,
+  drinkOf,
   encodeCell,
   LocalBackend,
   memoryStorage,
@@ -132,6 +133,62 @@ describe('WaterStore', () => {
     expect(s.days.get('2026-11-16')!.total).toBe(500);
     expect(s.days.get('2026-11-17')!.total).toBe(0);
     expect(toDateKey(s.logs[0].time)).toBe(addDays('2026-11-17', -1));
+  });
+
+  it('飲品：第一次使用建立開水、其他；記錄喝什麼；空白算開水', async () => {
+    const { b, store } = setup();
+    let s = await store.load(at('2026-11-17 08:00'));
+    expect(s.drinks.map((d) => d.name)).toEqual(['開水', '其他']);
+    await store.addLog(300, at('2026-11-17 09:00'), '其他');
+    await b.appendRaw('waterLogs', { time: at('2026-11-17 10:00'), ml: 200 });
+    s = await store.load(at('2026-11-17 11:00'));
+    expect(s.logs.map((l) => drinkOf(l, s.drinks))).toEqual(['其他', '開水']);
+    // 再次讀取不會重複建立
+    s = await store.load(at('2026-11-17 11:00'));
+    expect(s.drinks).toHaveLength(2);
+  });
+
+  it('同時讀取兩次不會重複建立飲品、每日目標', async () => {
+    const { b, store } = setup();
+    const now = at('2026-11-17 08:00');
+    await Promise.all([store.load(now), store.load(now)]);
+    const drinks = (await b.read('waterDrinks')).filter((r) => r.values.deletedAt == null);
+    const days = (await b.read('waterDays')).filter((r) => r.values.deletedAt == null);
+    expect(drinks.map((r) => r.values.name)).toEqual(['開水', '其他']);
+    expect(days).toHaveLength(1);
+  });
+
+  it('已經重複的飲品、每日目標會自動清掉多的', async () => {
+    const { b, store } = setup();
+    const now = at('2026-11-17 08:00');
+    await store.load(now);
+    // 模擬之前的錯誤：多一組開水、其他，和重複的今天
+    await b.appendRaw('waterDrinks', { name: '開水', sort: 0, id: 'DUP1' });
+    await b.appendRaw('waterDrinks', { name: '其他', sort: 1, id: 'DUP2' });
+    await b.appendRaw('waterDays', { date: '2026-11-17', goal: 2000, id: 'DUP3' });
+    const s = await store.load(now);
+    expect(s.drinks.map((d) => d.name)).toEqual(['開水', '其他']);
+    const live = (await b.read('waterDrinks')).filter((r) => r.values.deletedAt == null);
+    expect(live).toHaveLength(2);
+    expect((await b.read('waterDays')).filter((r) => r.values.deletedAt == null)).toHaveLength(1);
+  });
+
+  it('飲品：新增、改名（紀錄跟著改）、刪除', async () => {
+    const { store } = setup();
+    let s = await store.load(at('2026-11-17 08:00'));
+    await store.addDrink('茶', s.drinks);
+    s = await store.load(at('2026-11-17 08:00'));
+    await expect(store.addDrink('茶', s.drinks)).rejects.toThrow();
+    await store.addLog(250, at('2026-11-17 09:00'), '茶');
+    const tea = s.drinks.find((d) => d.name === '茶')!;
+    await store.renameDrink(tea, '綠茶', s.drinks);
+    s = await store.load(at('2026-11-17 10:00'));
+    expect(s.drinks.map((d) => d.name)).toEqual(['開水', '其他', '綠茶']);
+    expect(s.logs[0].drink).toBe('綠茶');
+    await store.deleteDrink(s.drinks[2], s.drinks);
+    s = await store.load(at('2026-11-17 10:00'));
+    expect(s.drinks.map((d) => d.name)).toEqual(['開水', '其他']);
+    expect(s.logs[0].drink).toBe('綠茶'); // 舊紀錄保留名稱
   });
 
   it('設定：係數範圍檢查、存檔後套用', async () => {

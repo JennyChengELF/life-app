@@ -13,9 +13,18 @@ export interface WaterLog {
   id: string;
   time: number;
   ml: number;
+  /** 飲品名稱；null = 預設飲品（清單第一個） */
+  drink: string | null;
   note: string | null;
   date: string;
   createdVia: string | null;
+}
+
+export interface Drink {
+  rowNumber: number;
+  id: string;
+  name: string;
+  sort: number;
 }
 
 export interface WaterDay {
@@ -71,6 +80,8 @@ export interface WaterSnapshot {
   logs: WaterLog[];
   days: Map<string, WaterDay>;
   cups: Cup[];
+  /** 依排序；第一個是預設飲品 */
+  drinks: Drink[];
   weights: Weight[];
   settings: WaterSettings;
   waterIssues: Issue[];
@@ -84,6 +95,13 @@ export const FACTOR_MIN = 25;
 export const FACTOR_MAX = 45;
 /** 沒有體重時的預設目標 */
 export const DEFAULT_GOAL = 2000;
+/** 第一次使用時建立的飲品清單（2026-11-17 確認） */
+export const DEFAULT_DRINKS = ['開水', '其他'];
+
+/** 這筆紀錄喝的是什麼（空白 = 預設飲品） */
+export function drinkOf(log: Pick<WaterLog, 'drink'>, drinks: Drink[]): string {
+  return log.drink?.trim() || drinks[0]?.name || DEFAULT_DRINKS[0];
+}
 
 export interface GoalCalc {
   goal: number;
@@ -170,20 +188,31 @@ export const validKg = (n: number) => n >= 2 && n <= 400;
 // ───────────── 資料存取 ─────────────
 
 export class WaterStore {
+  /** 讀取會順便寫入（補齊、建立預設資料），所以一次只跑一個，避免重複建立 */
+  private loadQueue: Promise<unknown> = Promise.resolve();
+
   constructor(
     private b: Backend,
     private via = 'water',
   ) {}
 
   /** 讀取全部資料；順便補齊使用者在試算表新增的列、更新每日目標紀錄 */
-  async load(now = Date.now()): Promise<WaterSnapshot> {
-    const [logRows, dayRows, cupRows, setRows, weightRows] = await Promise.all([
+  load(now = Date.now()): Promise<WaterSnapshot> {
+    const p = this.loadQueue.then(() => this.loadNow(now));
+    this.loadQueue = p.catch(() => undefined);
+    return p;
+  }
+
+  private async loadNow(now: number): Promise<WaterSnapshot> {
+    const [logRows, dayRows, cupRows, setRows, weightRows, drinkRows] = await Promise.all([
       this.b.read('waterLogs'),
       this.b.read('waterDays'),
       this.b.read('waterCups'),
       this.b.read('waterSettings'),
       this.b.read('healthWeights'),
+      this.b.read('waterDrinks'),
     ]);
+    const drinks = await this.ensureDrinks(drinkRows, now);
 
     const settings = parseSettings(setRows);
 
@@ -198,6 +227,7 @@ export class WaterStore {
         id: String(r.values.id),
         time: Number(r.values.time),
         ml: Number(r.values.ml),
+        drink: str(r.values.drink)?.trim() || null,
         note: str(r.values.note),
         date: String(r.values.date),
         createdVia: str(r.values.createdVia),
@@ -221,7 +251,27 @@ export class WaterStore {
 
     const days = await this.syncDays(dayRows, logs, weights, settings, now);
 
-    return { loadedAt: now, logs, days, cups, weights, settings, waterIssues: lt.issues, weightIssues: wt.issues };
+    return { loadedAt: now, logs, days, cups, drinks, weights, settings, waterIssues: lt.issues, weightIssues: wt.issues };
+  }
+
+  /** 飲品清單；第一次使用（清單是空的）時建立預設的「開水、其他」 */
+  private async ensureDrinks(rows: TableRow[], now: number): Promise<Drink[]> {
+    const all: Drink[] = rows
+      .filter((r) => !r.empty && r.values.deletedAt == null && r.values.id && str(r.values.name)?.trim())
+      .map((r) => ({ rowNumber: r.rowNumber, id: String(r.values.id), name: String(r.values.name).trim(), sort: num(r.values.sort) ?? 0 }))
+      .sort((a, b) => a.sort - b.sort || a.rowNumber - b.rowNumber);
+    // 同名的只留第一個（紀錄用名稱對應，刪掉重複的不影響紀錄）
+    const drinks: Drink[] = [];
+    const dupes: RowUpdate[] = [];
+    for (const d of all) {
+      if (drinks.some((x) => x.name === d.name)) dupes.push({ rowNumber: d.rowNumber, values: { deletedAt: now, updatedAt: now }, expectId: d.id });
+      else drinks.push(d);
+    }
+    if (dupes.length) await this.b.update('waterDrinks', dupes);
+    if (drinks.length || rows.some((r) => !r.empty)) return drinks;
+    const seed = DEFAULT_DRINKS.map((name, i) => ({ name, sort: i, id: newId(now), createdAt: now, updatedAt: now }));
+    const rowNums = await this.b.append('waterDrinks', seed);
+    return seed.map((d, i) => ({ rowNumber: rowNums[i], id: d.id, name: d.name, sort: d.sort }));
   }
 
   /**
@@ -239,9 +289,15 @@ export class WaterStore {
   ): Promise<Map<string, WaterDay>> {
     const today = todayKey(now);
     const days = new Map<string, WaterDay>();
+    const updates: RowUpdate[] = [];
     for (const r of dayRows) {
       const date = str(r.values.date);
       if (r.empty || r.values.deletedAt != null || !date || num(r.values.goal) == null) continue;
+      if (days.has(date)) {
+        // 同一天重複的列只留第一個
+        updates.push({ rowNumber: r.rowNumber, values: { deletedAt: now, updatedAt: now }, expectId: str(r.values.id) ?? '' });
+        continue;
+      }
       days.set(date, {
         rowNumber: r.rowNumber,
         id: str(r.values.id),
@@ -262,7 +318,6 @@ export class WaterStore {
 
     const dates = new Set<string>([today, ...totals.keys(), ...days.keys()]);
     const appends: { date: string; values: RowValues }[] = [];
-    const updates: RowUpdate[] = [];
 
     for (const date of [...dates].sort()) {
       const total = totals.get(date) ?? 0;
@@ -306,15 +361,15 @@ export class WaterStore {
 
   // ───── 喝水紀錄 ─────
 
-  async addLog(ml: number, time = Date.now(), note: string | null = null): Promise<string> {
+  async addLog(ml: number, time = Date.now(), drink: string | null = null, note: string | null = null): Promise<string> {
     if (!validMl(ml)) throw new Error('ml 的數值不合理');
     const now = Date.now();
     const id = newId(now);
-    await this.b.append('waterLogs', [{ time, ml, note, date: toDateKey(time), createdVia: this.via, id, createdAt: now, updatedAt: now }]);
+    await this.b.append('waterLogs', [{ time, ml, drink, note, date: toDateKey(time), createdVia: this.via, id, createdAt: now, updatedAt: now }]);
     return id;
   }
 
-  async updateLog(log: Pick<WaterLog, 'rowNumber' | 'id'>, patch: { time?: number; ml?: number; note?: string | null }) {
+  async updateLog(log: Pick<WaterLog, 'rowNumber' | 'id'>, patch: { time?: number; ml?: number; drink?: string | null; note?: string | null }) {
     if (patch.ml !== undefined && !validMl(patch.ml)) throw new Error('ml 的數值不合理');
     const values: RowValues = { ...patch, updatedAt: Date.now() };
     if (patch.time !== undefined) values.date = toDateKey(patch.time);
@@ -373,6 +428,39 @@ export class WaterStore {
   async deleteCup(cup: Pick<Cup, 'rowNumber' | 'id'>) {
     const now = Date.now();
     await this.b.update('waterCups', [{ rowNumber: cup.rowNumber, values: { deletedAt: now, updatedAt: now }, expectId: cup.id }]);
+  }
+
+  // ───── 飲品清單 ─────
+
+  async addDrink(name: string, existing: Drink[]) {
+    const n = name.trim();
+    if (!n) throw new Error('請輸入飲品名稱');
+    if (existing.some((d) => d.name === n)) throw new Error('已經有這個飲品了');
+    const now = Date.now();
+    const sort = Math.max(-1, ...existing.map((d) => d.sort)) + 1;
+    await this.b.append('waterDrinks', [{ name: n, sort, id: newId(now), createdAt: now, updatedAt: now }]);
+  }
+
+  /** 改名：喝水紀錄裡用舊名稱的也一起改 */
+  async renameDrink(drink: Drink, newName: string, existing: Drink[]) {
+    const n = newName.trim();
+    if (!n) throw new Error('請輸入飲品名稱');
+    if (n === drink.name) return;
+    if (existing.some((d) => d.id !== drink.id && d.name === n)) throw new Error('已經有這個飲品了');
+    const now = Date.now();
+    await this.b.update('waterDrinks', [{ rowNumber: drink.rowNumber, values: { name: n, updatedAt: now }, expectId: drink.id }]);
+    const logs = await this.b.read('waterLogs');
+    const updates: RowUpdate[] = logs
+      .filter((r) => str(r.values.drink)?.trim() === drink.name && r.values.id)
+      .map((r) => ({ rowNumber: r.rowNumber, values: { drink: n, updatedAt: now }, expectId: String(r.values.id) }));
+    if (updates.length) await this.b.update('waterLogs', updates);
+  }
+
+  /** 刪除只是不出現在選單；舊紀錄保留原本的名稱 */
+  async deleteDrink(drink: Drink, existing: Drink[]) {
+    if (existing.length <= 1) throw new Error('至少要留一個飲品');
+    const now = Date.now();
+    await this.b.update('waterDrinks', [{ rowNumber: drink.rowNumber, values: { deletedAt: now, updatedAt: now }, expectId: drink.id }]);
   }
 
   // ───── 設定 ─────

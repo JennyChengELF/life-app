@@ -173,13 +173,12 @@ export class SheetsBackend implements Backend {
     const id = this.sid(file);
     const tables = tablesOfFile(file);
     const missing = tables.filter((t) => !existing.includes(t));
-    if (missing.length) {
-      await this.api(`${SHEETS}/${id}:batchUpdate`, {
-        method: 'POST',
-        body: JSON.stringify({
-          requests: missing.map((t) => ({ addSheet: { properties: { title: t, gridProperties: { frozenRowCount: 1 } } } })),
-        }),
-      });
+    const requests: { addSheet: { properties: { title: string; gridProperties?: { frozenRowCount: number } } } }[] = missing.map((t) => ({
+      addSheet: { properties: { title: t, gridProperties: { frozenRowCount: 1 } } },
+    }));
+    if (!existing.includes(INFO_SHEET)) requests.push({ addSheet: { properties: { title: INFO_SHEET } } });
+    if (requests.length) {
+      await this.api(`${SHEETS}/${id}:batchUpdate`, { method: 'POST', body: JSON.stringify({ requests }) });
     }
     const ranges = tables.map((t) => `ranges=${encodeURIComponent(`${q(t)}!1:1`)}`).join('&');
     const res = await this.api(`${SHEETS}/${id}/values:batchGet?${ranges}`);
@@ -193,6 +192,11 @@ export class SheetsBackend implements Backend {
       }
       this.headers.set(t, header);
     });
+    // 結構有變（新增工作表或欄位）→ 重寫「說明」工作表
+    if (requests.length || writes.length) {
+      await this.api(`${SHEETS}/${id}/values/${encodeURIComponent(q(INFO_SHEET))}:clear`, { method: 'POST', body: '{}' });
+      writes.push({ range: `${q(INFO_SHEET)}!A1`, values: this.infoRows(file) });
+    }
     if (writes.length) {
       await this.api(`${SHEETS}/${id}/values:batchUpdate`, {
         method: 'POST',

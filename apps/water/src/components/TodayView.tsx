@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import type { WaterLog, WaterSnapshot } from '@life/db';
-import { addDays, computeGoal, latestWeight, startOfDay, todayKey, toHHmm } from '@life/db';
+import { addDays, computeGoal, drinkOf, latestWeight, startOfDay, todayKey, toHHmm } from '@life/db';
 import type { WaterApi } from '../useWater';
+import { drinkColor, totalsByDrink } from '../drinkColors';
 import type { Tab } from '../App';
 import { LogEditor } from './LogEditor';
 import { ProgressRing } from './ProgressRing';
@@ -30,6 +31,10 @@ export function TodayView(props: { api: WaterApi; snap: WaterSnapshot; date: str
   const { api, snap, date, setDate, goTo } = props;
   const [custom, setCustom] = useState('');
   const [editing, setEditing] = useState<string | null>(null);
+  // null = 預設飲品（清單第一個，開水）；記完一筆就回到預設
+  const [picked, setPicked] = useState<string | null>(null);
+  const defaultDrink = snap.drinks[0]?.name ?? '開水';
+  const drink = picked && snap.drinks.some((d) => d.name === picked) ? picked : defaultDrink;
 
   const isToday = date === todayKey();
   const logs = snap.logs.filter((l) => l.date === date).sort((a, b) => b.time - a.time);
@@ -38,18 +43,24 @@ export function TodayView(props: { api: WaterApi; snap: WaterSnapshot; date: str
   const goal = day?.goal ?? computeGoal(latestWeight(snap.weights)?.kg ?? null, snap.settings).goal;
   const remaining = Math.max(0, goal - total);
   const noWeight = snap.weights.length === 0;
+  const byDrink = totalsByDrink(
+    logs.map((l) => ({ drink: drinkOf(l, snap.drinks), ml: l.ml })),
+    snap.drinks,
+  );
 
   const add = async (ml: number) => {
     const time = timeForDate(date);
     const tempId = `temp-${Date.now()}`;
+    const d = drink;
+    setPicked(null);
     const id = await api.run(
-      (s) => s.addLog(ml, time),
-      (s) => ({ ...s, logs: [...s.logs, { rowNumber: -1, id: tempId, time, ml, note: null, date, createdVia: 'water' }] }),
+      (s) => s.addLog(ml, time, d),
+      (s) => ({ ...s, logs: [...s.logs, { rowNumber: -1, id: tempId, time, ml, drink: d, note: null, date, createdVia: 'water' }] }),
     );
     if (id) {
       api.showToast({
         kind: 'info',
-        text: `已記錄 +${ml}ml`,
+        text: `已記錄 ${d} +${ml}ml`,
         undo: () =>
           api.run(
             async (s) => {
@@ -73,7 +84,7 @@ export function TodayView(props: { api: WaterApi; snap: WaterSnapshot; date: str
     add(Math.round(ml));
   };
 
-  const save = (log: WaterLog, patch: { time: number; ml: number }) => {
+  const save = (log: WaterLog, patch: { time: number; ml: number; drink: string }) => {
     setEditing(null);
     api.run((s) => s.updateLog(log, patch));
   };
@@ -130,7 +141,32 @@ export function TodayView(props: { api: WaterApi; snap: WaterSnapshot; date: str
       <div className="today-grid">
         <section className="card">
           <ProgressRing total={total} goal={goal} />
+          {byDrink.length > 0 && (
+            <p className="by-drink">
+              {byDrink.map((b) => (
+                <span key={b.drink}>
+                  <i className="dot" style={{ background: drinkColor(b.drink, snap.drinks) }} />
+                  {b.drink} {b.ml.toLocaleString()}
+                </span>
+              ))}
+            </p>
+          )}
           {day?.locked && <p className="muted small center-text">這天的目標已鎖定（{goal.toLocaleString()} ml）</p>}
+
+          <div className="drink-pick" role="radiogroup" aria-label="喝什麼">
+            {snap.drinks.map((d) => (
+              <button
+                key={d.id}
+                role="radio"
+                aria-checked={drink === d.name}
+                className={drink === d.name ? 'active' : ''}
+                style={drink === d.name ? { background: drinkColor(d.name, snap.drinks), borderColor: 'transparent' } : undefined}
+                onClick={() => setPicked(d.name)}
+              >
+                {d.name}
+              </button>
+            ))}
+          </div>
 
           <div className="quick">
             {QUICK.map((ml) => (
@@ -181,7 +217,9 @@ export function TodayView(props: { api: WaterApi; snap: WaterSnapshot; date: str
                       time={l.time}
                       amount={l.ml}
                       unit="ml"
-                      onSave={(time, ml) => save(l, { time, ml })}
+                      drink={drinkOf(l, snap.drinks)}
+                      drinks={snap.drinks.map((d) => d.name)}
+                      onSave={(time, ml, dr) => save(l, { time, ml, drink: dr ?? drinkOf(l, snap.drinks) })}
                       onCancel={() => setEditing(null)}
                       onDelete={() => remove(l)}
                     />
@@ -189,6 +227,10 @@ export function TodayView(props: { api: WaterApi; snap: WaterSnapshot; date: str
                 ) : (
                   <li key={l.id} className="log-row">
                     <span className="log-time">{toHHmm(l.time)}</span>
+                    <span className="drink-tag">
+                      <i className="dot" style={{ background: drinkColor(drinkOf(l, snap.drinks), snap.drinks) }} />
+                      {drinkOf(l, snap.drinks)}
+                    </span>
                     <span className="log-ml">{l.ml} ml</span>
                     {l.createdVia === 'sheet' && <span className="badge">試算表</span>}
                     <button className="link" onClick={() => setEditing(l.id)} disabled={l.rowNumber < 0}>
