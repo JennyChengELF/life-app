@@ -1,0 +1,51 @@
+# 推送到 main 時自動建置並上線到 GitHub Pages
+# 網址：https://<帳號>.github.io/life-app/water/
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - name: Build water
+        run: pnpm --filter water build
+        env:
+          VITE_BASE: /${{ github.event.repository.name }}/water/
+          # 用戶端 ID 不是密碼（本來就會出現在網頁裡），存在 GitHub 的 Variables
+          VITE_GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+      - name: Assemble site
+        run: |
+          mkdir -p _site/water
+          cp -r apps/water/dist/. _site/water/
+          printf '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=water/"><title>life-app</title><a href="water/">💧 喝水</a>\n' > _site/index.html
+      - uses: actions/upload-pages-artifact@v3
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

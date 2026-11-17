@@ -1,0 +1,12 @@
+{
+  "name": "life-app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --filter water dev",
+    "build": "pnpm --filter water build",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "packageManager": "pnpm@9.15.9"
+}

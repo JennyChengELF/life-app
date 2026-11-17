@@ -1,0 +1,72 @@
+/** 本機測試模式：資料存在瀏覽器（還沒設定 Google 時開發用），不會同步到其他裝置。 */
+import type { Backend, RowUpdate, RowValues, TableRow } from './backend';
+import { ConflictError } from './backend';
+import type { TableName } from './schema';
+import { TABLES } from './schema';
+
+type KV = Pick<Storage, 'getItem' | 'setItem'>;
+
+export function memoryStorage(): KV {
+  const m = new Map<string, string>();
+  return { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => void m.set(k, v) };
+}
+
+export class LocalBackend implements Backend {
+  readonly kind = 'local' as const;
+  constructor(private storage: KV = globalThis.localStorage) {}
+
+  private key(t: TableName) {
+    return `life.local.${t}`;
+  }
+  private load(t: TableName): RowValues[] {
+    return JSON.parse(this.storage.getItem(this.key(t)) ?? '[]');
+  }
+  private save(t: TableName, rows: RowValues[]) {
+    this.storage.setItem(this.key(t), JSON.stringify(rows));
+  }
+
+  async init() {}
+
+  async read(table: TableName): Promise<TableRow[]> {
+    const cols = TABLES[table].columns.map((c) => c.name);
+    return this.load(table).map((r, i) => {
+      const values: RowValues = {};
+      for (const c of cols) values[c] = r[c] ?? null;
+      return {
+        rowNumber: i + 2,
+        values,
+        errors: [],
+        raw: { ...values },
+        empty: cols.every((c) => values[c] === null || values[c] === ''),
+      };
+    });
+  }
+
+  async append(table: TableName, rows: RowValues[]) {
+    const all = this.load(table);
+    const start = all.length + 2;
+    all.push(...rows);
+    this.save(table, all);
+    return rows.map((_, i) => start + i);
+  }
+
+  async update(table: TableName, updates: RowUpdate[]) {
+    const all = this.load(table);
+    for (const u of updates) {
+      const row = all[u.rowNumber - 2];
+      if (!row) throw new ConflictError();
+      if (u.expectId !== undefined && (row.id ?? '') !== u.expectId) throw new ConflictError();
+      Object.assign(row, u.values);
+    }
+    this.save(table, all);
+  }
+
+  /** 測試用：模擬使用者直接在試算表新增一列（沒有 id） */
+  async appendRaw(table: TableName, row: RowValues) {
+    return this.append(table, [row]);
+  }
+
+  fileUrl() {
+    return null;
+  }
+}
