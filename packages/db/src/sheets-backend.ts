@@ -4,7 +4,7 @@ import { ConflictError } from './backend';
 import { decodeCell, encodeCell } from './codec';
 import type { GoogleAuth } from './google-auth';
 import { AuthError } from './google-auth';
-import type { ColumnDef, FileKey, TableName } from './schema';
+import type { ColumnDef, FileKey, TableDef, TableName } from './schema';
 import { FILES, SCHEMA_VERSION, TABLES, tablesOfFile } from './schema';
 
 const SHEETS = 'https://sheets.googleapis.com/v4/spreadsheets';
@@ -89,15 +89,16 @@ export class SheetsBackend implements Backend {
     }
   }
 
-  /** 找到（或建立）這個 APP 的試算表，回傳現有的工作表名稱 */
-  private async ensureFile(file: FileKey): Promise<string[]> {
-    const fields = 'fields=spreadsheetId,sheets.properties.title';
+  /** 找到（或建立）這個 APP 的試算表，回傳現有的工作表（名稱 → sheetId） */
+  private async ensureFile(file: FileKey): Promise<Map<string, number>> {
+    const fields = 'fields=spreadsheetId,sheets.properties(title,sheetId)';
+    const toMap = (s: any) => new Map<string, number>(s.sheets.map((x: any) => [x.properties.title, x.properties.sheetId]));
     const cached = localStorage.getItem(ID_KEY(file));
     if (cached) {
       try {
         const s = await this.api(`${SHEETS}/${cached}?${fields}`);
         this.ids[file] = cached;
-        return s.sheets.map((x: any) => x.properties.title);
+        return toMap(s);
       } catch (e) {
         if (!(e instanceof ApiError) || (e.status !== 404 && e.status !== 403)) throw e;
         localStorage.removeItem(ID_KEY(file));
@@ -107,13 +108,13 @@ export class SheetsBackend implements Backend {
     const query = `name='${FILES[file].title}' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`;
     const found = await this.api(`${DRIVE}?q=${encodeURIComponent(query)}&fields=files(id)&orderBy=createdTime`);
     let id: string | undefined = found.files?.[0]?.id;
-    let titles: string[];
+    let titles: Map<string, number>;
     if (id) {
       const s = await this.api(`${SHEETS}/${id}?${fields}`);
-      titles = s.sheets.map((x: any) => x.properties.title);
+      titles = toMap(s);
     } else {
       id = await this.createFile(file);
-      titles = [INFO_SHEET, ...tablesOfFile(file)];
+      titles = new Map([INFO_SHEET, ...tablesOfFile(file)].map((t) => [t, -1]));
     }
     this.ids[file] = id;
     localStorage.setItem(ID_KEY(file), id);
@@ -169,13 +170,18 @@ export class SheetsBackend implements Backend {
   }
 
   /** 補上缺少的工作表、缺少的欄位（資料格式升級時用） */
-  private async ensureTables(file: FileKey, existing: string[]) {
+  private async ensureTables(file: FileKey, existingSheets: Map<string, number>) {
     const id = this.sid(file);
     const tables = tablesOfFile(file);
-    const missing = tables.filter((t) => !existing.includes(t));
-    const requests: { addSheet: { properties: { title: string; gridProperties?: { frozenRowCount: number } } } }[] = missing.map((t) => ({
-      addSheet: { properties: { title: t, gridProperties: { frozenRowCount: 1 } } },
-    }));
+    const existing = [...existingSheets.keys()];
+    const requests: object[] = [];
+    for (const t of tables) {
+      if (existing.includes(t)) continue;
+      // 舊名稱的工作表 → 改名（資料保留）
+      const former = ((TABLES[t] as TableDef).formerNames ?? []).find((n) => existingSheets.has(n));
+      if (former) requests.push({ updateSheetProperties: { properties: { sheetId: existingSheets.get(former), title: t }, fields: 'title' } });
+      else requests.push({ addSheet: { properties: { title: t, gridProperties: { frozenRowCount: 1 } } } });
+    }
     if (!existing.includes(INFO_SHEET)) requests.push({ addSheet: { properties: { title: INFO_SHEET } } });
     if (requests.length) {
       await this.api(`${SHEETS}/${id}:batchUpdate`, { method: 'POST', body: JSON.stringify({ requests }) });

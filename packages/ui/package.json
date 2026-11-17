@@ -1,0 +1,11 @@
+{
+  "name": "@life/ui",
+  "version": "0.1.0",
+  "private": true,
+  "files": [
+    "base.css"
+  ],
+  "exports": {
+    "./base.css": "./base.css"
+  }
+}

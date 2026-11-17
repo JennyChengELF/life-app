@@ -6,6 +6,9 @@ import { StatsView } from './components/StatsView';
 import { SettingsView } from './components/SettingsView';
 import { IssuesView } from './components/IssuesView';
 
+/** 綜合首頁：上線時在上一層路徑；開發時是另一個 port */
+const HOME_URL = import.meta.env.DEV ? `http://${location.hostname}:5172/` : "../";
+
 export type Tab = 'today' | 'stats' | 'settings' | 'issues';
 
 const TABS: { key: Tab; icon: string; label: string }[] = [
@@ -22,6 +25,9 @@ export function App() {
   return (
     <div className="app">
       <header className="topbar">
+        <a className="icon-btn home-link" href={HOME_URL} title="回首頁">
+          🏠
+        </a>
         <h1>💧 喝水</h1>
         <nav className="tabs-top">
           {TABS.map((t) => (

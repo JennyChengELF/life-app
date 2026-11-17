@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { WaterLog, WaterSnapshot } from '@life/db';
-import { addDays, computeGoal, drinkOf, latestWeight, startOfDay, todayKey, toHHmm } from '@life/db';
+import { addDays, computeGoal, drinkOf, goalWeight, startOfDay, todayKey, toHHmm } from '@life/db';
 import type { WaterApi } from '../useWater';
 import { drinkColor, totalsByDrink } from '../drinkColors';
 import type { Tab } from '../App';
@@ -40,9 +40,11 @@ export function TodayView(props: { api: WaterApi; snap: WaterSnapshot; date: str
   const logs = snap.logs.filter((l) => l.date === date).sort((a, b) => b.time - a.time);
   const total = logs.reduce((s, l) => s + l.ml, 0);
   const day = snap.days.get(date);
-  const goal = day?.goal ?? computeGoal(latestWeight(snap.weights)?.kg ?? null, snap.settings).goal;
+  const goal = day?.goal ?? computeGoal(goalWeight(snap.weights, date)?.kg ?? null, snap.settings).goal;
   const remaining = Math.max(0, goal - total);
   const noWeight = snap.weights.length === 0;
+  /** 只有今天量的體重：目標明天才會用 */
+  const onlyTodayWeight = !noWeight && isToday && goalWeight(snap.weights, date) == null;
   const byDrink = totalsByDrink(
     logs.map((l) => ({ drink: drinkOf(l, snap.drinks), ml: l.ml })),
     snap.drinks,
@@ -121,6 +123,7 @@ export function TodayView(props: { api: WaterApi; snap: WaterSnapshot; date: str
             輸入體重可獲得個人化目標（目前用預設 2000ml） ›
           </button>
         )}
+        {onlyTodayWeight && <div className="msg info">今天量的體重明天開始用來算目標（今天先用預設 2000ml）</div>}
       </div>
 
       <div className="date-nav">

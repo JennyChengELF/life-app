@@ -58,7 +58,7 @@ describe('WaterStore', () => {
   it('記錄喝水、算今天總量與達標', async () => {
     const { store } = setup();
     const now = at('2026-11-17 15:00');
-    await store.addWeight(60, at('2026-11-17 07:00'));
+    await store.addWeight(60, at('2026-11-16 07:00'));
     await store.addLog(1000, at('2026-11-17 09:00'));
     await store.addLog(800, at('2026-11-17 13:00'));
     const s = await store.load(now);
@@ -68,13 +68,15 @@ describe('WaterStore', () => {
 
   it('過了當天鎖定目標，之後體重改變不影響', async () => {
     const { store } = setup();
-    await store.addWeight(60, at('2026-11-16 07:00'));
+    await store.addWeight(60, at('2026-11-15 07:00'));
     await store.addLog(500, at('2026-11-16 10:00'));
     await store.load(at('2026-11-16 20:00')); // 11/16 當天打開過：目標 1800
     await store.addWeight(80, at('2026-11-17 07:00'));
     const s = await store.load(at('2026-11-17 08:00'));
     expect(s.days.get('2026-11-16')).toMatchObject({ goal: 1800, locked: true, total: 500 });
-    expect(s.days.get('2026-11-17')).toMatchObject({ goal: 2400, locked: false });
+    // 11/17 當天量的 80 kg 明天才用
+    expect(s.days.get('2026-11-17')).toMatchObject({ goal: 1800, locked: false, weightUsed: 60 });
+    expect((await store.load(at('2026-11-18 08:00'))).days.get('2026-11-18')).toMatchObject({ goal: 2400, weightUsed: 80 });
   });
 
   it('過去沒有目標紀錄的日子，用當天以前最新的體重', async () => {
@@ -86,13 +88,17 @@ describe('WaterStore', () => {
     expect(s.days.get('2026-11-05')).toMatchObject({ goal: 1500, weightUsed: 50, locked: true });
   });
 
-  it('當天新量的體重會更新當天目標', async () => {
+  it('目標用系統日以前（不含當天）最新的體重', async () => {
     const { store } = setup();
     await store.addWeight(60, at('2026-11-16 07:00'));
     await store.load(at('2026-11-17 07:00'));
     await store.addWeight(70, at('2026-11-17 07:30'));
     const s = await store.load(at('2026-11-17 08:00'));
-    expect(s.days.get('2026-11-17')!.goal).toBe(2100);
+    expect(s.days.get('2026-11-17')).toMatchObject({ goal: 1800, weightUsed: 60 });
+    // 只有今天量的體重 → 用預設 2000
+    const { store: s2 } = setup();
+    await s2.addWeight(70, at('2026-11-17 07:30'));
+    expect((await s2.load(at('2026-11-17 08:00'))).days.get('2026-11-17')).toMatchObject({ goal: 2000, weightUsed: null });
   });
 
   it('在試算表直接新增的列：有效就補上 id，無效列入需要補齊', async () => {

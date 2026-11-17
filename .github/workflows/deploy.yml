@@ -1,5 +1,5 @@
 # 推送到 main 時自動建置並上線到 GitHub Pages
-# 網址：https://<帳號>.github.io/life-app/water/
+# 網址：https://<帳號>.github.io/life-app/（綜合首頁）、/water/（喝水）、/health/（健康）
 name: deploy
 
 on:
@@ -28,17 +28,27 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
+      # 用戶端 ID 不是密碼（本來就會出現在網頁裡），存在 GitHub 的 Variables
+      - name: Build hub
+        run: pnpm --filter hub build
+        env:
+          VITE_BASE: /${{ github.event.repository.name }}/
       - name: Build water
         run: pnpm --filter water build
         env:
           VITE_BASE: /${{ github.event.repository.name }}/water/
-          # 用戶端 ID 不是密碼（本來就會出現在網頁裡），存在 GitHub 的 Variables
+          VITE_GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+      - name: Build health
+        run: pnpm --filter health build
+        env:
+          VITE_BASE: /${{ github.event.repository.name }}/health/
           VITE_GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
       - name: Assemble site
         run: |
-          mkdir -p _site/water
+          mkdir -p _site/water _site/health
+          cp -r apps/hub/dist/. _site/
           cp -r apps/water/dist/. _site/water/
-          printf '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=water/"><title>life-app</title><a href="water/">💧 喝水</a>\n' > _site/index.html
+          cp -r apps/health/dist/. _site/health/
       - uses: actions/upload-pages-artifact@v3
   deploy:
     needs: build

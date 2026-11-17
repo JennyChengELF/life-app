@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { Cup, WaterSnapshot } from '@life/db';
-import { computeGoal, FACTOR_MAX, FACTOR_MIN, latestWeight, toDateKey, toHHmm } from '@life/db';
+import { computeGoal, FACTOR_MAX, FACTOR_MIN, goalWeight, latestWeight, toDateKey, todayKey, toHHmm } from '@life/db';
 import type { WaterApi } from '../useWater';
 import { drinkColor } from '../drinkColors';
 
@@ -25,7 +25,7 @@ function WeightCard({ api, snap }: { api: WaterApi; snap: WaterSnapshot }) {
     if (!Number.isFinite(v) || v < 2 || v > 400) return api.showToast({ kind: 'error', text: '請輸入正確的體重' });
     setKg('');
     await api.run((s) => s.addWeight(Math.round(v * 10) / 10));
-    api.showToast({ kind: 'info', text: `已記錄體重 ${v} kg` });
+    api.showToast({ kind: 'info', text: `已記錄體重 ${v} kg（明天開始用來算目標）` });
   };
   return (
     <section className="card">
@@ -48,7 +48,7 @@ function WeightCard({ api, snap }: { api: WaterApi; snap: WaterSnapshot }) {
           記錄
         </button>
       </div>
-      <p className="muted small">體重存在「生活APP-健康」試算表，之後健康 APP 也看得到。</p>
+      <p className="muted small">每天的目標用「昨天以前最新的體重」計算，今天量的明天才會用。體重存在「生活APP-健康」試算表，健康 APP 也看得到。</p>
     </section>
   );
 }
@@ -58,7 +58,8 @@ function GoalCard({ api, snap }: { api: WaterApi; snap: WaterSnapshot }) {
   const [factor, setFactor] = useState(String(s.factor));
   const [extra, setExtra] = useState(String(s.extraMl));
   const [round, setRound] = useState(s.roundTo100);
-  const w = latestWeight(snap.weights)?.kg ?? null;
+  const gw = goalWeight(snap.weights, todayKey());
+  const w = gw?.kg ?? null;
   const f = Number(factor);
   const e = Number(extra);
   const valid = Number.isFinite(f) && f >= FACTOR_MIN && f <= FACTOR_MAX && Number.isFinite(e) && e >= 0 && e <= 3000;
@@ -96,9 +97,11 @@ function GoalCard({ api, snap }: { api: WaterApi; snap: WaterSnapshot }) {
                 {e ? ` + ${e}` : ''} = {Math.round(w * f + e)}
                 {round ? '，四捨五入' : ''}）
               </span>
+              <br />
+              <span className="muted small">體重用 {toDateKey(gw!.time)} 量的 {w} kg（今天以前最新的一筆）</span>
             </>
           ) : (
-            <span className="muted">還沒有體重，目標用預設 2000ml</span>
+            <span className="muted">今天以前還沒有體重，目標用預設 2000ml</span>
           )
         ) : (
           <span className="error-text">請輸入正確的數值</span>

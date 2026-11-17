@@ -3,8 +3,11 @@
  * 第一列是欄位名稱（英文），APP 依欄位名稱找欄位，所以使用者調整欄位順序也沒關係。
  */
 
-/** 2：喝水紀錄加「drink」、新增飲品清單（2026-11-17） */
-export const SCHEMA_VERSION = 2;
+/**
+ * 2：喝水紀錄加「drink」、新增飲品清單（2026-11-17）
+ * 3：體重表 healthWeights 改名為身體量測 healthBodyMeasurements 並加上身體組成欄位；新增偶爾量測、健康設定（2026-11-17）
+ */
+export const SCHEMA_VERSION = 3;
 
 export type ColType = 'datetime' | 'date' | 'number' | 'text' | 'bool' | 'any';
 
@@ -25,11 +28,13 @@ export interface FileDef {
 
 export const FILES: Record<FileKey, FileDef> = {
   water: { title: '生活APP-喝水', description: '喝水 APP 的資料：喝水紀錄、每日目標、常用杯子、設定' },
-  health: { title: '生活APP-健康', description: '健康 APP 的資料（目前只有體重）' },
+  health: { title: '生活APP-健康', description: '健康 APP 的資料：身體量測（體重、體脂⋯⋯）、偶爾量測（身高、圍度⋯⋯）、設定' },
 };
 
 export interface TableDef {
   file: FileKey;
+  /** 以前的表名：試算表裡有舊名稱的工作表時，自動改成新名稱（資料保留） */
+  formerNames?: string[];
   description: string;
   columns: ColumnDef[];
 }
@@ -98,9 +103,10 @@ export const TABLES = {
       { name: 'value', type: 'any', label: '設定值' },
     ],
   },
-  healthWeights: {
+  healthBodyMeasurements: {
     file: 'health',
-    description: '體重紀錄。可以直接在最下方新增一列，只要填 time 和 kg。',
+    formerNames: ['healthWeights'],
+    description: '身體量測（體重計量的，一次量測一列）。可以直接在最下方新增一列，只要填 time 和 kg，其他欄位有量才填。',
     columns: [
       { name: 'time', type: 'datetime', label: '量的時間（必填）' },
       { name: 'kg', type: 'number', label: '體重 kg（必填）' },
@@ -108,6 +114,52 @@ export const TABLES = {
       { name: 'date', type: 'date', label: '日期（APP 依 time 自動填）' },
       { name: 'createdVia', type: 'text', label: '在哪裡輸入（water、health、sheet）' },
       ...systemCols,
+      { name: 'bodyFatPct', type: 'number', label: '體脂肪 %' },
+      { name: 'bodyFatKg', type: 'number', label: '體脂肪 kg' },
+      { name: 'visceralFatLevel', type: 'number', label: '內臟脂肪程度（等級，沒有單位）' },
+      { name: 'bmiScale', type: 'number', label: '體重計顯示的 BMI（APP 另外用身高自動算，不寫進試算表）' },
+      { name: 'bmiOk', type: 'bool', label: '體重計 BMI 和自動算的不同時，已確認不用改（TRUE）' },
+      { name: 'bodyFatOk', type: 'bool', label: '體重 × 體脂肪 % 和體脂肪 kg 不同時，已確認不用改（TRUE）' },
+      { name: 'skeletalMuscleOk', type: 'bool', label: '體重 × 骨骼肌 % 和骨骼肌 kg 不同時，已確認不用改（TRUE）' },
+      { name: 'skeletalMusclePct', type: 'number', label: '骨骼肌 %' },
+      { name: 'skeletalMuscleKg', type: 'number', label: '骨骼肌 kg' },
+      { name: 'muscleKg', type: 'number', label: '肌肉量 kg' },
+      { name: 'bodyAge', type: 'number', label: '身體年齡' },
+      { name: 'bmrKcal', type: 'number', label: '基礎代謝 kcal' },
+      { name: 'personId', type: 'text', label: '是誰的資料（空白 = 我自己）' },
+    ],
+  },
+  healthOccasionalItems: {
+    file: 'health',
+    description: '偶爾量測的項目清單（身高、各部位圍度⋯⋯）。請在 APP 裡新增或修改。',
+    columns: [
+      { name: 'name', type: 'text', label: '項目名稱（例：腰圍）' },
+      { name: 'unit', type: 'text', label: '單位（例：cm）' },
+      { name: 'sort', type: 'number', label: '排序' },
+      { name: 'code', type: 'text', label: 'APP 內建項目的代號（height = 身高，用來算 BMI；請勿修改）' },
+      ...systemCols,
+    ],
+  },
+  healthOccasionalMeasurements: {
+    file: 'health',
+    description: '偶爾量測的紀錄，一個項目一列。可以直接在最下方新增一列，填 time、item（項目清單裡的名稱）、value。',
+    columns: [
+      { name: 'time', type: 'datetime', label: '量的時間（必填）' },
+      { name: 'item', type: 'text', label: '項目（填項目清單裡的名稱，必填）' },
+      { name: 'value', type: 'number', label: '數值（必填）' },
+      { name: 'note', type: 'text', label: '備註' },
+      { name: 'date', type: 'date', label: '日期（APP 依 time 自動填）' },
+      { name: 'createdVia', type: 'text', label: '在哪裡輸入（health、sheet）' },
+      { name: 'personId', type: 'text', label: '是誰的資料（空白 = 我自己）' },
+      ...systemCols,
+    ],
+  },
+  healthSettings: {
+    file: 'health',
+    description: '健康 APP 的設定，請在 APP 裡修改。',
+    columns: [
+      { name: 'key', type: 'text', label: '設定名稱' },
+      { name: 'value', type: 'any', label: '設定值' },
     ],
   },
 } satisfies Record<string, TableDef>;

@@ -1,0 +1,94 @@
+@import '@life/ui/base.css';
+
+/* 健康 APP 的主題色 */
+:root {
+  --accent: #1f8a7a;
+  --accent-soft: #e0f3ef;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --accent: #4cc3ae;
+    --accent-soft: #163a35;
+  }
+}
+
+.home-link { text-decoration: none; padding: 2px 4px; }
+button.full { width: 100%; margin-bottom: 12px; }
+.nowrap { white-space: nowrap; }
+.grow { flex: 1; }
+
+/* ── 總覽 ── */
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
+.stat-tile { background: var(--bg); border-radius: 10px; padding: 10px 12px; }
+.stat-label { font-size: 0.8rem; color: var(--muted); }
+.stat-value { font-size: 1.45rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.25; }
+.stat-value small { font-size: 0.75rem; font-weight: 400; color: var(--muted); }
+.stat-diff { font-size: 0.78rem; color: var(--muted); }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.chips button, .chip { border-radius: 999px; padding: 4px 12px; font-size: 0.88rem; }
+.chips button.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+
+/* ── 趨勢圖 ── */
+.chart { position: relative; }
+.chart svg { width: 100%; display: block; touch-action: pan-y; }
+.chart .grid { stroke: var(--line); stroke-width: 1; }
+.chart .axis { fill: var(--muted); font-size: 12px; }
+.chart .line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart .pt { fill: var(--accent); }
+.chart .pt-last { fill: var(--accent); stroke: var(--card); stroke-width: 2; }
+.chart .pt-hover { fill: var(--accent); stroke: var(--card); stroke-width: 2; }
+.chart .cross { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; }
+.tip {
+  position: absolute; top: 0; transform: translateX(-50%); background: var(--card); border: 1px solid var(--line);
+  border-radius: 8px; padding: 4px 10px; font-size: 0.82rem; display: flex; flex-direction: column; align-items: center;
+  pointer-events: none; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12); white-space: nowrap;
+}
+.tip span { color: var(--muted); font-size: 0.75rem; }
+
+/* ── 表格 ── */
+.table-wrap { overflow-x: auto; margin: 0 -4px; }
+.data-table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+.data-table th { text-align: right; font-weight: 600; color: var(--muted); font-size: 0.78rem; padding: 4px 8px; white-space: nowrap; border-bottom: 1px solid var(--line); }
+.data-table th:first-child { text-align: left; }
+.data-table td { padding: 7px 8px; border-bottom: 1px solid var(--line); }
+.data-table tr:last-child td { border-bottom: 0; }
+.data-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.data-table tbody tr[title] { cursor: pointer; }
+.data-table tbody tr[title]:hover { background: var(--bg); }
+
+/* ── 輸入 ── */
+.body-form, .occ { max-width: 720px; }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0 12px; }
+.input-unit { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.input-unit input { margin-top: 0; }
+.unit { color: var(--muted); font-size: 0.85rem; min-width: 1.5em; }
+.hint { display: block; font-size: 0.78rem; color: var(--accent); margin-top: 2px; }
+.req { color: var(--danger); }
+.warn-card { background: var(--warn-soft); border-color: transparent; }
+.warn-card h2 { color: var(--warn); }
+
+/* ── 偶爾量測 ── */
+.occ-group { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.occ-group:last-child { border-bottom: 0; }
+.occ-values { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.occ-editor { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; width: 100%; }
+.occ-editor input.narrow { flex: 0 0 90px; }
+
+/* ── 設定 ── */
+.order-list { list-style: none; margin: 0 0 10px; padding: 0; }
+.order-list > li { display: flex; align-items: center; gap: 4px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+.order-list > li.editor { display: block; }
+.order-list > li .check { flex: 1; margin: 0; flex-wrap: wrap; }
+.order-list > li.off { opacity: 0.6; }
+.icon-small { padding: 4px 10px; }
+.editor { background: var(--bg); border-radius: 10px; padding: 10px; margin: 6px 0; list-style: none; }
+.editor-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.log-list { list-style: none; margin: 0; padding: 0; }
+.log-time { color: var(--muted); font-variant-numeric: tabular-nums; }
+.field .hint, .field .req { color: inherit; }
+.field .hint { color: var(--accent); }
+.field .req { color: var(--danger); }
+.chart-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.chart-head h2 { margin: 0; }
+.field .hint.off { color: var(--warn); }

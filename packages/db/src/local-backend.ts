@@ -2,6 +2,7 @@
 import type { Backend, RowUpdate, RowValues, TableRow } from './backend';
 import { ConflictError } from './backend';
 import type { TableName } from './schema';
+import type { TableDef } from './schema';
 import { TABLES } from './schema';
 
 type KV = Pick<Storage, 'getItem' | 'setItem'>;
@@ -19,7 +20,10 @@ export class LocalBackend implements Backend {
     return `life.local.${t}`;
   }
   private load(t: TableName): RowValues[] {
-    return JSON.parse(this.storage.getItem(this.key(t)) ?? '[]');
+    let text = this.storage.getItem(this.key(t));
+    // 表改過名稱：讀舊名稱的資料
+    for (const old of (TABLES[t] as TableDef).formerNames ?? []) text ??= this.storage.getItem(`life.local.${old}`);
+    return JSON.parse(text ?? '[]');
   }
   private save(t: TableName, rows: RowValues[]) {
     this.storage.setItem(this.key(t), JSON.stringify(rows));

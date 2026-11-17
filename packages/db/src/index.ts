@@ -7,3 +7,4 @@ export { LocalBackend, memoryStorage } from './local-backend';
 export { SheetsBackend } from './sheets-backend';
 export { GoogleAuth, AuthError, DRIVE_FILE_SCOPE } from './google-auth';
 export * from './water';
+export * from './health';

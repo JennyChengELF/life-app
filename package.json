@@ -4,7 +4,9 @@
   "type": "module",
   "scripts": {
     "dev": "pnpm --filter water dev",
-    "build": "pnpm --filter water build",
+    "dev:health": "pnpm --filter health dev",
+    "dev:hub": "pnpm --filter hub dev",
+    "build": "pnpm -r --filter ./apps/* build",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck"
   },

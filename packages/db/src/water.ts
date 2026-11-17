@@ -4,7 +4,7 @@
 import type { Backend, RowUpdate, RowValues, TableRow } from './backend';
 import { newId } from './ids';
 import type { TableName } from './schema';
-import { endOfDay, toDateKey, todayKey } from './time';
+import { startOfDay, toDateKey, todayKey } from './time';
 
 // ───────────── 型別 ─────────────
 
@@ -126,6 +126,11 @@ export function computeGoal(weightKg: number | null, s: WaterSettings): GoalCalc
   };
 }
 
+/** 某一天的目標用的體重：那天以前（不含那天）最新的一筆（2026-11-17 使用者決定） */
+export function goalWeight(weights: Weight[], dateKey: string): Weight | null {
+  return latestWeight(weights, startOfDay(dateKey) - 1);
+}
+
 /** 某個時間點以前最新的體重（同一天多筆取時間最晚的） */
 export function latestWeight(weights: Weight[], atOrBefore = Date.now()): Weight | null {
   let best: Weight | null = null;
@@ -165,7 +170,7 @@ function triageTimed(
     else if (!validAmount(amount)) problems.push(`${amountCol} 的數值不合理`);
     const id = str(r.values.id);
     if (problems.length) {
-      issues.push({ table: amountCol === 'ml' ? 'waterLogs' : 'healthWeights', rowNumber: r.rowNumber, id, raw: r.raw, problems });
+      issues.push({ table: amountCol === 'ml' ? 'waterLogs' : 'healthBodyMeasurements', rowNumber: r.rowNumber, id, raw: r.raw, problems });
       continue;
     }
     const date = toDateKey(time!);
@@ -209,7 +214,7 @@ export class WaterStore {
       this.b.read('waterDays'),
       this.b.read('waterCups'),
       this.b.read('waterSettings'),
-      this.b.read('healthWeights'),
+      this.b.read('healthBodyMeasurements'),
       this.b.read('waterDrinks'),
     ]);
     const drinks = await this.ensureDrinks(drinkRows, now);
@@ -219,7 +224,7 @@ export class WaterStore {
     const lt = triageTimed(logRows, 'ml', validMl, now);
     const wt = triageTimed(weightRows, 'kg', validKg, now);
     if (lt.fixes.length) await this.b.update('waterLogs', lt.fixes);
-    if (wt.fixes.length) await this.b.update('healthWeights', wt.fixes);
+    if (wt.fixes.length) await this.b.update('healthBodyMeasurements', wt.fixes);
 
     const logs: WaterLog[] = lt.valid
       .map((r) => ({
@@ -277,7 +282,8 @@ export class WaterStore {
   /**
    * 每日目標紀錄：
    * - 今天（及未來）：目標隨最新體重、設定更新，未鎖定
-   * - 過去：鎖定目標（之前沒有紀錄的，用當天以前最新的體重計算）
+   * - 目標用「那天以前（不含那天）最新的體重」計算；當天新量的體重明天才用
+   * - 過去：鎖定目標（之前沒有紀錄的，同樣用那天以前最新的體重計算）
    * - 總量、是否達標永遠依喝水紀錄重算（補記過去的紀錄也會更新）
    */
   private async syncDays(
@@ -327,8 +333,7 @@ export class WaterStore {
       if (past && existing) {
         calc = { goal: existing.goal, weightUsed: existing.weightUsed, factor: existing.factor, extraMl: existing.extraMl, rounded: existing.rounded };
       } else {
-        const atTime = past ? endOfDay(date) : now;
-        calc = computeGoal(latestWeight(weights, atTime)?.kg ?? null, settings);
+        calc = computeGoal(goalWeight(weights, date)?.kg ?? null, settings);
       }
       const desired = { ...calc, total, achieved: total >= calc.goal, locked: past };
 
@@ -408,7 +413,7 @@ export class WaterStore {
   async addWeight(kg: number, time = Date.now()) {
     if (!validKg(kg)) throw new Error('體重的數值不合理');
     const now = Date.now();
-    await this.b.append('healthWeights', [{ time, kg, date: toDateKey(time), createdVia: this.via, id: newId(now), createdAt: now, updatedAt: now }]);
+    await this.b.append('healthBodyMeasurements', [{ time, kg, date: toDateKey(time), createdVia: this.via, id: newId(now), createdAt: now, updatedAt: now }]);
   }
 
   // ───── 常用杯子 ─────
