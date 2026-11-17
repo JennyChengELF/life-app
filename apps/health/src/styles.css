@@ -112,11 +112,6 @@ button.full { width: 100%; margin-bottom: 12px; }
 .sw.s1 { background: var(--s1); }
 .sw.s2 { background: var(--s2); }
 
-/* 顏色標示：正常 / 偏高偏低 / 異常（一定和文字一起出現，不只靠顏色） */
-.lv { display: inline-block; font-size: 0.75rem; font-weight: 600; border-radius: 999px; padding: 0 8px; line-height: 1.6; white-space: nowrap; vertical-align: middle; }
-.lv.ok { background: var(--ok-soft); color: var(--ok); }
-.lv.warn { background: var(--warn-soft); color: var(--warn); }
-.lv.bad { background: var(--danger-soft); color: var(--danger); }
 .big-num { font-size: 2rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
 .big-num small { font-size: 0.85rem; font-weight: 400; color: var(--muted); }
 
@@ -133,16 +128,3 @@ button.full { width: 100%; margin-bottom: 12px; }
 .choice button { border-radius: 999px; padding: 5px 12px; font-size: 0.9rem; }
 .choice button.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
 
-/* 總覽：一天的時間軸 */
-.date-nav { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; flex-wrap: wrap; }
-.date-label { font-weight: 600; min-width: 130px; text-align: center; }
-.timeline { list-style: none; margin: 0; padding: 0; }
-.timeline li { display: flex; align-items: flex-start; gap: 8px; padding: 9px 4px; border-bottom: 1px solid var(--line); cursor: pointer; }
-.timeline li:last-child { border-bottom: 0; }
-.timeline li:hover { background: var(--bg); }
-.tl-time { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 3em; }
-.tl-icon { width: 1.4em; text-align: center; }
-.tl-main { flex: 1; min-width: 0; }
-.tl-name { color: var(--muted); font-size: 0.9rem; }
-.tl-value { font-weight: 600; font-variant-numeric: tabular-nums; }
-.tl-extra { font-size: 0.8rem; color: var(--muted); margin-top: 1px; }

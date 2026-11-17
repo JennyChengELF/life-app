@@ -2,10 +2,19 @@
   "name": "@life/ui",
   "version": "0.1.0",
   "private": true,
-  "files": [
-    "base.css"
-  ],
+  "type": "module",
   "exports": {
-    "./base.css": "./base.css"
+    "./base.css": "./base.css",
+    "./timeline": "./src/Timeline.tsx"
+  },
+  "peerDependencies": {
+    "react": "18.3.1"
+  },
+  "dependencies": {
+    "@life/db": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/react": "18.3.12",
+    "react": "18.3.1"
   }
 }

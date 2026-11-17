@@ -33,6 +33,7 @@ jobs:
         run: pnpm --filter hub build
         env:
           VITE_BASE: /${{ github.event.repository.name }}/
+          VITE_GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
       - name: Build water
         run: pnpm --filter water build
         env:

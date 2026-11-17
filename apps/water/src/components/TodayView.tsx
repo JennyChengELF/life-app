@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { WaterLog, WaterSnapshot } from '@life/db';
 import { addDays, computeGoal, drinkOf, goalWeight, startOfDay, todayKey, toHHmm } from '@life/db';
 import type { WaterApi } from '../useWater';
@@ -27,10 +27,23 @@ function timeForDate(date: string) {
   return base.getTime();
 }
 
-export function TodayView(props: { api: WaterApi; snap: WaterSnapshot; date: string; setDate: (d: string) => void; goTo: (t: Tab) => void }) {
+export function TodayView(props: {
+  api: WaterApi;
+  snap: WaterSnapshot;
+  date: string;
+  setDate: (d: string) => void;
+  goTo: (t: Tab) => void;
+  /** 一打開就修改這一筆（從綜合首頁點進來） */
+  editId?: string | null;
+  /** 有的話：改完 / 取消後呼叫（回首頁） */
+  onEditDone?: () => void;
+}) {
   const { api, snap, date, setDate, goTo } = props;
   const [custom, setCustom] = useState('');
-  const [editing, setEditing] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(props.editId ?? null);
+  useEffect(() => {
+    if (props.editId) setEditing(props.editId);
+  }, [props.editId]);
   // null = 預設飲品（清單第一個，開水）；記完一筆就回到預設
   const [picked, setPicked] = useState<string | null>(null);
   const defaultDrink = snap.drinks[0]?.name ?? '開水';
@@ -86,17 +99,19 @@ export function TodayView(props: { api: WaterApi; snap: WaterSnapshot; date: str
     add(Math.round(ml));
   };
 
-  const save = (log: WaterLog, patch: { time: number; ml: number; drink: string }) => {
+  const save = async (log: WaterLog, patch: { time: number; ml: number; drink: string }) => {
     setEditing(null);
-    api.run((s) => s.updateLog(log, patch));
+    await api.run((s) => s.updateLog(log, patch));
+    props.onEditDone?.();
   };
 
-  const remove = (log: WaterLog) => {
+  const remove = async (log: WaterLog) => {
     setEditing(null);
-    api.run(
+    await api.run(
       (s) => s.deleteLog(log),
       (s) => ({ ...s, logs: s.logs.filter((l) => l.id !== log.id) }),
     );
+    props.onEditDone?.();
   };
 
   return (
@@ -223,7 +238,10 @@ export function TodayView(props: { api: WaterApi; snap: WaterSnapshot; date: str
                       drink={drinkOf(l, snap.drinks)}
                       drinks={snap.drinks.map((d) => d.name)}
                       onSave={(time, ml, dr) => save(l, { time, ml, drink: dr ?? drinkOf(l, snap.drinks) })}
-                      onCancel={() => setEditing(null)}
+                      onCancel={() => {
+                        setEditing(null);
+                        props.onEditDone?.();
+                      }}
                       onDelete={() => remove(l)}
                     />
                   </li>

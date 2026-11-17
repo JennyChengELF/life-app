@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { todayKey } from '@life/db';
+import { useEffect, useState } from 'react';
+import { parseEditHash, todayKey } from '@life/db';
 import { useWater } from './useWater';
 import { TodayView } from './components/TodayView';
 import { StatsView } from './components/StatsView';
@@ -21,6 +21,20 @@ export function App() {
   const api = useWater();
   const [tab, setTab] = useState<Tab>('today');
   const [date, setDate] = useState(todayKey());
+  /** 從綜合首頁點某一筆喝水進來（#edit/water/id）：資料讀好後打開它，改完回首頁 */
+  const [pendingEdit, setPendingEdit] = useState(() => parseEditHash(location.hash));
+  const [editFromHome, setEditFromHome] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!pendingEdit || !api.snap) return;
+    setPendingEdit(null);
+    history.replaceState(null, '', location.pathname + location.search);
+    const log = api.snap.logs.find((l) => l.id === pendingEdit.id);
+    if (!log) return api.showToast({ kind: 'error', text: '找不到這一筆（可能已經刪除）' });
+    setTab('today');
+    setDate(log.date);
+    setEditFromHome(log.id);
+  }, [pendingEdit, api.snap, api]);
 
   return (
     <div className="app">
@@ -68,7 +82,15 @@ export function App() {
           </div>
         ) : api.snap ? (
           <>
-            {tab === 'today' && <TodayView api={api} snap={api.snap} date={date} setDate={setDate} goTo={setTab} />}
+            {tab === 'today' && <TodayView
+                api={api}
+                snap={api.snap}
+                date={date}
+                setDate={setDate}
+                goTo={setTab}
+                editId={editFromHome}
+                onEditDone={editFromHome ? () => (location.href = HOME_URL + location.search) : undefined}
+              />}
             {tab === 'stats' && (
               <StatsView
                 snap={api.snap}
