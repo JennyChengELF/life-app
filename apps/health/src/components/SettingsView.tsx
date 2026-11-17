@@ -1,13 +1,78 @@
 import { useState } from 'react';
-import type { BodyFieldKey, HealthSnapshot, OccItem } from '@life/db';
-import { BODY_FIELDS, bodyField, HEIGHT_CODE } from '@life/db';
+import type { BodyFieldKey, HealthSnapshot, OccItem, TimeRange } from '@life/db';
+import { BODY_FIELDS, bodyField, formatRange, HEIGHT_CODE, rangesOverlap, TEMP_KINDS, TEMP_SITES } from '@life/db';
 import type { HealthApi } from '../useHealth';
 import { fieldLabel, hasTwin } from '../format';
+import { Choice } from './vital';
+
+const toMin = (hhmm: string) => {
+  const [h, m] = hhmm.split(':').map(Number);
+  return h * 60 + m;
+};
+const toHHMM = (min: number) => formatRange({ start: min, end: (min + 1) % 1440 }).slice(0, 5);
+
+/** 血壓 722 的早上 / 晚上時段 */
+function BpPeriodsCard({ api, snap }: { api: HealthApi; snap: HealthSnapshot }) {
+  const p = snap.settings.bpPeriods;
+  const [v, setV] = useState({ ms: toHHMM(p.morning.start), me: toHHMM(p.morning.end), es: toHHMM(p.evening.start), ee: toHHMM(p.evening.end) });
+  const ok = [v.ms, v.me, v.es, v.ee].every((x) => /^\d{2}:\d{2}$/.test(x));
+  const morning: TimeRange | null = ok ? { start: toMin(v.ms), end: toMin(v.me) } : null;
+  const evening: TimeRange | null = ok ? { start: toMin(v.es), end: toMin(v.ee) } : null;
+  const valid = !!morning && !!evening && morning.start !== morning.end && evening.start !== evening.end;
+  const overlap = valid && rangesOverlap(morning!, evening!);
+  const changed = valid && (formatRange(morning!) !== formatRange(p.morning) || formatRange(evening!) !== formatRange(p.evening));
+  const time = (k: keyof typeof v) => <input type="time" value={v[k]} onChange={(e) => setV((s) => ({ ...s, [k]: e.target.value }))} />;
+  return (
+    <section className="card">
+      <h2>血壓 722 的時段</h2>
+      <p className="muted small">在這兩個時段量的血壓才算進 722。晚上的時段可以跨過半夜（例：18:00–02:00，半夜量的算前一天晚上）。</p>
+      <div className="row wrap">
+        <span>早上</span>
+        {time('ms')}–{time('me')}
+      </div>
+      <div className="row wrap" style={{ marginTop: 8 }}>
+        <span>晚上</span>
+        {time('es')}–{time('ee')}
+      </div>
+      {overlap && <p className="error-text small">早上和晚上的時段重疊了</p>}
+      <div className="editor-actions">
+        <button
+          className="primary"
+          disabled={!changed || overlap || api.busy}
+          onClick={async () => {
+            const done = await api.run((s) => s.saveBpPeriods({ morning: morning!, evening: evening! }).then(() => true));
+            if (done) api.showToast({ kind: 'info', text: '已儲存' });
+          }}
+        >
+          儲存
+        </button>
+      </div>
+    </section>
+  );
+}
+
+/** 體溫的預設部位 */
+function TempSiteCard({ api, snap }: { api: HealthApi; snap: HealthSnapshot }) {
+  return (
+    <section className="card">
+      <h2>體溫的預設部位</h2>
+      <p className="muted small">記體溫時先幫你選好的部位，記的時候還是可以改。</p>
+      {TEMP_KINDS.map((k) => (
+        <div key={k} className="field">
+          {k}體溫
+          <Choice options={TEMP_SITES} value={snap.settings.tempSite[k]} onChange={(s) => api.run((st) => st.saveTempSite(k, s))} />
+        </div>
+      ))}
+    </section>
+  );
+}
 
 export function SettingsView({ api, snap }: { api: HealthApi; snap: HealthSnapshot }) {
   return (
     <div className="settings">
       <FieldsCard api={api} snap={snap} />
+      <BpPeriodsCard api={api} snap={snap} />
+      <TempSiteCard api={api} snap={snap} />
       <ItemsCard api={api} snap={snap} />
       <DataCard api={api} />
       <p className="muted small center-text">數值僅供記錄參考，不能取代醫療建議。</p>
@@ -189,7 +254,7 @@ function DataCard({ api }: { api: HealthApi }) {
       ) : (
         <>
           <p className="muted small">
-            資料存在你的 Google 試算表「生活APP-健康」。可以直接在試算表最下方新增：身體量測只要填 time 和 kg；偶爾量測填 time、item（項目名稱）、value。APP 打開或重新整理時會自動補齊。
+            資料存在你的 Google 試算表「生活APP-健康」。可以直接在試算表最下方新增：身體量測只要填 time 和 kg；血壓填 time、systolic、diastolic；血糖填 time、timing、mgdl；體溫填 time、kind、celsius；偶爾量測填 time、item（項目名稱）、value。APP 打開或重新整理時會自動補齊。
           </p>
           {health && (
             <a className="btn" href={health} target="_blank" rel="noreferrer">

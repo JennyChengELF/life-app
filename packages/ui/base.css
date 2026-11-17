@@ -12,6 +12,7 @@
   --warn: #b7791f;
   --warn-soft: #fdf3e1;
   --danger: #d64545;
+  --danger-soft: #fbe7e7;
   --radius: 14px;
   color-scheme: light;
 }
@@ -29,6 +30,7 @@
     --warn: #e0a84a;
     --warn-soft: #3a2e17;
     --danger: #f06b6b;
+    --danger-soft: #3d1f1f;
     color-scheme: dark;
   }
 }

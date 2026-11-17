@@ -5,6 +5,9 @@ const show = (v: unknown) => (v === undefined || v === null || v === '' ? '（�
 const TABLE_NAME: Record<string, string> = {
   healthBodyMeasurements: '身體量測',
   healthOccasionalMeasurements: '偶爾量測',
+  healthBloodPressure: '血壓',
+  healthBloodGlucose: '血糖',
+  healthTemperature: '體溫',
 };
 
 export function IssuesView({ api, snap, onDone }: { api: HealthApi; snap: HealthSnapshot; onDone: () => void }) {

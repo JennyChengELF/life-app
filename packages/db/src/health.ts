@@ -1,11 +1,24 @@
 /**
- * 健康 APP 的資料存取與規則（第一版：身體量測＋偶爾量測）。
- * 資料存在「生活APP-健康」試算表。
+ * 健康 APP 的資料存取與規則：身體量測、偶爾量測、血壓、血糖、體溫。
+ * 資料存在「生活APP-健康」試算表。血壓、血糖、體溫的判斷規則在 vitals.ts。
  */
 import type { Backend, RowUpdate, RowValues, TableRow } from './backend';
 import { newId } from './ids';
 import type { TableName } from './schema';
 import { toDateKey } from './time';
+import type { BloodGlucose, BloodPressure, BpPeriods, GlucoseTiming, Temperature, TempKind, TempSite } from './vitals';
+import {
+  BP_RANGE,
+  DEFAULT_BP_PERIODS,
+  formatRange,
+  GLUCOSE_RANGE,
+  GLUCOSE_TIMINGS,
+  parseRange,
+  rangesOverlap,
+  TEMP_KINDS,
+  TEMP_RANGE,
+  TEMP_SITES,
+} from './vitals';
 
 // ───────────── 身體量測的項目 ─────────────
 
@@ -145,7 +158,13 @@ export interface OccMeasurement {
 export interface HealthSettings {
   /** 顯示哪些項目、順序 */
   bodyFields: BodyFieldKey[];
+  /** 血壓 722 的早上 / 晚上時段 */
+  bpPeriods: BpPeriods;
+  /** 體溫的預設部位 */
+  tempSite: Record<TempKind, TempSite>;
 }
+
+export const DEFAULT_TEMP_SITE: Record<TempKind, TempSite> = { 一般: '耳溫', 基礎: '口溫' };
 
 export interface HealthIssue {
   table: TableName;
@@ -163,6 +182,10 @@ export interface HealthSnapshot {
   items: OccItem[];
   /** 依時間排序（舊 → 新） */
   occ: OccMeasurement[];
+  /** 依時間排序（舊 → 新） */
+  bp: BloodPressure[];
+  glucose: BloodGlucose[];
+  temps: Temperature[];
   settings: HealthSettings;
   issues: HealthIssue[];
 }
@@ -288,6 +311,61 @@ function checkBodyRow(r: TableRow): string[] {
   return problems;
 }
 
+function checkTime(r: TableRow, problems: string[]) {
+  if (r.errors.includes('time')) problems.push('時間格式看不懂（例：2026/11/17 07:30）');
+  else if (num(r.values.time) == null) problems.push('沒有填時間');
+}
+
+function checkNum(r: TableRow, col: string, label: string, [min, max]: readonly [number, number], required: boolean, problems: string[]) {
+  const v = num(r.values[col]);
+  if (r.errors.includes(col)) problems.push(`${label}不是數字`);
+  else if (v == null) {
+    if (required) problems.push(`沒有填${label}`);
+  } else if (v < min || v > max) problems.push(`${label}的數值不合理`);
+}
+
+function checkChoice(r: TableRow, col: string, label: string, choices: readonly string[], required: boolean, problems: string[]) {
+  const v = str(r.values[col])?.trim();
+  if (!v) {
+    if (required) problems.push(`沒有填${label}`);
+  } else if (!choices.includes(v)) problems.push(`${label}「${v}」看不懂（請填：${choices.join('、')}）`);
+}
+
+function checkBpRow(r: TableRow): string[] {
+  const p: string[] = [];
+  checkTime(r, p);
+  checkNum(r, 'systolic', '收縮壓', BP_RANGE.systolic, true, p);
+  checkNum(r, 'diastolic', '舒張壓', BP_RANGE.diastolic, true, p);
+  checkNum(r, 'pulse', '脈搏', BP_RANGE.pulse, false, p);
+  if (!p.length && Number(r.values.diastolic) >= Number(r.values.systolic)) p.push('舒張壓（低）比收縮壓（高）還高，可能填反了');
+  return p;
+}
+
+function checkGlucoseRow(r: TableRow): string[] {
+  const p: string[] = [];
+  checkTime(r, p);
+  checkChoice(r, 'timing', '測量時機', GLUCOSE_TIMINGS, true, p);
+  checkNum(r, 'mgdl', '血糖', GLUCOSE_RANGE, true, p);
+  return p;
+}
+
+function checkTempRow(r: TableRow): string[] {
+  const p: string[] = [];
+  checkTime(r, p);
+  checkChoice(r, 'kind', '種類', TEMP_KINDS, true, p);
+  checkChoice(r, 'site', '部位', TEMP_SITES, false, p);
+  checkNum(r, 'celsius', '體溫', TEMP_RANGE, true, p);
+  return p;
+}
+
+const baseOf = (r: TableRow) => ({
+  rowNumber: r.rowNumber,
+  id: String(r.values.id),
+  time: Number(r.values.time),
+  date: String(r.values.date),
+  note: str(r.values.note),
+});
+
 /** 補上使用者在試算表直接新增的列（id 等）、修正 date；有問題的列入「需要補齊」 */
 function triage(
   table: TableName,
@@ -356,6 +434,73 @@ export function cleanBodyValues(values: BodyValues): BodyValues {
 
 export const validOccValue = (n: number) => Number.isFinite(n) && n > 0 && n < 100000;
 
+function parseSettings(rows: TableRow[]): HealthSettings {
+  const kv = new Map<string, unknown>();
+  for (const r of rows) {
+    const k = str(r.values.key)?.trim();
+    if (k && !kv.has(k)) kv.set(k, r.values.value);
+  }
+  const defaults = { morning: parseRange(DEFAULT_BP_PERIODS.morning)!, evening: parseRange(DEFAULT_BP_PERIODS.evening)! };
+  const morning = parseRange(kv.get('health.bpMorning')) ?? defaults.morning;
+  const evening = parseRange(kv.get('health.bpEvening')) ?? defaults.evening;
+  const site = (k: TempKind): TempSite => {
+    const v = str(kv.get(`health.tempSite.${k}`))?.trim() ?? '';
+    return (TEMP_SITES as readonly string[]).includes(v) ? (v as TempSite) : DEFAULT_TEMP_SITE[k];
+  };
+  return {
+    bodyFields: parseBodyFields(kv.get('health.bodyFields')),
+    // 試算表裡改成重疊的時段 → 用預設
+    bpPeriods: rangesOverlap(morning, evening) ? defaults : { morning, evening },
+    tempSite: { 一般: site('一般'), 基礎: site('基礎') },
+  };
+}
+
+/** 檢查數值範圍；回傳四捨五入後的值 */
+function checkRange(v: number, [min, max]: readonly [number, number], label: string, decimals = 0): number {
+  if (!Number.isFinite(v)) throw new Error(`請輸入${label}`);
+  if (v < min || v > max) throw new Error(`${label}的數值不合理`);
+  const p = 10 ** decimals;
+  return Math.round(v * p) / p;
+}
+
+export interface BpInput {
+  systolic: number;
+  diastolic: number;
+  pulse: number | null;
+}
+export function cleanBp(v: BpInput): BpInput {
+  const out = {
+    systolic: checkRange(v.systolic, BP_RANGE.systolic, '收縮壓'),
+    diastolic: checkRange(v.diastolic, BP_RANGE.diastolic, '舒張壓'),
+    pulse: v.pulse == null ? null : checkRange(v.pulse, BP_RANGE.pulse, '脈搏'),
+  };
+  if (out.diastolic >= out.systolic) throw new Error('舒張壓（低）比收縮壓（高）還高，請確認是不是填反了');
+  return out;
+}
+
+export interface GlucoseInput {
+  timing: GlucoseTiming;
+  mgdl: number;
+}
+export function cleanGlucose(v: GlucoseInput): GlucoseInput {
+  if (!GLUCOSE_TIMINGS.includes(v.timing)) throw new Error('請選測量時機');
+  return { timing: v.timing, mgdl: checkRange(v.mgdl, GLUCOSE_RANGE, '血糖') };
+}
+
+export interface TempInput {
+  kind: TempKind;
+  site: TempSite | null;
+  celsius: number;
+}
+export function cleanTemp(v: TempInput): TempInput {
+  if (!TEMP_KINDS.includes(v.kind)) throw new Error('請選種類');
+  if (v.site != null && !TEMP_SITES.includes(v.site)) throw new Error('部位看不懂');
+  // 基礎體溫記到小數第 2 位
+  return { kind: v.kind, site: v.site, celsius: checkRange(v.celsius, TEMP_RANGE, '體溫', v.kind === '基礎' ? 2 : 1) };
+}
+
+export type VitalTable = 'healthBloodPressure' | 'healthBloodGlucose' | 'healthTemperature';
+
 // ───────────── 資料存取 ─────────────
 
 export class HealthStore {
@@ -374,11 +519,14 @@ export class HealthStore {
   }
 
   private async loadNow(now: number): Promise<HealthSnapshot> {
-    const [bodyRows, itemRows, occRows, setRows] = await Promise.all([
+    const [bodyRows, itemRows, occRows, setRows, bpRows, gluRows, tempRows] = await Promise.all([
       this.b.read('healthBodyMeasurements'),
       this.b.read('healthOccasionalItems'),
       this.b.read('healthOccasionalMeasurements'),
       this.b.read('healthSettings'),
+      this.b.read('healthBloodPressure'),
+      this.b.read('healthBloodGlucose'),
+      this.b.read('healthTemperature'),
     ]);
 
     const items = await this.ensureItems(itemRows, now);
@@ -401,8 +549,29 @@ export class HealthStore {
       },
       now,
     );
+    const pt = triage('healthBloodPressure', bpRows, checkBpRow, now);
+    const gt = triage('healthBloodGlucose', gluRows, checkGlucoseRow, now);
+    const tt = triage('healthTemperature', tempRows, checkTempRow, now);
     if (bt.fixes.length) await this.b.update('healthBodyMeasurements', bt.fixes);
     if (ot.fixes.length) await this.b.update('healthOccasionalMeasurements', ot.fixes);
+    if (pt.fixes.length) await this.b.update('healthBloodPressure', pt.fixes);
+    if (gt.fixes.length) await this.b.update('healthBloodGlucose', gt.fixes);
+    if (tt.fixes.length) await this.b.update('healthTemperature', tt.fixes);
+    const byTime = (a: { time: number }, b: { time: number }) => a.time - b.time;
+    const bp: BloodPressure[] = pt.valid
+      .map((r) => ({ ...baseOf(r), systolic: Number(r.values.systolic), diastolic: Number(r.values.diastolic), pulse: num(r.values.pulse) }))
+      .sort(byTime);
+    const glucose: BloodGlucose[] = gt.valid
+      .map((r) => ({ ...baseOf(r), timing: String(r.values.timing).trim() as GlucoseTiming, mgdl: Number(r.values.mgdl) }))
+      .sort(byTime);
+    const temps: Temperature[] = tt.valid
+      .map((r) => ({
+        ...baseOf(r),
+        kind: String(r.values.kind).trim() as TempKind,
+        site: (str(r.values.site)?.trim() || null) as TempSite | null,
+        celsius: Number(r.values.celsius),
+      }))
+      .sort(byTime);
 
     const body = bt.valid.map(toBody).sort((a, b) => a.time - b.time);
     const occ: OccMeasurement[] = ot.valid
@@ -417,12 +586,17 @@ export class HealthStore {
       }))
       .sort((a, b) => a.time - b.time);
 
-    const settings: HealthSettings = { bodyFields: [...DEFAULT_BODY_FIELDS] };
-    for (const r of setRows) {
-      if (str(r.values.key) === 'health.bodyFields') settings.bodyFields = parseBodyFields(r.values.value);
-    }
-
-    return { loadedAt: now, body, items, occ, settings, issues: [...bt.issues, ...ot.issues] };
+    return {
+      loadedAt: now,
+      body,
+      items,
+      occ,
+      bp,
+      glucose,
+      temps,
+      settings: parseSettings(setRows),
+      issues: [...bt.issues, ...ot.issues, ...pt.issues, ...gt.issues, ...tt.issues],
+    };
   }
 
   /** 項目清單；第一次使用（清單是空的）時建立預設項目；同名的只留第一個 */
@@ -492,6 +666,46 @@ export class HealthStore {
   async deleteBody(m: Pick<BodyMeasurement, 'rowNumber' | 'id'>) {
     const now = Date.now();
     await this.b.update('healthBodyMeasurements', [{ rowNumber: m.rowNumber, values: { deletedAt: now, updatedAt: now }, expectId: m.id }]);
+  }
+
+  // ───── 血壓、血糖、體溫 ─────
+
+  async addBp(v: BpInput, time = Date.now(), note: string | null = null) {
+    return this.addVital('healthBloodPressure', { ...cleanBp(v) }, time, note);
+  }
+  async updateBp(r: Pick<BloodPressure, 'rowNumber' | 'id'>, v: BpInput, time: number, note: string | null) {
+    return this.updateVital('healthBloodPressure', r, { ...cleanBp(v) }, time, note);
+  }
+  async addGlucose(v: GlucoseInput, time = Date.now(), note: string | null = null) {
+    return this.addVital('healthBloodGlucose', { ...cleanGlucose(v) }, time, note);
+  }
+  async updateGlucose(r: Pick<BloodGlucose, 'rowNumber' | 'id'>, v: GlucoseInput, time: number, note: string | null) {
+    return this.updateVital('healthBloodGlucose', r, { ...cleanGlucose(v) }, time, note);
+  }
+  async addTemp(v: TempInput, time = Date.now(), note: string | null = null) {
+    return this.addVital('healthTemperature', { ...cleanTemp(v) }, time, note);
+  }
+  async updateTemp(r: Pick<Temperature, 'rowNumber' | 'id'>, v: TempInput, time: number, note: string | null) {
+    return this.updateVital('healthTemperature', r, { ...cleanTemp(v) }, time, note);
+  }
+
+  async deleteVital(table: VitalTable, r: { rowNumber: number; id: string }) {
+    const now = Date.now();
+    await this.b.update(table, [{ rowNumber: r.rowNumber, values: { deletedAt: now, updatedAt: now }, expectId: r.id }]);
+  }
+
+  private async addVital(table: VitalTable, values: RowValues, time: number, note: string | null) {
+    if (time > Date.now() + 5 * 60000) throw new Error('時間不能是未來');
+    const now = Date.now();
+    const id = newId(now);
+    await this.b.append(table, [{ ...values, time, note: note?.trim() || null, date: toDateKey(time), createdVia: this.via, id, createdAt: now, updatedAt: now }]);
+    return id;
+  }
+
+  private async updateVital(table: VitalTable, r: { rowNumber: number; id: string }, values: RowValues, time: number, note: string | null) {
+    if (time > Date.now() + 5 * 60000) throw new Error('時間不能是未來');
+    const v: RowValues = { ...values, time, date: toDateKey(time), note: note?.trim() || null, updatedAt: Date.now() };
+    await this.b.update(table, [{ rowNumber: r.rowNumber, values: v, expectId: r.id }]);
   }
 
   // ───── 偶爾量測 ─────
@@ -585,11 +799,25 @@ export class HealthStore {
   // ───── 設定 ─────
 
   async saveBodyFields(keys: BodyFieldKey[]) {
-    const clean = parseBodyFields(keys.join(','));
+    await this.saveSetting('health.bodyFields', parseBodyFields(keys.join(',')).join(','));
+  }
+
+  /** 血壓 722 的時段（不能重疊） */
+  async saveBpPeriods(p: BpPeriods) {
+    if (rangesOverlap(p.morning, p.evening)) throw new Error('早上和晚上的時段重疊了');
+    await this.saveSetting('health.bpMorning', formatRange(p.morning));
+    await this.saveSetting('health.bpEvening', formatRange(p.evening));
+  }
+
+  async saveTempSite(kind: TempKind, site: TempSite) {
+    await this.saveSetting(`health.tempSite.${kind}`, site);
+  }
+
+  private async saveSetting(key: string, value: string) {
     const rows = await this.b.read('healthSettings');
-    const row = rows.find((r) => r.values.key === 'health.bodyFields');
-    if (row) await this.b.update('healthSettings', [{ rowNumber: row.rowNumber, values: { value: clean.join(',') } }]);
-    else await this.b.append('healthSettings', [{ key: 'health.bodyFields', value: clean.join(',') }]);
+    const row = rows.find((r) => str(r.values.key)?.trim() === key);
+    if (row) await this.b.update('healthSettings', [{ rowNumber: row.rowNumber, values: { value } }]);
+    else await this.b.append('healthSettings', [{ key, value }]);
   }
 
   // ───── 需要補齊 ─────

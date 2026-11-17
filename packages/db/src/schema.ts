@@ -6,8 +6,9 @@
 /**
  * 2：喝水紀錄加「drink」、新增飲品清單（2026-11-17）
  * 3：體重表 healthWeights 改名為身體量測 healthBodyMeasurements 並加上身體組成欄位；新增偶爾量測、健康設定（2026-11-17）
+ * 4：新增血壓、血糖、體溫（2026-11-17）
  */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export type ColType = 'datetime' | 'date' | 'number' | 'text' | 'bool' | 'any';
 
@@ -28,7 +29,7 @@ export interface FileDef {
 
 export const FILES: Record<FileKey, FileDef> = {
   water: { title: '生活APP-喝水', description: '喝水 APP 的資料：喝水紀錄、每日目標、常用杯子、設定' },
-  health: { title: '生活APP-健康', description: '健康 APP 的資料：身體量測（體重、體脂⋯⋯）、偶爾量測（身高、圍度⋯⋯）、設定' },
+  health: { title: '生活APP-健康', description: '健康 APP 的資料：身體量測（體重、體脂⋯⋯）、血壓、血糖、體溫、偶爾量測（身高、圍度⋯⋯）、設定' },
 };
 
 export interface TableDef {
@@ -147,6 +148,50 @@ export const TABLES = {
       { name: 'time', type: 'datetime', label: '量的時間（必填）' },
       { name: 'item', type: 'text', label: '項目（填項目清單裡的名稱，必填）' },
       { name: 'value', type: 'number', label: '數值（必填）' },
+      { name: 'note', type: 'text', label: '備註' },
+      { name: 'date', type: 'date', label: '日期（APP 依 time 自動填）' },
+      { name: 'createdVia', type: 'text', label: '在哪裡輸入（health、sheet）' },
+      { name: 'personId', type: 'text', label: '是誰的資料（空白 = 我自己）' },
+      ...systemCols,
+    ],
+  },
+  healthBloodPressure: {
+    file: 'health',
+    description: '血壓紀錄，量一次一列。可以直接在最下方新增一列，填 time、systolic、diastolic。',
+    columns: [
+      { name: 'time', type: 'datetime', label: '量的時間（必填）' },
+      { name: 'systolic', type: 'number', label: '收縮壓（高）mmHg（必填）' },
+      { name: 'diastolic', type: 'number', label: '舒張壓（低）mmHg（必填）' },
+      { name: 'pulse', type: 'number', label: '脈搏 次/分' },
+      { name: 'note', type: 'text', label: '備註' },
+      { name: 'date', type: 'date', label: '日期（APP 依 time 自動填）' },
+      { name: 'createdVia', type: 'text', label: '在哪裡輸入（health、sheet）' },
+      { name: 'personId', type: 'text', label: '是誰的資料（空白 = 我自己）' },
+      ...systemCols,
+    ],
+  },
+  healthBloodGlucose: {
+    file: 'health',
+    description: '血糖紀錄，量一次一列。可以直接在最下方新增一列，填 time、timing、mgdl。',
+    columns: [
+      { name: 'time', type: 'datetime', label: '量的時間（必填）' },
+      { name: 'timing', type: 'text', label: '測量時機（空腹、飯前、飯後2小時、睡前、隨機，必填）' },
+      { name: 'mgdl', type: 'number', label: '血糖 mg/dL（必填）' },
+      { name: 'note', type: 'text', label: '備註' },
+      { name: 'date', type: 'date', label: '日期（APP 依 time 自動填）' },
+      { name: 'createdVia', type: 'text', label: '在哪裡輸入（health、sheet）' },
+      { name: 'personId', type: 'text', label: '是誰的資料（空白 = 我自己）' },
+      ...systemCols,
+    ],
+  },
+  healthTemperature: {
+    file: 'health',
+    description: '體溫紀錄，量一次一列。可以直接在最下方新增一列，填 time、kind、site、celsius。',
+    columns: [
+      { name: 'time', type: 'datetime', label: '量的時間（必填）' },
+      { name: 'kind', type: 'text', label: '種類（一般、基礎，必填）' },
+      { name: 'site', type: 'text', label: '部位（耳溫、額溫、口溫、腋溫；空白 = 不知道）' },
+      { name: 'celsius', type: 'number', label: '體溫 °C（必填）' },
       { name: 'note', type: 'text', label: '備註' },
       { name: 'date', type: 'date', label: '日期（APP 依 time 自動填）' },
       { name: 'createdVia', type: 'text', label: '在哪裡輸入（health、sheet）' },

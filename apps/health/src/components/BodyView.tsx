@@ -40,14 +40,14 @@ export function BodyView({ api, snap, editing, nav }: { api: HealthApi; snap: He
       : await api.run((s) => s.addBody({ ...values, kg: values.kg! }, timeMs, note).then(() => true));
     if (ok) {
       api.showToast({ kind: 'info', text: editing ? '已修改' : `已記錄體重 ${values.kg} kg` });
-      nav.go('overview');
+      nav.go('body');
     }
   };
 
   const remove = async () => {
     if (!editing || !confirm('確定要刪除這筆紀錄嗎？')) return;
     const ok = await api.run((s) => s.deleteBody(editing).then(() => true));
-    if (ok) nav.go('overview');
+    if (ok) nav.go('body');
   };
 
   const input = (k: BodyFieldKey) => {
@@ -111,7 +111,7 @@ export function BodyView({ api, snap, editing, nav }: { api: HealthApi; snap: He
           <button className="primary big" onClick={save} disabled={api.busy}>
             儲存
           </button>
-          <button onClick={() => nav.go('overview')}>取消</button>
+          <button onClick={() => nav.go('body')}>取消</button>
           {editing && (
             <button className="danger" onClick={remove}>
               刪除

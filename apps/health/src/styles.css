@@ -4,11 +4,16 @@
 :root {
   --accent: #1f8a7a;
   --accent-soft: #e0f3ef;
+  /* 多條線的圖（已用 dataviz 檢查色盲可分辨） */
+  --s1: #008f7c;
+  --s2: #c8692a;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --accent: #4cc3ae;
     --accent-soft: #163a35;
+    --s1: #1f9e89;
+    --s2: #c97c3a;
   }
 }
 
@@ -30,7 +35,7 @@ button.full { width: 100%; margin-bottom: 12px; }
 .chips button.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
 
 /* ── 趨勢圖 ── */
-.chart { position: relative; }
+.chart-plot { position: relative; }
 .chart svg { width: 100%; display: block; touch-action: pan-y; }
 .chart .grid { stroke: var(--line); stroke-width: 1; }
 .chart .axis { fill: var(--muted); font-size: 12px; }
@@ -62,7 +67,7 @@ button.full { width: 100%; margin-bottom: 12px; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0 12px; }
 .input-unit { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
 .input-unit input { margin-top: 0; }
-.unit { color: var(--muted); font-size: 0.85rem; min-width: 1.5em; }
+.unit { color: var(--muted); font-size: 0.85rem; min-width: 1.5em; white-space: nowrap; }
 .hint { display: block; font-size: 0.78rem; color: var(--accent); margin-top: 2px; }
 .req { color: var(--danger); }
 .warn-card { background: var(--warn-soft); border-color: transparent; }
@@ -92,3 +97,38 @@ button.full { width: 100%; margin-bottom: 12px; }
 .chart-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
 .chart-head h2 { margin: 0; }
 .field .hint.off { color: var(--warn); }
+
+/* 多條線、參考線 */
+.chart .line.s1, .chart .pt.s1, .chart .pt-last.s1, .chart .pt-hover.s1 { stroke: var(--s1); }
+.chart .pt.s1, .chart .pt-last.s1, .chart .pt-hover.s1 { fill: var(--s1); }
+.chart .line.s2 { stroke: var(--s2); }
+.chart .pt.s2, .chart .pt-last.s2, .chart .pt-hover.s2 { fill: var(--s2); }
+.chart .pt-last.s1, .chart .pt-last.s2, .chart .pt-hover.s1, .chart .pt-hover.s2 { stroke: var(--card); stroke-width: 2; }
+.chart .ref { stroke: var(--warn); stroke-width: 1; stroke-dasharray: 5 4; opacity: 0.7; }
+.chart .ref-label { fill: var(--muted); font-size: 11px; }
+.legend { display: flex; gap: 14px; font-size: 0.82rem; color: var(--muted); margin-bottom: 4px; }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.sw { display: inline-block; width: 14px; height: 3px; border-radius: 2px; }
+.sw.s1 { background: var(--s1); }
+.sw.s2 { background: var(--s2); }
+
+/* 顏色標示：正常 / 偏高偏低 / 異常（一定和文字一起出現，不只靠顏色） */
+.lv { display: inline-block; font-size: 0.75rem; font-weight: 600; border-radius: 999px; padding: 0 8px; line-height: 1.6; white-space: nowrap; vertical-align: middle; }
+.lv.ok { background: var(--ok-soft); color: var(--ok); }
+.lv.warn { background: var(--warn-soft); color: var(--warn); }
+.lv.bad { background: var(--danger-soft); color: var(--danger); }
+.big-num { font-size: 2rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.big-num small { font-size: 0.85rem; font-weight: 400; color: var(--muted); }
+
+/* 總覽的各種量測 */
+.sum-card { cursor: pointer; }
+.sum-card:hover { border-color: var(--accent); }
+.sum-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.sum-head h2 { margin: 0 0 4px; }
+.quick { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
+.quick button { flex-direction: column; padding: 10px 4px; font-size: 0.85rem; gap: 2px; }
+.quick button .q-icon { font-size: 1.4rem; }
+.more-list button { width: 100%; justify-content: space-between; margin-bottom: 8px; padding: 14px 16px; font-size: 1rem; }
+.choice { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.choice button { border-radius: 999px; padding: 5px 12px; font-size: 0.9rem; }
+.choice button.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
