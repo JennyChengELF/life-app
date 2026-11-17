@@ -7,6 +7,8 @@ import { newId } from './ids';
 import type { TableName } from './schema';
 import { toDateKey } from './time';
 import type { BloodGlucose, BloodPressure, BpPeriods, GlucoseTiming, Temperature, TempKind, TempSite } from './vitals';
+import type { LabItem, LabKind, LabReport, LabResult } from './lab';
+import { DEFAULT_LAB_ITEMS, LAB_KINDS, splitOptions } from './lab';
 import {
   BP_RANGE,
   DEFAULT_BP_PERIODS,
@@ -186,6 +188,10 @@ export interface HealthSnapshot {
   bp: BloodPressure[];
   glucose: BloodGlucose[];
   temps: Temperature[];
+  /** 健檢 / 檢驗：報告（依檢驗日期，舊 → 新）、項目清單（依排序）、結果 */
+  labReports: LabReport[];
+  labItems: LabItem[];
+  labResults: LabResult[];
   settings: HealthSettings;
   issues: HealthIssue[];
 }
@@ -501,6 +507,96 @@ export function cleanTemp(v: TempInput): TempInput {
 
 export type VitalTable = 'healthBloodPressure' | 'healthBloodGlucose' | 'healthTemperature';
 
+// ───────────── 健檢 / 檢驗 ─────────────
+
+function toLabItem(r: TableRow): LabItem {
+  const v = r.values;
+  return {
+    rowNumber: r.rowNumber,
+    id: String(v.id),
+    name: String(v.name).trim(),
+    unit: str(v.unit)?.trim() ?? '',
+    type: str(v.type)?.trim() === '文字' ? '文字' : '數字',
+    refLow: num(v.refLow),
+    refHigh: num(v.refHigh),
+    redLow: num(v.redLow),
+    redHigh: num(v.redHigh),
+    options: splitOptions(v.options),
+    warnOptions: splitOptions(v.warnOptions),
+    badOptions: splitOptions(v.badOptions),
+    sort: num(v.sort) ?? 0,
+    code: str(v.code)?.trim() || null,
+  };
+}
+
+/** 檢驗項目可以修改的欄位 */
+export type LabItemInput = Pick<LabItem, 'name' | 'unit' | 'type' | 'refLow' | 'refHigh' | 'redLow' | 'redHigh' | 'options' | 'warnOptions' | 'badOptions'> & {
+  code?: string | null;
+};
+
+function labItemValues(d: Partial<LabItemInput> & { name: string }): RowValues {
+  return {
+    name: d.name.trim(),
+    unit: d.unit?.trim() ?? '',
+    type: d.type ?? '數字',
+    refLow: d.refLow ?? null,
+    refHigh: d.refHigh ?? null,
+    redLow: d.redLow ?? null,
+    redHigh: d.redHigh ?? null,
+    options: d.options?.join(',') || null,
+    warnOptions: d.warnOptions?.join(',') || null,
+    badOptions: d.badOptions?.join(',') || null,
+    code: d.code ?? null,
+  };
+}
+
+export interface LabReportInput {
+  date: string;
+  kind: LabKind;
+  place: string | null;
+  note: string | null;
+}
+
+/** 報告裡的一項；id 有值 = 修改原本的那一筆 */
+export interface LabResultInput {
+  id?: string;
+  item: string;
+  value: number | null;
+  text: string | null;
+  refLow: number | null;
+  refHigh: number | null;
+}
+
+const LAB_VALUE_LIMIT = 1e7;
+
+function cleanResult(r: LabResultInput, items: LabItem[]): LabResultInput {
+  const item = items.find((i) => i.name === r.item);
+  if (!item) throw new Error(`項目「${r.item}」不在檢驗項目清單裡`);
+  const bad = (n: number | null) => n != null && (!Number.isFinite(n) || Math.abs(n) > LAB_VALUE_LIMIT);
+  if (bad(r.value) || bad(r.refLow) || bad(r.refHigh)) throw new Error(`${r.item} 的數值不合理`);
+  if (r.refLow != null && r.refHigh != null && r.refLow > r.refHigh) throw new Error(`${r.item} 的正常範圍下限比上限大`);
+  if (item.type === '文字') return { ...r, value: null, text: r.text?.trim() || null };
+  return { ...r, text: null };
+}
+
+/** 有填結果的才存 */
+const hasResult = (r: LabResultInput) => r.value != null || !!r.text?.trim();
+
+function checkLabItem(v: LabItemInput, existing: LabItem[], self: LabItem | null): LabItemInput {
+  const name = v.name.trim();
+  if (!name) throw new Error('請輸入項目名稱');
+  if (existing.some((i) => i.id !== self?.id && i.name === name)) throw new Error('已經有這個項目了');
+  const nums = [v.refLow, v.refHigh, v.redLow, v.redHigh];
+  if (nums.some((n) => n != null && !Number.isFinite(n))) throw new Error('範圍要填數字');
+  if (v.refLow != null && v.refHigh != null && v.refLow > v.refHigh) throw new Error('正常範圍的下限比上限大');
+  if (v.type === '文字') {
+    if (!v.options.length) throw new Error('文字項目要填選項（例：陰性,陽性）');
+    const unknown = [...v.warnOptions, ...v.badOptions].find((o) => !v.options.includes(o));
+    if (unknown) throw new Error(`「${unknown}」不在選項裡`);
+  }
+  return { ...v, name };
+}
+
 // ───────────── 資料存取 ─────────────
 
 export class HealthStore {
@@ -519,7 +615,7 @@ export class HealthStore {
   }
 
   private async loadNow(now: number): Promise<HealthSnapshot> {
-    const [bodyRows, itemRows, occRows, setRows, bpRows, gluRows, tempRows] = await Promise.all([
+    const [bodyRows, itemRows, occRows, setRows, bpRows, gluRows, tempRows, repRows, labItemRows, resRows] = await Promise.all([
       this.b.read('healthBodyMeasurements'),
       this.b.read('healthOccasionalItems'),
       this.b.read('healthOccasionalMeasurements'),
@@ -527,7 +623,11 @@ export class HealthStore {
       this.b.read('healthBloodPressure'),
       this.b.read('healthBloodGlucose'),
       this.b.read('healthTemperature'),
+      this.b.read('healthLabReports'),
+      this.b.read('healthLabItems'),
+      this.b.read('healthLabResults'),
     ]);
+    const lab = await this.loadLab(repRows, labItemRows, resRows, now);
 
     const items = await this.ensureItems(itemRows, now);
 
@@ -594,9 +694,106 @@ export class HealthStore {
       bp,
       glucose,
       temps,
+      labReports: lab.reports,
+      labItems: lab.items,
+      labResults: lab.results,
       settings: parseSettings(setRows),
-      issues: [...bt.issues, ...ot.issues, ...pt.issues, ...gt.issues, ...tt.issues],
+      issues: [...bt.issues, ...ot.issues, ...pt.issues, ...gt.issues, ...tt.issues, ...lab.issues],
     };
+  }
+
+  /** 健檢：項目清單（第一次建立預設項目）、報告、結果；補齊在試算表直接新增的列 */
+  private async loadLab(repRows: TableRow[], itemRows: TableRow[], resRows: TableRow[], now: number) {
+    const items = await this.ensureLabItems(itemRows, now);
+    const issues: HealthIssue[] = [];
+    const fill = (r: TableRow): RowValues | null =>
+      r.values.id ? null : { id: newId(now), createdVia: str(r.values.createdVia) ?? 'sheet', createdAt: now, updatedAt: now };
+
+    const repFixes: RowUpdate[] = [];
+    const reports: LabReport[] = [];
+    for (const r of repRows) {
+      if (!isLive(r)) continue;
+      const problems: string[] = [];
+      const date = str(r.values.date);
+      if (r.errors.includes('date')) problems.push('檢驗日期看不懂（例：2026/11/17）');
+      else if (!date) problems.push('沒有填檢驗日期');
+      const kind = str(r.values.kind)?.trim() || '健檢';
+      if (!(LAB_KINDS as readonly string[]).includes(kind)) problems.push(`種類「${kind}」看不懂（請填：${LAB_KINDS.join('、')}）`);
+      if (problems.length) {
+        issues.push({ table: 'healthLabReports', rowNumber: r.rowNumber, id: str(r.values.id), raw: r.raw, problems });
+        continue;
+      }
+      const f = fill(r);
+      if (f) repFixes.push({ rowNumber: r.rowNumber, values: f, expectId: '' });
+      reports.push({
+        rowNumber: r.rowNumber,
+        id: String(f?.id ?? r.values.id),
+        date: date!,
+        kind: kind as LabKind,
+        place: str(r.values.place)?.trim() || null,
+        note: str(r.values.note),
+      });
+    }
+
+    const resFixes: RowUpdate[] = [];
+    const results: LabResult[] = [];
+    for (const r of resRows) {
+      if (!isLive(r)) continue;
+      const problems: string[] = [];
+      const reportId = str(r.values.reportId)?.trim();
+      if (!reportId) problems.push('沒有填 reportId（哪一份報告）');
+      else if (!reports.some((x) => x.id === reportId)) problems.push(`找不到報告「${reportId}」`);
+      const name = str(r.values.item)?.trim();
+      const item = items.find((i) => i.name === name) ?? null;
+      if (!name) problems.push('沒有填項目');
+      else if (!item) problems.push(`項目「${name}」不在檢驗項目清單裡（請先在 APP 新增，或改成清單裡的名稱）`);
+      const text = str(r.values.text)?.trim() || null;
+      if (r.errors.includes('value')) problems.push('數值不是數字');
+      else if (num(r.values.value) == null && !text) problems.push('沒有填結果（數值或文字）');
+      for (const c of ['refLow', 'refHigh']) if (r.errors.includes(c)) problems.push(`${c} 不是數字`);
+      if (r.errors.includes('date')) problems.push('檢驗日期看不懂（例：2026/11/17）');
+      if (problems.length) {
+        issues.push({ table: 'healthLabResults', rowNumber: r.rowNumber, id: str(r.values.id), raw: r.raw, problems });
+        continue;
+      }
+      const f = fill(r);
+      if (f) resFixes.push({ rowNumber: r.rowNumber, values: f, expectId: '' });
+      results.push({
+        rowNumber: r.rowNumber,
+        id: String(f?.id ?? r.values.id),
+        reportId: reportId!,
+        item: name!,
+        value: num(r.values.value),
+        text,
+        refLow: num(r.values.refLow),
+        refHigh: num(r.values.refHigh),
+        date: str(r.values.date),
+        note: str(r.values.note),
+      });
+    }
+    if (repFixes.length) await this.b.update('healthLabReports', repFixes);
+    if (resFixes.length) await this.b.update('healthLabResults', resFixes);
+    reports.sort((a, b) => a.date.localeCompare(b.date) || a.rowNumber - b.rowNumber);
+    return { reports, items, results, issues };
+  }
+
+  /** 檢驗項目清單；第一次使用時建立預設項目；同名的只留第一個 */
+  private async ensureLabItems(rows: TableRow[], now: number): Promise<LabItem[]> {
+    const all: LabItem[] = rows
+      .filter((r) => isLive(r) && r.values.id && str(r.values.name)?.trim())
+      .map((r) => toLabItem(r))
+      .sort((a, b) => a.sort - b.sort || a.rowNumber - b.rowNumber);
+    const items: LabItem[] = [];
+    const dupes: RowUpdate[] = [];
+    for (const i of all) {
+      if (items.some((x) => x.name === i.name)) dupes.push({ rowNumber: i.rowNumber, values: { deletedAt: now, updatedAt: now }, expectId: i.id });
+      else items.push(i);
+    }
+    if (dupes.length) await this.b.update('healthLabItems', dupes);
+    if (items.length || rows.some((r) => !r.empty)) return items;
+    const seed = DEFAULT_LAB_ITEMS.map((d, i) => ({ ...labItemValues(d), sort: i, id: newId(now), createdAt: now, updatedAt: now }));
+    const rowNums = await this.b.append('healthLabItems', seed);
+    return seed.map((v, i) => toLabItem({ rowNumber: rowNums[i], values: v, errors: [], raw: {}, empty: false }));
   }
 
   /** 項目清單；第一次使用（清單是空的）時建立預設項目；同名的只留第一個 */
@@ -706,6 +903,94 @@ export class HealthStore {
     if (time > Date.now() + 5 * 60000) throw new Error('時間不能是未來');
     const v: RowValues = { ...values, time, date: toDateKey(time), note: note?.trim() || null, updatedAt: Date.now() };
     await this.b.update(table, [{ rowNumber: r.rowNumber, values: v, expectId: r.id }]);
+  }
+
+  // ───── 健檢 / 檢驗 ─────
+
+  /**
+   * 新增或修改一份報告和它的結果。
+   * 修改時：rows 裡有 id 的更新、沒有 id 的新增、原本有但 rows 沒有（或沒填結果）的刪除
+   */
+  async saveLabReport(
+    input: LabReportInput,
+    rows: LabResultInput[],
+    items: LabItem[],
+    existing?: { report: LabReport; results: LabResult[] },
+  ): Promise<string> {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) throw new Error('請輸入檢驗日期');
+    if (!LAB_KINDS.includes(input.kind)) throw new Error('請選種類');
+    const filled = rows.filter(hasResult).map((r) => cleanResult(r, items));
+    if (!filled.length) throw new Error('請至少填一個項目的結果');
+    const names = filled.map((r) => r.item);
+    const dup = names.find((n, i) => names.indexOf(n) !== i);
+    if (dup) throw new Error(`「${dup}」重複了`);
+    const now = Date.now();
+    const report: RowValues = { date: input.date, kind: input.kind, place: input.place?.trim() || null, note: input.note?.trim() || null, updatedAt: now };
+    const resultValues = (r: LabResultInput): RowValues => ({ item: r.item, value: r.value, text: r.text, refLow: r.refLow, refHigh: r.refHigh, updatedAt: now });
+
+    let reportId: string;
+    const updates: RowUpdate[] = [];
+    const appends: RowValues[] = [];
+    if (existing) {
+      reportId = existing.report.id;
+      await this.b.update('healthLabReports', [{ rowNumber: existing.report.rowNumber, values: report, expectId: reportId }]);
+      for (const old of existing.results) {
+        const row = filled.find((r) => r.id === old.id);
+        updates.push(
+          row
+            ? { rowNumber: old.rowNumber, values: resultValues(row), expectId: old.id }
+            : { rowNumber: old.rowNumber, values: { deletedAt: now, updatedAt: now }, expectId: old.id },
+        );
+      }
+    } else {
+      reportId = newId(now);
+      await this.b.append('healthLabReports', [{ ...report, id: reportId, createdVia: this.via, createdAt: now }]);
+    }
+    for (const r of filled) {
+      if (r.id && existing?.results.some((x) => x.id === r.id)) continue;
+      appends.push({ ...resultValues(r), reportId, createdVia: this.via, id: newId(now), createdAt: now });
+    }
+    if (updates.length) await this.b.update('healthLabResults', updates);
+    if (appends.length) await this.b.append('healthLabResults', appends);
+    return reportId;
+  }
+
+  /** 刪除報告和它所有的結果 */
+  async deleteLabReport(report: LabReport, results: LabResult[]) {
+    const now = Date.now();
+    const del = { deletedAt: now, updatedAt: now };
+    const mine = results.filter((r) => r.reportId === report.id);
+    if (mine.length) await this.b.update('healthLabResults', mine.map((r) => ({ rowNumber: r.rowNumber, values: del, expectId: r.id })));
+    await this.b.update('healthLabReports', [{ rowNumber: report.rowNumber, values: del, expectId: report.id }]);
+  }
+
+  async addLabItem(input: LabItemInput, existing: LabItem[]) {
+    const v = checkLabItem(input, existing, null);
+    const now = Date.now();
+    const sort = Math.max(-1, ...existing.map((i) => i.sort)) + 1;
+    await this.b.append('healthLabItems', [{ ...labItemValues(v), sort, id: newId(now), createdAt: now, updatedAt: now }]);
+  }
+
+  /** 修改項目；改名時已記的結果一起改 */
+  async updateLabItem(item: LabItem, input: LabItemInput, existing: LabItem[]) {
+    const v = checkLabItem(input, existing, item);
+    const now = Date.now();
+    await this.b.update('healthLabItems', [{ rowNumber: item.rowNumber, values: { ...labItemValues({ ...v, code: item.code }), updatedAt: now }, expectId: item.id }]);
+    if (v.name.trim() !== item.name) {
+      const rows = await this.b.read('healthLabResults');
+      const updates: RowUpdate[] = rows
+        .filter((r) => str(r.values.item)?.trim() === item.name && r.values.id)
+        .map((r) => ({ rowNumber: r.rowNumber, values: { item: v.name.trim(), updatedAt: now }, expectId: String(r.values.id) }));
+      if (updates.length) await this.b.update('healthLabResults', updates);
+    }
+  }
+
+  /** 已經有結果的項目不能刪 */
+  async deleteLabItem(item: LabItem, results: LabResult[]) {
+    if (item.code) throw new Error(`「${item.name}」是 APP 內建項目，不能刪除`);
+    if (results.some((r) => r.item === item.name)) throw new Error(`「${item.name}」已經有檢驗結果，不能刪除`);
+    const now = Date.now();
+    await this.b.update('healthLabItems', [{ rowNumber: item.rowNumber, values: { deletedAt: now, updatedAt: now }, expectId: item.id }]);
   }
 
   // ───── 偶爾量測 ─────

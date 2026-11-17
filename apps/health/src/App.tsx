@@ -12,15 +12,16 @@ import { MoreView } from './components/MoreView';
 import { OccView } from './components/OccView';
 import { SettingsView } from './components/SettingsView';
 import { IssuesView } from './components/IssuesView';
+import { LabView } from './components/LabView';
 
 /** 綜合首頁：上線時在上一層路徑；開發時是另一個 port */
 const HOME_URL = import.meta.env.DEV ? `http://${location.hostname}:5172/` : '../';
 
-export type Tab = 'overview' | 'body' | 'bodyForm' | 'bp' | 'glucose' | 'temp' | 'more' | 'occ' | 'settings' | 'issues';
+export type Tab = 'overview' | 'body' | 'bodyForm' | 'bp' | 'glucose' | 'temp' | 'lab' | 'more' | 'occ' | 'settings' | 'issues';
 export type VitalTab = 'bp' | 'glucose' | 'temp';
 /** 輸入畫面存好 / 取消後回到哪裡；home = 綜合首頁（從首頁點某一筆進來的） */
 export type Back = Tab | 'home';
-export type RecordKind = 'body' | 'bp' | 'glucose' | 'temp' | 'occ';
+export type RecordKind = 'body' | 'bp' | 'glucose' | 'temp' | 'occ' | 'lab';
 type VitalRecord = BloodPressure | BloodGlucose | Temperature;
 
 /** 下方分頁列（2026-11-17 確認）；體溫、偶爾量測、設定放在「更多」 */
@@ -31,7 +32,7 @@ const TABS: { key: Tab; icon: string; label: string }[] = [
   { key: 'glucose', icon: '🍬', label: '血糖' },
   { key: 'more', icon: '☰', label: '更多' },
 ];
-const UNDER: Partial<Record<Tab, Tab>> = { bodyForm: 'body', temp: 'more', occ: 'more', settings: 'more' };
+const UNDER: Partial<Record<Tab, Tab>> = { bodyForm: 'body', temp: 'more', lab: 'more', occ: 'more', settings: 'more' };
 
 /** 網址 #new（記體重）、#bp、#glucose、#temp → 直接打開輸入畫面；#edit/種類/id → 讀完資料後打開那一筆（見 pendingEdit） */
 function fromHash(): { tab: Tab; form: boolean } {
@@ -40,6 +41,9 @@ function fromHash(): { tab: Tab; form: boolean } {
   if (h === 'bp' || h === 'glucose' || h === 'temp') return { tab: h, form: true };
   return { tab: 'overview', form: false };
 }
+
+/** 健檢頁：看某一份報告 / 新增或修改報告；null = 列表 */
+export type LabOpen = { mode: 'detail'; id: string } | { mode: 'form'; id: string | null } | null;
 
 export interface VitalForm {
   /** null = 新增 */
@@ -66,6 +70,7 @@ export function App() {
   const [focusItem, setFocusItem] = useState<string | null>(null);
   /** 輸入畫面存好 / 取消後回到哪裡（從總覽打開的回總覽；沒有就回那一種的列表） */
   const [formBack, setFormBack] = useState<Back | null>(null);
+  const [labOpen, setLabOpen] = useState<LabOpen>(null);
   /** 從綜合首頁點某一筆進來：資料讀好後打開它 */
   const [pendingEdit, setPendingEdit] = useState(() => parseEditHash(location.hash));
 
@@ -85,6 +90,7 @@ export function App() {
     if (t !== 'bodyForm') setEditing(null);
     if (t !== 'occ') setFocusItem(null);
     setVitalForm(null);
+    setLabOpen(null);
     setFormBack(null);
     setTabState(t);
     window.scrollTo(0, 0);
@@ -125,6 +131,7 @@ export function App() {
         : kind === 'bp' ? find(snap.bp)
         : kind === 'glucose' ? find(snap.glucose)
         : kind === 'temp' ? find(snap.temps)
+        : kind === 'lab' ? find(snap.labReports)
         : find(snap.occ);
       if (!rec) {
         api.showToast({ kind: 'error', text: '找不到這一筆（可能已經刪除）' });
@@ -132,8 +139,22 @@ export function App() {
       }
       if (kind === 'body') nav.edit(rec as BodyMeasurement, back);
       else if (kind === 'occ') nav.occ();
+      else if (kind === 'lab') nav.lab({ mode: 'detail', id }, back);
       else nav.vital(kind, { rec: rec as VitalRecord }, back);
       return true;
+    },
+    lab: (open, back = null) => {
+      setTab('lab');
+      setLabOpen(open);
+      setFormBack(back);
+    },
+    /** 健檢：報告 / 輸入畫面 → 回去（從別處打開的回原處） */
+    closeLab: (to = null) => {
+      if (to) return setLabOpen(to);
+      if (formBack === 'home') return goHome();
+      if (formBack) return setTab(formBack);
+      setLabOpen(null);
+      window.scrollTo(0, 0);
     },
     go: setTab,
   };
@@ -198,6 +219,7 @@ export function App() {
             {tab === 'bp' && <BpView key={vitalKey} api={api} snap={api.snap} nav={nav} form={vitalForm} />}
             {tab === 'glucose' && <GlucoseView key={vitalKey} api={api} snap={api.snap} nav={nav} form={vitalForm} />}
             {tab === 'temp' && <TempView key={vitalKey} api={api} snap={api.snap} nav={nav} form={vitalForm} />}
+            {tab === 'lab' && <LabView key={labOpen ? `${labOpen.mode}-${labOpen.id}` : 'list'} api={api} snap={api.snap} nav={nav} open={labOpen} />}
             {tab === 'more' && <MoreView snap={api.snap} nav={nav} />}
             {tab === 'occ' && <OccView key={focusItem ?? ''} api={api} snap={api.snap} focusItem={focusItem} />}
             {tab === 'settings' && <SettingsView api={api} snap={api.snap} />}
@@ -246,6 +268,10 @@ export type Nav = {
   occ: (item?: string | null) => void;
   /** 打開血壓 / 血糖 / 體溫；有 form 就直接進輸入畫面 */
   vital: (t: VitalTab, form?: VitalForm, back?: Back | null) => void;
+  /** 健檢頁：打開報告 / 輸入畫面 */
+  lab: (open: LabOpen, back?: Back | null) => void;
+  /** 健檢頁回去；to = 改成打開另一個畫面（例：存好後看報告） */
+  closeLab: (to?: LabOpen) => void;
   /** 打開某一筆的修改畫面；找不到回傳 false */
   openRecord: (kind: RecordKind, id: string, back: Back | null) => boolean;
   /** 輸入畫面 → 回列表 */

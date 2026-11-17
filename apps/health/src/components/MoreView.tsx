@@ -4,11 +4,16 @@ import type { Nav } from '../App';
 /** 更多：體溫、偶爾量測、設定 */
 export function MoreView({ snap, nav }: { snap: HealthSnapshot; nav: Nav }) {
   const lastTemp = snap.temps[snap.temps.length - 1];
+  const lastLab = snap.labReports[snap.labReports.length - 1];
   return (
     <div className="more-list">
       <button onClick={() => nav.go('temp')}>
         <span>🌡️ 體溫</span>
         <span className="muted small">{lastTemp ? `最近 ${lastTemp.celsius} °C ›` : '›'}</span>
+      </button>
+      <button onClick={() => nav.go('lab')}>
+        <span>🧪 健檢 / 檢驗</span>
+        <span className="muted small">{lastLab ? `最近 ${lastLab.date} ›` : '›'}</span>
       </button>
       <button onClick={() => nav.go('occ')}>
         <span>📏 偶爾量測（身高、圍度）</span>

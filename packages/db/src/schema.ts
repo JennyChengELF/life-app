@@ -7,8 +7,9 @@
  * 2：喝水紀錄加「drink」、新增飲品清單（2026-11-17）
  * 3：體重表 healthWeights 改名為身體量測 healthBodyMeasurements 並加上身體組成欄位；新增偶爾量測、健康設定（2026-11-17）
  * 4：新增血壓、血糖、體溫（2026-11-17）
+ * 5：新增健檢 / 檢驗：報告、檢驗項目、檢驗結果（2026-11-17）
  */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export type ColType = 'datetime' | 'date' | 'number' | 'text' | 'bool' | 'any';
 
@@ -29,7 +30,7 @@ export interface FileDef {
 
 export const FILES: Record<FileKey, FileDef> = {
   water: { title: '生活APP-喝水', description: '喝水 APP 的資料：喝水紀錄、每日目標、常用杯子、設定' },
-  health: { title: '生活APP-健康', description: '健康 APP 的資料：身體量測（體重、體脂⋯⋯）、血壓、血糖、體溫、偶爾量測（身高、圍度⋯⋯）、設定' },
+  health: { title: '生活APP-健康', description: '健康 APP 的資料：身體量測（體重、體脂⋯⋯）、血壓、血糖、體溫、健檢 / 檢驗、偶爾量測（身高、圍度⋯⋯）、設定' },
 };
 
 export interface TableDef {
@@ -194,6 +195,55 @@ export const TABLES = {
       { name: 'celsius', type: 'number', label: '體溫 °C（必填）' },
       { name: 'note', type: 'text', label: '備註' },
       { name: 'date', type: 'date', label: '日期（APP 依 time 自動填）' },
+      { name: 'createdVia', type: 'text', label: '在哪裡輸入（health、sheet）' },
+      { name: 'personId', type: 'text', label: '是誰的資料（空白 = 我自己）' },
+      ...systemCols,
+    ],
+  },
+  healthLabReports: {
+    file: 'health',
+    description: '健檢 / 檢驗報告，一次檢驗一列；結果在 healthLabResults。建議在 APP 裡新增。',
+    columns: [
+      { name: 'date', type: 'date', label: '檢驗日期（必填）' },
+      { name: 'kind', type: 'text', label: '種類（健檢、門診檢驗、其他）' },
+      { name: 'place', type: 'text', label: '醫院 / 診所' },
+      { name: 'note', type: 'text', label: '備註' },
+      { name: 'createdVia', type: 'text', label: '在哪裡輸入（health、sheet）' },
+      { name: 'personId', type: 'text', label: '是誰的資料（空白 = 我自己）' },
+      ...systemCols,
+    ],
+  },
+  healthLabItems: {
+    file: 'health',
+    description: '檢驗項目清單（單位、預設正常範圍）。請在 APP 裡新增或修改。',
+    columns: [
+      { name: 'name', type: 'text', label: '項目名稱（例：總膽固醇）' },
+      { name: 'unit', type: 'text', label: '單位' },
+      { name: 'type', type: 'text', label: '數字 或 文字（文字 = 選項，例：尿蛋白 −、±、+）' },
+      { name: 'refLow', type: 'number', label: '預設正常範圍下限（報告沒印範圍時用）' },
+      { name: 'refHigh', type: 'number', label: '預設正常範圍上限' },
+      { name: 'redLow', type: 'number', label: '低於這個算明顯異常（紅色）' },
+      { name: 'redHigh', type: 'number', label: '高於或等於這個算明顯異常（紅色）' },
+      { name: 'options', type: 'text', label: '文字項目的選項（用逗號分開）' },
+      { name: 'warnOptions', type: 'text', label: '算「注意」的選項（黃色）' },
+      { name: 'badOptions', type: 'text', label: '算「異常」的選項（紅色）' },
+      { name: 'sort', type: 'number', label: '排序' },
+      { name: 'code', type: 'text', label: 'APP 內建項目的代號（hba1c = 糖化血色素，血糖頁會顯示；請勿修改）' },
+      ...systemCols,
+    ],
+  },
+  healthLabResults: {
+    file: 'health',
+    description: '檢驗結果，一個項目一列；reportId 對到 healthLabReports 的 id。建議在 APP 裡新增。',
+    columns: [
+      { name: 'reportId', type: 'text', label: '哪一份報告（healthLabReports 的 id，必填）' },
+      { name: 'item', type: 'text', label: '項目（填檢驗項目清單裡的名稱，必填）' },
+      { name: 'value', type: 'number', label: '數值（數字項目）' },
+      { name: 'text', type: 'text', label: '結果文字（文字項目，例：±）' },
+      { name: 'refLow', type: 'number', label: '報告上印的正常範圍下限（沒印就空白）' },
+      { name: 'refHigh', type: 'number', label: '報告上印的正常範圍上限' },
+      { name: 'date', type: 'date', label: '檢驗日期（和報告不同天才填，空白 = 報告的日期）' },
+      { name: 'note', type: 'text', label: '備註' },
       { name: 'createdVia', type: 'text', label: '在哪裡輸入（health、sheet）' },
       { name: 'personId', type: 'text', label: '是誰的資料（空白 = 我自己）' },
       ...systemCols,

@@ -8,6 +8,8 @@ const TABLE_NAME: Record<string, string> = {
   healthBloodPressure: '血壓',
   healthBloodGlucose: '血糖',
   healthTemperature: '體溫',
+  healthLabReports: '健檢報告',
+  healthLabResults: '檢驗結果',
 };
 
 export function IssuesView({ api, snap, onDone }: { api: HealthApi; snap: HealthSnapshot; onDone: () => void }) {

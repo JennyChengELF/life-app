@@ -9,4 +9,5 @@ export { GoogleAuth, AuthError, DRIVE_FILE_SCOPE } from './google-auth';
 export * from './water';
 export * from './health';
 export * from './vitals';
+export * from './lab';
 export * from './timeline';

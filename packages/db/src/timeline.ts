@@ -6,6 +6,8 @@ import type { HealthSnapshot } from './health';
 import { bodyField, bodyValue, mismatchFields } from './health';
 import type { Judge } from './vitals';
 import { judgeBp, judgeGlucose, judgeTemp } from './vitals';
+import { judgeLab } from './lab';
+import { startOfDay } from './time';
 import type { WaterSnapshot } from './water';
 import { computeGoal, drinkOf, goalWeight } from './water';
 
@@ -13,6 +15,7 @@ import { computeGoal, drinkOf, goalWeight } from './water';
 export type EntryRef =
   | { app: 'health'; kind: 'body' | 'bp' | 'glucose' | 'temp'; id: string }
   | { app: 'health'; kind: 'occ'; id: string }
+  | { app: 'health'; kind: 'lab'; id: string }
   | { app: 'water'; kind: 'water'; id: string };
 
 export interface TimelineEntry {
@@ -24,6 +27,8 @@ export interface TimelineEntry {
   /** 第二行小字 */
   extra?: string;
   judge?: Judge | null;
+  /** 整天的（例：健檢報告只有日期）：不顯示時間、排在最前面 */
+  allDay?: boolean;
   /** 數值對不起來（例：BMI） */
   warn?: boolean;
   note?: string | null;
@@ -112,6 +117,24 @@ export function healthEntries(snap: HealthSnapshot, date: string): TimelineEntry
       ref: { app: 'health', kind: 'occ', id: list[0].id },
     });
   }
+  // 健檢 / 檢驗報告：只有日期
+  for (const rep of snap.labReports) {
+    if (rep.date !== date) continue;
+    const results = snap.labResults.filter((r) => r.reportId === rep.id);
+    const judges = results.map((r) => judgeLab(r, snap.labItems.find((i) => i.name === r.item) ?? null));
+    const bad = judges.filter((j) => j && j.level !== 'ok').length;
+    out.push({
+      key: rep.id,
+      time: startOfDay(date),
+      allDay: true,
+      icon: '🧪',
+      name: rep.kind + (rep.place ? ` ${rep.place}` : ''),
+      value: `${results.length} 項`,
+      judge: bad ? { level: judges.some((j) => j?.level === 'bad') ? 'bad' : 'warn', label: `${bad} 項異常` } : results.length ? { level: 'ok', label: '都正常' } : null,
+      note: rep.note,
+      ref: { app: 'health', kind: 'lab', id: rep.id },
+    });
+  }
   return out;
 }
 
@@ -136,7 +159,7 @@ export function waterSummary(snap: WaterSnapshot, date: string): { total: number
   return { total, goal };
 }
 
-export const sortEntries = (list: TimelineEntry[]) => [...list].sort((a, b) => a.time - b.time);
+export const sortEntries = (list: TimelineEntry[]) => [...list].sort((a, b) => Number(!!b.allDay) - Number(!!a.allDay) || a.time - b.time);
 
 /**
  * 從別的頁面（例：綜合首頁）直接打開某一筆的修改畫面：網址 #edit/種類/id
@@ -145,6 +168,6 @@ export const sortEntries = (list: TimelineEntry[]) => [...list].sort((a, b) => a
 export const editHash = (ref: EntryRef) => `#edit/${ref.kind}/${ref.id}`;
 
 export function parseEditHash(hash: string): { kind: EntryRef['kind']; id: string } | null {
-  const m = /^#edit\/(body|bp|glucose|temp|occ|water)\/(.+)$/.exec(hash);
+  const m = /^#edit\/(body|bp|glucose|temp|occ|lab|water)\/(.+)$/.exec(hash);
   return m ? { kind: m[1] as EntryRef['kind'], id: decodeURIComponent(m[2]) } : null;
 }

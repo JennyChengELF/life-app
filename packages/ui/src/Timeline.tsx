@@ -39,7 +39,7 @@ export function Timeline({ entries, onPick }: { entries: TimelineEntry[]; onPick
     <ul className="timeline">
       {entries.map((e) => (
         <li key={e.key} onClick={() => onPick(e)} title="點一下修改">
-          <span className="tl-time">{toHHmm(e.time)}</span>
+          <span className="tl-time">{e.allDay ? '' : toHHmm(e.time)}</span>
           <span className="tl-icon">{e.icon}</span>
           <span className="tl-main">
             <span className="tl-name">{e.name}</span> <span className="tl-value">{e.value}</span>

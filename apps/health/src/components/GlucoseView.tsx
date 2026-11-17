@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { BloodGlucose, GlucoseTiming, HealthSnapshot } from '@life/db';
-import { GLUCOSE_TIMINGS, guessTiming, judgeGlucose } from '@life/db';
+import { GLUCOSE_TIMINGS, guessTiming, HBA1C_CODE, judgeGlucose, judgeLab } from '@life/db';
 import type { HealthApi } from '../useHealth';
 import type { Nav, VitalForm } from '../App';
 import { fmtDateTime, parseNum } from '../format';
@@ -21,6 +21,7 @@ export function GlucoseView({ api, snap, nav, form }: { api: HealthApi; snap: He
       <button className="primary big full" onClick={() => nav.vital('glucose')}>
         🍬 記一筆血糖
       </button>
+      <Hba1cCard snap={snap} nav={nav} />
       {snap.glucose.length === 0 ? (
         <p className="muted center-text">還沒有血糖紀錄</p>
       ) : (
@@ -164,5 +165,27 @@ function GlucoseForm({ api, nav, rec }: { api: HealthApi; nav: Nav; rec: BloodGl
         {timing}的標準：{STANDARD[timing]}；任何時機低於 70 偏低、低於 54 低血糖。
       </p>
     </div>
+  );
+}
+
+/** 最近一次的糖化血色素（存在健檢報告裡）；點了看那份報告 */
+function Hba1cCard({ snap, nav }: { snap: HealthSnapshot; nav: Nav }) {
+  const item = snap.labItems.find((i) => i.code === HBA1C_CODE);
+  if (!item) return null;
+  const dateOf = (r: (typeof snap.labResults)[number]) => r.date ?? snap.labReports.find((x) => x.id === r.reportId)?.date ?? '';
+  const list = snap.labResults.filter((r) => r.item === item.name && r.value != null).sort((a, b) => dateOf(a).localeCompare(dateOf(b)));
+  const last = list[list.length - 1];
+  if (!last) return null;
+  const prev = list[list.length - 2];
+  return (
+    <section className="card sum-card" onClick={() => nav.lab({ mode: 'detail', id: last.reportId }, 'glucose')}>
+      <div className="sum-head">
+        <h2>糖化血色素 HbA1c</h2>
+        <span className="muted small">{dateOf(last).replace(/-/g, '/')}</span>
+      </div>
+      <div className="big-num">
+        {last.value} <small>%{prev?.value != null && ` · 上次 ${prev.value}`}</small> <Badge judge={judgeLab(last, item)} />
+      </div>
+    </section>
   );
 }

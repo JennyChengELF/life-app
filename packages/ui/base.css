@@ -90,7 +90,7 @@ main { padding-top: 8px; }
 .row input { flex: 1; min-width: 0; }
 .row input.narrow { flex: 0 0 90px; }
 
-input[type='number'], input[type='text'], input:not([type]), input[type='datetime-local'] {
+input[type='number'], input[type='text'], input:not([type]), input[type='datetime-local'], input[type='date'], input[type='time'] {
   border: 1px solid var(--line); background: var(--bg); border-radius: 10px; padding: 9px 11px; width: 100%; min-width: 0;
 }
 input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
