@@ -36,7 +36,7 @@ export function BodyTab({ api, snap, nav }: { api: HealthApi; snap: HealthSnapsh
         )}
       </div>
 
-      <button className="primary big full" onClick={nav.newBody}>
+      <button className="primary big full" onClick={() => nav.newBody()}>
         ⚖️ 記一筆身體量測
       </button>
 

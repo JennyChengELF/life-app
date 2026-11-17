@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { todayKey } from '@life/db';
 import type { BloodGlucose, BloodPressure, BodyMeasurement, Temperature, TempKind } from '@life/db';
 import { useHealth } from './useHealth';
 import { OverviewView } from './components/OverviewView';
@@ -51,8 +52,12 @@ export function App() {
   const [editing, setEditing] = useState<BodyMeasurement | null>(null);
   /** 血壓、血糖、體溫的輸入畫面（null = 看列表） */
   const [vitalForm, setVitalForm] = useState<VitalForm | null>(() => (fromHash().form ? { rec: null } : null));
+  /** 總覽看的日期（去修改再回來時保留） */
+  const [overviewDate, setOverviewDate] = useState(todayKey);
   /** 偶爾量測畫面要先填的項目（例：BMI 不同時按「改身高」） */
   const [focusItem, setFocusItem] = useState<string | null>(null);
+  /** 輸入畫面存好 / 取消後回到哪裡（從總覽打開的回總覽；沒有就回那一種的列表） */
+  const [formBack, setFormBack] = useState<Tab | null>(null);
 
   useEffect(() => {
     const onHash = () => {
@@ -70,25 +75,33 @@ export function App() {
     if (t !== 'bodyForm') setEditing(null);
     if (t !== 'occ') setFocusItem(null);
     setVitalForm(null);
+    setFormBack(null);
     setTabState(t);
     window.scrollTo(0, 0);
   };
 
   const nav: Nav = {
-    edit: (m) => {
+    edit: (m, back = null) => {
       setTab('bodyForm');
       setEditing(m);
+      setFormBack(back);
     },
-    newBody: () => setTab('bodyForm'),
+    newBody: (back = null) => {
+      setTab('bodyForm');
+      setFormBack(back);
+    },
+    closeBody: () => setTab(formBack ?? 'body'),
     occ: (item = null) => {
       setTab('occ');
       setFocusItem(item);
     },
-    vital: (t, form = { rec: null }) => {
+    vital: (t, form = { rec: null }, back = null) => {
       setTab(t);
       setVitalForm(form);
+      setFormBack(back);
     },
     closeForm: () => {
+      if (formBack) return setTab(formBack);
       setVitalForm(null);
       window.scrollTo(0, 0);
     },
@@ -142,7 +155,7 @@ export function App() {
           </div>
         ) : api.snap ? (
           <>
-            {tab === 'overview' && <OverviewView api={api} snap={api.snap} nav={nav} />}
+            {tab === 'overview' && <OverviewView api={api} snap={api.snap} nav={nav} date={overviewDate} setDate={setOverviewDate} />}
             {tab === 'body' && <BodyTab api={api} snap={api.snap} nav={nav} />}
             {tab === 'bodyForm' && <BodyView key={editing?.id ?? 'new'} api={api} snap={api.snap} editing={editing} nav={nav} />}
             {tab === 'bp' && <BpView key={vitalKey} api={api} snap={api.snap} nav={nav} form={vitalForm} />}
@@ -188,11 +201,14 @@ export function App() {
 }
 
 export type Nav = {
-  edit: (m: BodyMeasurement) => void;
-  newBody: () => void;
+  /** back：存好 / 取消後回到哪個分頁（預設回身體） */
+  edit: (m: BodyMeasurement, back?: Tab | null) => void;
+  newBody: (back?: Tab | null) => void;
+  /** 身體量測輸入畫面 → 回去 */
+  closeBody: () => void;
   occ: (item?: string | null) => void;
   /** 打開血壓 / 血糖 / 體溫；有 form 就直接進輸入畫面 */
-  vital: (t: VitalTab, form?: VitalForm) => void;
+  vital: (t: VitalTab, form?: VitalForm, back?: Tab | null) => void;
   /** 輸入畫面 → 回列表 */
   closeForm: () => void;
   go: (t: Tab) => void;
