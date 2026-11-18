@@ -81,6 +81,7 @@ export function AccountsView({ api, snap, onEdit }: { api: MoneyApi; snap: Money
                   <div className={`acc-row ${acc.archived ? 'archived' : ''}`} onClick={() => (setAdding(null), setEditAcc(acc))} title="點一下修改">
                     <span className="acc-name">
                       {acc.name}
+                      {acc.last4 && <small>（{acc.last4}）</small>}
                       <small>{by === 'org' ? acc.type : (acc.org ?? '')}</small>
                       {acc.currency !== 'TWD' && <small>{acc.currency}</small>}
                     </span>

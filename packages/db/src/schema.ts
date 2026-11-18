@@ -12,7 +12,7 @@
  * 7：新增記帳 APP 的試算表（帳戶、分類、交易、明細）；綜合加人物、機構（2026-11-18）
  * 8：交易加分店、帳單名稱；帳戶加國外交易手續費率；機構加國外（2026-11-18）
  * 9：新增預算、預算分配；交易加快速輸入的分類、預算（2026-11-18）
- * 10：新增定存單（2026-11-18）
+ * 10：新增定存單；帳戶加卡號 / 帳號後幾碼（2026-11-18）
  */
 export const SCHEMA_VERSION = 10;
 
@@ -321,6 +321,7 @@ export const TABLES = {
       { name: 'type', type: 'text', label: '類型（現金、銀行、定存、信用卡、電子支付、儲值卡、禮券，必填）' },
       { name: 'currency', type: 'text', label: '幣別（TWD、USD、JPY⋯⋯；空白 = TWD）' },
       { name: 'org', type: 'text', label: '屬於哪個機構（填機構名稱，例：永豐銀行；現金可空白）' },
+      { name: 'last4', type: 'text', label: '卡號 / 帳號後幾碼（選填，例：5009）' },
       { name: 'openingDate', type: 'date', label: '期初餘額是哪一天的（那天結束時的餘額；空白 = 不顯示餘額）' },
       { name: 'openingBalance', type: 'number', label: '那天的餘額（信用卡填那天的未繳金額，正數 = 欠款）' },
       { name: 'closingDay', type: 'number', label: '信用卡結帳日（1–31）' },

@@ -66,6 +66,8 @@ export interface Account extends RowRef {
   type: AccountType;
   currency: string;
   org: string | null;
+  /** 卡號 / 帳號後幾碼（2026-11-18 使用者要求） */
+  last4: string | null;
   openingDate: string | null;
   openingBalance: number | null;
   closingDay: number | null;
@@ -396,6 +398,7 @@ function toAccount(r: TableRow): Account {
     type: str(v.type) as AccountType,
     currency: (str(v.currency) ?? 'TWD').toUpperCase(),
     org: str(v.org),
+    last4: str(v.last4),
     openingDate: str(v.openingDate),
     openingBalance: num(v.openingBalance),
     closingDay: num(v.closingDay),
@@ -544,6 +547,9 @@ export interface MoneyRefs {
   categories: Pick<Category, 'path' | 'kind'>[];
   people: Pick<Person, 'name'>[];
 }
+
+/** 帳戶顯示名稱：有後幾碼就加在後面（例：大戶卡（5009）） */
+export const accountLabel = (a: Pick<Account, 'name' | 'last4'>) => (a.last4 ? `${a.name}（${a.last4}）` : a.name);
 
 /** 這筆交易的幣別：有帳戶看帳戶，沒帳戶看交易自己填的（空白 = TWD） */
 export function txnCurrency(t: Pick<TxnInput, 'account' | 'currency'>, accounts: Pick<Account, 'name' | 'currency'>[]): string {
@@ -1458,7 +1464,7 @@ export class MoneyStore {
 
   // ── 帳戶 ──
 
-  async saveAccount(input: Omit<Account, 'rowNumber' | 'id' | 'sort'> & { sort?: number | null }, existing?: Account) {
+  async saveAccount(input: Omit<Account, 'rowNumber' | 'id' | 'sort' | 'last4'> & { sort?: number | null; last4?: string | null }, existing?: Account) {
     const snap = await this.fresh();
     const name = input.name.trim();
     if (!name) throw new Error('請填帳戶名稱');
@@ -1470,6 +1476,7 @@ export class MoneyStore {
       throw new Error('這個帳戶已經有紀錄，不能改幣別');
     }
     if ((input.openingDate == null) !== (input.openingBalance == null)) throw new Error('期初餘額的日期和金額要一起填（或都不填）');
+    if (input.last4 && !/^\d{1,8}$/.test(input.last4.trim())) throw new Error('後幾碼請填數字（例：5009）');
     for (const [k, label] of [
       ['closingDay', '結帳日'],
       ['dueDay', '繳款日'],
@@ -1485,6 +1492,7 @@ export class MoneyStore {
       type: input.type,
       currency: currency === 'TWD' ? null : currency,
       org,
+      last4: input.last4?.trim() || null,
       openingDate: input.openingDate,
       openingBalance: input.openingBalance == null ? null : roundMoney(input.openingBalance, currency),
       closingDay: input.type === '信用卡' ? input.closingDay : null,

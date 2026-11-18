@@ -10,6 +10,7 @@ const blankAccount = (): AccountDraft => ({
   type: '現金',
   currency: 'TWD',
   org: null,
+  last4: null,
   openingDate: null,
   openingBalance: null,
   closingDay: null,
@@ -75,6 +76,10 @@ export function AccountForm({
             <option key={o.id} value={o.name} />
           ))}
         </datalist>
+      </label>
+      <label className="field">
+        卡號 / 帳號後幾碼（選填）
+        <input inputMode="numeric" maxLength={8} value={d.last4 ?? ''} onChange={(e) => set({ last4: e.target.value.replace(/\D/g, '') || null })} placeholder="例：5009" />
       </label>
       <div className="row">
         <label className="field" style={{ flex: 1 }}>

@@ -1,4 +1,5 @@
 import type { Account, MoneySnapshot, Person } from '@life/db';
+import { accountLabel } from '@life/db';
 
 export function addMonths(month: string, n: number): string {
   const [y, m] = month.split('-').map(Number);
@@ -68,8 +69,8 @@ export function AccountSelect({
         <optgroup key={g} label={g}>
           {accs.map((a) => (
             <option key={a.id} value={a.name}>
-              {a.name}
-              {a.currency !== 'TWD' ? `（${a.currency}）` : ''}
+              {accountLabel(a)}
+              {a.currency !== 'TWD' ? ` ${a.currency}` : ''}
             </option>
           ))}
         </optgroup>

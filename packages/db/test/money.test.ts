@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { Account, EntryForm, MoneySnapshot, Txn } from '../src';
 import {
   accountBalance,
+  accountLabel,
   categoryBreakdown,
   moneyDayTotals,
   moneyEntries,
@@ -201,6 +202,7 @@ describe('計算', () => {
     type: '信用卡',
     currency: 'TWD',
     org: '永豐銀行',
+    last4: '5009',
     openingDate: '2026-11-01',
     openingBalance: 2000,
     closingDay: 25,
@@ -554,5 +556,18 @@ describe('分期', () => {
     expect(list[0]).toMatchObject({ direction: '出', amount: 5257, note: '1/6 期：員旅', store: '東南旅行社' });
     expect(list.every((t) => checkTxn(t, refs).length === 0)).toBe(true);
     expect(() => installmentTxns(tx, 1, refs.accounts)).toThrow('2–60');
+  });
+});
+
+describe('帳戶後幾碼', () => {
+  it('存、顯示；只能填數字', async () => {
+    const store = new MoneyStore(new LocalBackend(memoryStorage()));
+    await store.load();
+    const acc = { type: '信用卡' as const, currency: 'TWD', org: '永豐銀行', openingDate: null, openingBalance: null, closingDay: null, dueDay: null, fxFeeRate: null, expiryDate: null, monthlyCheck: true, archived: false, note: null };
+    await store.saveAccount({ ...acc, name: '大戶卡', last4: '5009' });
+    const snap = await store.load();
+    expect(snap.accounts[0].last4).toBe('5009');
+    expect(accountLabel(snap.accounts[0])).toBe('大戶卡（5009）');
+    await expect(store.saveAccount({ ...acc, name: 'X', last4: '50a9' })).rejects.toThrow('數字');
   });
 });
