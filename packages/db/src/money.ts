@@ -1169,6 +1169,11 @@ export class MoneyStore {
       usedTx.add(id);
       const lines = (linesByTx.get(id) ?? []).map((x) => x.line).sort(bySort);
       const t = toTxn(r, lines);
+      // 試算表直接填負數 = 退款（2026-11-18 使用者要求）：出 −3065 就是入 3065
+      if ((t.direction === '出' || t.direction === '入') && t.amount != null && t.amount < 0) {
+        t.direction = t.direction === '出' ? '入' : '出';
+        t.amount = -t.amount;
+      }
       const dir = str(r.values.direction);
       const p = dir && !has(DIRECTIONS, dir) ? [`direction「${dir}」看不懂（請填：出、入、轉帳）`] : checkTxn(t, refs);
       if (p.length) {

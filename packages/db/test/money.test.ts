@@ -482,3 +482,19 @@ describe('退款不出現「大於 0」', () => {
     expect(empty).not.toContain('大於 0');
   });
 });
+
+describe('試算表直接填負數', () => {
+  it('出 −3065 = 退款（入 3065），明細的支出也是負的', async () => {
+    const backend = new LocalBackend(memoryStorage());
+    const store = new MoneyStore(backend);
+    await store.load();
+    const acc = { type: '信用卡' as const, currency: 'TWD', org: null, openingDate: null, openingBalance: null, closingDay: null, dueDay: null, fxFeeRate: null, expiryDate: null, monthlyCheck: true, archived: false, note: null };
+    await store.saveAccount({ ...acc, name: 'cube信用卡' });
+    await backend.appendRaw('moneyTransactions', { time: at('2026-11-17 17:03'), direction: '出', account: 'cube信用卡', amount: -3065, store: 'Google', id: 'G1' });
+    await backend.appendRaw('moneyLines', { transaction: 'G1', kind: '支出', amount: -3065, category: '樂 / 娛樂', id: 'GL1' });
+    const snap = await store.load();
+    expect(snap.issues).toEqual([]);
+    expect(snap.txns[0]).toMatchObject({ direction: '入', amount: 3065 });
+    expect(txnToForm(snap.txns[0])).toMatchObject({ mode: '支出', cats: [{ amount: -3065 }] });
+  });
+});
