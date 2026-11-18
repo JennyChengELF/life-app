@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import type { Account, MoneySnapshot } from '@life/db';
+import type { MoneyApi } from '../useMoney';
+import { AccountForm } from './SettingsView';
 import { accountBalance, emptyForm, fmtMoney, personBalances } from '@life/db';
 import type { Editing } from '../App';
 
@@ -17,7 +19,9 @@ function totals(list: { acc: Account; bal: number | null }[]) {
   return [...m].map(([c, n]) => fmtMoney(n, c)).join(' ／ ');
 }
 
-export function AccountsView({ snap, onEdit, goSettings }: { snap: MoneySnapshot; onEdit: (e: Editing) => void; goSettings: () => void }) {
+/** 帳戶（2026-11-18 使用者要求：在這一頁直接新增、修改） */
+export function AccountsView({ api, snap, onEdit }: { api: MoneyApi; snap: MoneySnapshot; onEdit: (e: Editing) => void }) {
+  const [editAcc, setEditAcc] = useState<Account | 'new' | null>(null);
   const [by, setBy] = useState<'org' | 'type'>('org');
   const [showArchived, setShowArchived] = useState(false);
   const rows = snap.accounts
@@ -44,26 +48,27 @@ export function AccountsView({ snap, onEdit, goSettings }: { snap: MoneySnapshot
             </button>
           </div>
         </div>
-        {!snap.accounts.length && (
-          <p className="muted">
-            還沒有帳戶。<button className="link" onClick={goSettings}>到設定新增帳戶</button>
-          </p>
-        )}
+        {!snap.accounts.length && editAcc !== 'new' && <p className="muted">還沒有帳戶，按下面的「＋ 新增帳戶」。</p>}
         {[...groups].map(([g, list]) => (
           <div className="grp" key={g}>
             <div className="grp-head">
               <span>{g}</span>
               <span className="grp-total">{list.length > 1 ? totals(list) : ''}</span>
             </div>
-            {list.map(({ acc, bal }) => (
-              <div key={acc.id} className={`acc-row ${acc.archived ? 'archived' : ''}`} onClick={goSettings} title="到設定修改">
-                <span className="acc-name">
-                  {acc.name}
-                  <small>{by === 'org' ? acc.type : (acc.org ?? '')}</small>
-                </span>
-                <BalanceText acc={acc} bal={bal} />
-              </div>
-            ))}
+            {list.map(({ acc, bal }) =>
+              editAcc !== 'new' && editAcc?.id === acc.id ? (
+                <AccountForm key={acc.id} api={api} snap={snap} acc={acc} onDone={() => setEditAcc(null)} />
+              ) : (
+                <div key={acc.id} className={`acc-row ${acc.archived ? 'archived' : ''}`} onClick={() => setEditAcc(acc)} title="點一下修改">
+                  <span className="acc-name">
+                    {acc.name}
+                    <small>{by === 'org' ? acc.type : (acc.org ?? '')}</small>
+                    {acc.currency !== 'TWD' && <small>{acc.currency}</small>}
+                  </span>
+                  <BalanceText acc={acc} bal={bal} />
+                </div>
+              ),
+            )}
           </div>
         ))}
         {snap.accounts.some((a) => a.archived) && (
@@ -71,6 +76,16 @@ export function AccountsView({ snap, onEdit, goSettings }: { snap: MoneySnapshot
             <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
             顯示停用的帳戶
           </label>
+        )}
+        {editAcc === 'new' ? (
+          <AccountForm api={api} snap={snap} onDone={() => setEditAcc(null)} />
+        ) : (
+          <div className="editor-actions">
+            <button className="primary" onClick={() => setEditAcc('new')}>
+              ＋ 新增帳戶
+            </button>
+            <span className="hint">點帳戶可以修改</span>
+          </div>
         )}
       </section>
 

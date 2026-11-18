@@ -21,7 +21,7 @@ const blankAccount = (): AccountDraft => ({
   note: null,
 });
 
-function AccountForm({ api, snap, acc, onDone }: { api: MoneyApi; snap: MoneySnapshot; acc?: Account; onDone: () => void }) {
+export function AccountForm({ api, snap, acc, onDone }: { api: MoneyApi; snap: MoneySnapshot; acc?: Account; onDone: () => void }) {
   const [d, setD] = useState<AccountDraft>(() => (acc ? { ...acc } : blankAccount()));
   const [bal, setBal] = useState(amountText(acc?.openingBalance));
   const set = (p: Partial<AccountDraft>) => setD((x) => ({ ...x, ...p }));
@@ -154,52 +154,11 @@ function MoneySettingsCard({ api, snap }: { api: MoneyApi; snap: MoneySnapshot }
   );
 }
 
-export function SettingsView({ api, snap, openCategories, openBudgets }: { api: MoneyApi; snap: MoneySnapshot; openCategories: () => void; openBudgets: () => void }) {
-  const [editAcc, setEditAcc] = useState<Account | 'new' | null>(null);
+export function SettingsView({ api, snap, openBudgets }: { api: MoneyApi; snap: MoneySnapshot; openBudgets: () => void }) {
   const url = api.fileUrl();
   return (
     <div className="settings">
-      <section className="card">
-        <h2>帳戶</h2>
-        {snap.accounts.map((a) =>
-          editAcc !== 'new' && editAcc?.id === a.id ? (
-            <AccountForm key={a.id} api={api} snap={snap} acc={a} onDone={() => setEditAcc(null)} />
-          ) : (
-            <div className={`list-row ${a.archived ? 'archived' : ''}`} key={a.id}>
-              <span className="grow">
-                {a.name}{' '}
-                <span className="muted small">
-                  {a.type}
-                  {a.currency !== 'TWD' ? `・${a.currency}` : ''}
-                  {a.org ? `・${a.org}` : ''}
-                  {a.archived ? '・停用' : ''}
-                </span>
-              </span>
-              <button onClick={() => setEditAcc(a)}>修改</button>
-            </div>
-          ),
-        )}
-        {editAcc === 'new' ? (
-          <AccountForm api={api} snap={snap} onDone={() => setEditAcc(null)} />
-        ) : (
-          <div className="editor-actions">
-            <button className="primary" onClick={() => setEditAcc('new')}>
-              ＋ 新增帳戶
-            </button>
-          </div>
-        )}
-      </section>
-
-      <section className="card">
-        <h2>分類</h2>
-        <p className="muted small">
-          支出 {snap.categories.filter((c) => c.kind === '支出').length} 個、收入 {snap.categories.filter((c) => c.kind === '收入').length} 個
-        </p>
-        <button className="primary" onClick={openCategories}>
-          分類管理 ›
-        </button>
-      </section>
-
+      <p className="hint">帳戶在「🏦 帳戶」、分類在「🏷️ 分類」分頁直接修改。</p>
       <section className="card">
         <h2>預算</h2>
         <p className="muted small">{snap.budgets.length} 個預算</p>

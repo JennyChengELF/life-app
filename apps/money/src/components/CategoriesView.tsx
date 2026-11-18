@@ -6,7 +6,7 @@ import type { MoneyApi } from '../useMoney';
 /**
  * 分類管理（2026-11-18 確認：獨立頁面、樹狀）。新增只填這一層的名字；改名只改這一層，底下跟著改。
  */
-export function CategoriesView({ api, snap, onBack }: { api: MoneyApi; snap: MoneySnapshot; onBack: () => void }) {
+export function CategoriesView({ api, snap }: { api: MoneyApi; snap: MoneySnapshot }) {
   const [kind, setKind] = useState<CategoryKind>('支出');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [menu, setMenu] = useState<string | null>(null);
@@ -102,10 +102,7 @@ export function CategoriesView({ api, snap, onBack }: { api: MoneyApi; snap: Mon
   return (
     <section className="card">
       <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
-        <button className="link" onClick={onBack}>
-          ‹ 設定
-        </button>
-        <h2 style={{ margin: 0 }}>分類管理</h2>
+        <h2 style={{ margin: 0 }}>分類</h2>
         <div className="seg">
           {(['支出', '收入'] as const).map((k) => (
             <button key={k} className={kind === k ? 'active' : ''} onClick={() => setKind(k)}>

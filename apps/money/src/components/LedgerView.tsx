@@ -132,7 +132,7 @@ export function LedgerView({
           <button onClick={() => newEntry('轉帳')}>轉帳</button>
         </div>
       )}
-      {!snap.accounts.length && <p className="hint warn">還沒有帳戶：請先到「⚙️ 設定」新增帳戶（例：台幣現金、信用卡）。</p>}
+      {!snap.accounts.length && <p className="hint warn">還沒有帳戶：請先到「🏦 帳戶」新增帳戶（例：台幣現金、信用卡）。</p>}
 
       <section className="card">
         <div className="ledger-head">

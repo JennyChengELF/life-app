@@ -151,7 +151,7 @@ export function StatsView({ snap, initialMonth }: { snap: MoneySnapshot; initial
         </div>
       ))}
       <p className="hint">點有 ▶ 的分類可以展開，子分類的 % 是佔上一層的比例。</p>
-      {!hasInvest && <p className="hint">在「分類管理」把投資相關的分類設成「投資類」，這裡就會另外顯示實際收支。</p>}
+      {!hasInvest && <p className="hint">在「🏷️ 分類」把投資相關的分類設成「投資類」，這裡就會另外顯示實際收支。</p>}
     </section>
   );
 }
