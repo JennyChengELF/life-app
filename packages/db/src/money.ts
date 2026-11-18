@@ -542,7 +542,9 @@ export function checkTxn(t: Omit<TxnInput, 'tags'> & { tags?: string[] }, refs: 
   if (t.direction) {
     if (!t.account) p.push('沒有填帳戶');
     else if (!accName(t.account)) p.push(`帳戶「${t.account}」不在帳戶清單裡`);
-    if (t.amount == null || !(t.amount > 0)) p.push('金額請填大於 0 的數字');
+    // 退款用負數記（2026-11-18）：支出 / 收入的交易金額已經轉成正數，這裡只會是沒填、0、或借還款轉帳填了負數
+    if (t.amount == null || Number.isNaN(t.amount) || t.amount === 0) p.push('請填金額');
+    else if (t.amount < 0) p.push('轉帳、借款、還款的金額請填正數');
     else if (!intOk(t.amount)) p.push(`${cur} 金額請填整數`);
     if (t.paidBy) p.push('朋友先幫我付（paidBy）時不能有帳戶和出 / 入');
   } else {
@@ -576,7 +578,7 @@ export function checkTxn(t: Omit<TxnInput, 'tags'> & { tags?: string[] }, refs: 
     }
     // 支出、收入可以是負數（退款、折扣，2026-11-18 使用者決定）；其他明細一律正數
     const signed = l.kind === '支出' || l.kind === '收入';
-    if (!Number.isFinite(l.amount) || (signed ? l.amount === 0 : !(l.amount > 0))) p.push(`${at}金額請填${signed ? '不是 0 的數字（負數 = 退款、折扣）' : '大於 0 的數字'}`);
+    if (!Number.isFinite(l.amount) || (signed ? l.amount === 0 : !(l.amount > 0))) p.push(`${at}${signed ? '請填金額（負數 = 退款、折扣）' : '分帳、借款、還款的金額請填正數'}`);
     else if (!intOk(l.amount)) p.push(`${at}${cur} 金額請填整數`);
     if (l.kind === '支出' || l.kind === '收入') {
       const c = l.category ? refs.categories.find((x) => x.path === normPath(l.category!)) : null;
@@ -837,7 +839,8 @@ export function formToTxn(f: EntryForm): TxnInput {
           amount: null,
           paidBy: f.paidBy,
           currency: f.currency,
-          lines: [...mine, { kind: '我欠他', amount: sum(mine.map((l) => l.amount)), person: f.paidBy, debtType: '分帳' }],
+          // 朋友先付的退款（我的部分是負的）→ 變成他欠我
+          lines: [...mine, { kind: sum(mine.map((l) => l.amount)) < 0 ? '他欠我' : '我欠他', amount: Math.abs(sum(mine.map((l) => l.amount))), person: f.paidBy, debtType: '分帳' }],
         };
       }
       const shares: LineInput[] = f.shares.filter((s) => s.person || s.amount).map((s) => ({ kind: '他欠我', amount: s.amount ?? 0, person: s.person, debtType: '分帳' }));

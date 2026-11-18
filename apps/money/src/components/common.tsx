@@ -27,7 +27,14 @@ export function MonthNav({ month, setMonth }: { month: string; setMonth: (m: str
 
 /** 輸入框的文字 → 數字（空白 = null；可以有逗號） */
 export function parseAmount(s: string): number | null {
-  const t = s.replace(/,/g, '').trim();
+  // 全形數字、各種負號（−、－）也看得懂
+  const t = s
+    .replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+    .replace(/[−－﹣‐]/g, '-')
+    .replace(/[．。]/g, '.')
+    .replace(/[,，\s]/g, '')
+    .trim();
+  if (t === '-') return null;
   if (!t) return null;
   const n = Number(t);
   return Number.isFinite(n) ? n : NaN;
