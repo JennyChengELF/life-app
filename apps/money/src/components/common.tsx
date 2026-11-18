@@ -1,4 +1,4 @@
-import type { Account, Category, MoneySnapshot, Person } from '@life/db';
+import type { Account, MoneySnapshot, Person } from '@life/db';
 
 export function addMonths(month: string, n: number): string {
   const [y, m] = month.split('-').map(Number);
@@ -72,29 +72,6 @@ export function AccountSelect({
   );
 }
 
-export function CategorySelect({
-  categories,
-  kind,
-  value,
-  onChange,
-}: {
-  categories: Category[];
-  kind: '支出' | '收入';
-  value: string | null;
-  onChange: (v: string | null) => void;
-}) {
-  const list = categories.filter((c) => c.kind === kind && (!c.archived || c.path === value));
-  return (
-    <select value={value ?? ''} onChange={(e) => onChange(e.target.value || null)}>
-      <option value="">選擇分類</option>
-      {list.map((c) => (
-        <option key={c.id} value={c.path}>
-          {c.path}
-        </option>
-      ))}
-    </select>
-  );
-}
 
 const NEW_PERSON = '\u0000new';
 

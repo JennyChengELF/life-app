@@ -27,17 +27,23 @@ export const PERSON_KINDS: LineKind[] = ['他欠我', '我欠他', '他還我', 
 
 /** 💡 第一次使用時放的預設分類（之後可匯入舊試算表的分類、自己改） */
 export const DEFAULT_CATEGORIES: { path: string; kind: CategoryKind }[] = [
+  { path: '食', kind: '支出' },
   { path: '食 / 三餐', kind: '支出' },
   { path: '食 / 飲料點心', kind: '支出' },
   { path: '食 / 食材', kind: '支出' },
   { path: '衣', kind: '支出' },
+  { path: '住', kind: '支出' },
   { path: '住 / 日用品', kind: '支出' },
   { path: '住 / 水電瓦斯', kind: '支出' },
+  { path: '行', kind: '支出' },
   { path: '行 / 大眾交通', kind: '支出' },
   { path: '行 / 計程車', kind: '支出' },
+  { path: '育', kind: '支出' },
   { path: '育 / 學習', kind: '支出' },
+  { path: '樂', kind: '支出' },
   { path: '樂 / 娛樂', kind: '支出' },
   { path: '醫療', kind: '支出' },
+  { path: '人情', kind: '支出' },
   { path: '人情 / 送禮', kind: '支出' },
   { path: '其他支出', kind: '支出' },
   { path: '薪資', kind: '收入' },
@@ -208,6 +214,64 @@ export function normPath(s: string): string {
     .join(' / ');
 }
 export const topCategory = (path: string) => path.split(' / ')[0];
+
+/**
+ * 分類最多幾層（2026-11-18 確認三層）。程式都照「任意層數」寫，要第四層只要改這個數字。
+ */
+export const MAX_CATEGORY_DEPTH = 3;
+export const pathDepth = (path: string) => path.split(' / ').length;
+/** 上一層（主分類 → null） */
+export const parentPath = (path: string): string | null => {
+  const i = path.lastIndexOf(' / ');
+  return i < 0 ? null : path.slice(0, i);
+};
+export const lastName = (path: string) => path.split(' / ').pop()!;
+/** 「食 / 三餐 / 早餐」→ [食, 食 / 三餐] */
+export function ancestorPaths(path: string): string[] {
+  const parts = path.split(' / ');
+  return parts.slice(0, -1).map((_, i) => parts.slice(0, i + 1).join(' / '));
+}
+
+export function checkCategoryName(name: string): string {
+  const n = name.trim();
+  if (!n) throw new Error('請填分類名稱');
+  if (n.includes('/')) throw new Error('分類名稱不能有「/」（要加下一層請用「＋子分類」）');
+  return n;
+}
+
+export interface CategoryNode {
+  cat: Category;
+  name: string;
+  depth: number;
+  children: CategoryNode[];
+  /** 自己或上層停用 */
+  hidden: boolean;
+}
+
+/** 依支出 / 收入排成樹（同一層照排序） */
+export function categoryTree(categories: Category[], kind: CategoryKind): CategoryNode[] {
+  const list = categories.filter((c) => c.kind === kind).sort(bySort);
+  const build = (parent: string | null, parentHidden: boolean): CategoryNode[] =>
+    list
+      .filter((c) => parentPath(c.path) === parent)
+      .map((c) => {
+        const hidden = parentHidden || c.archived;
+        return { cat: c, name: lastName(c.path), depth: pathDepth(c.path), hidden, children: build(c.path, hidden) };
+      });
+  return build(null, false);
+}
+
+/** 最近用過的分類（新 → 舊，不重複） */
+export function recentCategories(txns: Txn[], kind: CategoryKind, n = 5): string[] {
+  const out: string[] = [];
+  for (const t of txns) {
+    for (const l of t.lines) {
+      if (l.kind === kind && l.category && !out.includes(l.category)) out.push(l.category);
+      if (out.length >= n) return out;
+    }
+  }
+  return out;
+}
 
 export function splitTags(v: unknown): string[] {
   const s = str(v);
@@ -860,6 +924,22 @@ export class MoneyStore {
       return this.loadNow(now);
     }
 
+    // 只有「食 / 三餐」沒有「食」（試算表直接新增、或舊版預設分類）→ 補上上層分類
+    const have = new Set(categories.map((c) => c.path));
+    const missing: RowValues[] = [];
+    for (const c of categories) {
+      for (const a of ancestorPaths(c.path)) {
+        if (have.has(a)) continue;
+        have.add(a);
+        // 排在第一個子分類的位置（分類已依排序排好）
+        missing.push({ path: a, kind: c.kind, sort: (c.sort ?? 0) - 0.5, id: newId(now), createdAt: now, updatedAt: now });
+      }
+    }
+    if (missing.length) {
+      await this.b.append('moneyCategories', missing);
+      return this.loadNow(now);
+    }
+
     const snap: MoneySnapshot = { loadedAt: now, accounts, categories, people, orgs, txns, issues };
     this.last = snap;
     return snap;
@@ -1026,15 +1106,50 @@ export class MoneyStore {
 
   // ── 分類 ──
 
-  async addCategory(path: string, kind: CategoryKind) {
+  /**
+   * 新增分類：在某個分類底下（parent）或新增主分類（parent = null），只填這一層的名字。
+   * 回傳完整路徑（例：食 / 三餐 / 早餐）。子分類的支出 / 收入跟著上層。
+   */
+  async addCategory(parent: string | null, name: string, kind: CategoryKind): Promise<string> {
     const snap = await this.fresh();
-    const p = normPath(path);
-    if (!p) throw new Error('請填分類名稱');
-    if (p.split(' / ').length > 3) throw new Error('分類最多三層');
+    const n = checkCategoryName(name);
+    const up = parent ? snap.categories.find((c) => c.path === normPath(parent)) : null;
+    if (parent && !up) throw new Error(`找不到上層分類「${parent}」`);
+    const p = up ? `${up.path} / ${n}` : n;
+    if (pathDepth(p) > MAX_CATEGORY_DEPTH) throw new Error(`分類最多 ${MAX_CATEGORY_DEPTH} 層`);
     if (snap.categories.some((c) => c.path === p)) throw new Error(`已經有「${p}」`);
     const now = Date.now();
     const sort = Math.max(0, ...snap.categories.map((c) => c.sort ?? 0)) + 1;
-    await this.b.append('moneyCategories', [{ path: p, kind, sort, id: newId(now), createdAt: now, updatedAt: now }]);
+    await this.b.append('moneyCategories', [{ path: p, kind: up?.kind ?? kind, sort, id: newId(now), createdAt: now, updatedAt: now }]);
+    return p;
+  }
+
+  /** 改名：只改這一層的名字，底下的分類和用到的明細一起改 */
+  async renameCategory(c: Category, name: string) {
+    const n = checkCategoryName(name);
+    const parts = c.path.split(' / ');
+    parts[parts.length - 1] = n;
+    await this.updateCategory(c, { path: parts.join(' / ') });
+  }
+
+  /** 在同一層裡上移（-1）/ 下移（+1）：和旁邊的分類交換排序 */
+  async moveCategory(c: Category, delta: -1 | 1) {
+    const snap = await this.fresh();
+    const siblings = snap.categories.filter((x) => x.kind === c.kind && parentPath(x.path) === parentPath(c.path));
+    const i = siblings.findIndex((x) => x.id === c.id);
+    const other = siblings[i + delta];
+    if (i < 0 || !other) return;
+    // 排序可能有空白或重複 → 整層重新編號後交換
+    const base = Math.min(...siblings.map((x) => x.sort ?? Infinity).filter(Number.isFinite), 1);
+    const order = siblings.map((x) => x.id);
+    [order[i], order[i + delta]] = [order[i + delta], order[i]];
+    const now = Date.now();
+    const us: RowUpdate[] = [];
+    order.forEach((id, k) => {
+      const x = siblings.find((s) => s.id === id)!;
+      if (x.sort !== base + k) us.push({ rowNumber: x.rowNumber, values: { sort: base + k, updatedAt: now }, expectId: x.id });
+    });
+    if (us.length) await this.b.update('moneyCategories', us);
   }
 
   /**
@@ -1045,7 +1160,7 @@ export class MoneyStore {
     const now = Date.now();
     const to = patch.path != null ? normPath(patch.path) : c.path;
     if (!to) throw new Error('請填分類名稱');
-    if (to.split(' / ').length > 3) throw new Error('分類最多三層');
+    if (pathDepth(to) > MAX_CATEGORY_DEPTH) throw new Error(`分類最多 ${MAX_CATEGORY_DEPTH} 層`);
     const us: RowUpdate[] = [];
     const v: RowValues = { updatedAt: now };
     if (patch.isInvest !== undefined) v.isInvest = patch.isInvest || null;

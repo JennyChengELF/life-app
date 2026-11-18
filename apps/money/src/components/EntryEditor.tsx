@@ -15,7 +15,8 @@ import {
 } from '@life/db';
 import type { Editing } from '../App';
 import type { MoneyApi } from '../useMoney';
-import { AccountSelect, amountText, CategorySelect, parseAmount, PersonSelect } from './common';
+import { AccountSelect, amountText, parseAmount, PersonSelect } from './common';
+import { CategoryPicker } from './CategoryPicker';
 
 /** 金額輸入：自己記住打到一半的文字（例：「12.」） */
 function AmountInput({ value, onChange, placeholder = '金額' }: { value: number | null; onChange: (n: number | null) => void; placeholder?: string }) {
@@ -90,19 +91,22 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
       {f.shares.length || paidByMode ? '我的部分' : '分類'}
       <div className="split-rows">
         {f.cats.map((c, i) => (
-          <div className="row" key={i}>
-            <CategorySelect
-              categories={snap.categories}
+          <div className="cat-line" key={i}>
+            <div className="row">
+              <AmountInput value={c.amount} onChange={(n) => set({ cats: f.cats.map((x, j) => (j === i ? { ...x, amount: n } : x)) })} />
+              {f.cats.length > 1 && (
+                <button className="x-btn" onClick={() => set({ cats: f.cats.filter((_, j) => j !== i) })} aria-label="移除">
+                  ✕
+                </button>
+              )}
+            </div>
+            <CategoryPicker
+              api={api}
+              snap={snap}
               kind={kind}
               value={c.category}
               onChange={(v) => set({ cats: f.cats.map((x, j) => (j === i ? { ...x, category: v } : x)) })}
             />
-            <AmountInput value={c.amount} onChange={(n) => set({ cats: f.cats.map((x, j) => (j === i ? { ...x, amount: n } : x)) })} />
-            {f.cats.length > 1 && (
-              <button className="x-btn" onClick={() => set({ cats: f.cats.filter((_, j) => j !== i) })} aria-label="移除">
-                ✕
-              </button>
-            )}
           </div>
         ))}
       </div>
@@ -354,8 +358,9 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
                 <>
                   <label className="field">
                     {f.sub === '我還他' ? '算成哪一種收入' : '算成哪一種支出'}
-                    <CategorySelect
-                      categories={snap.categories}
+                    <CategoryPicker
+                      api={api}
+                      snap={snap}
                       kind={f.sub === '我還他' ? '收入' : '支出'}
                       value={f.cats[0]?.category ?? null}
                       onChange={(v) => set({ cats: [{ category: v, amount: null }] })}

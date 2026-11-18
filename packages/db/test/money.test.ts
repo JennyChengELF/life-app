@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { Account, EntryForm, MoneySnapshot, Txn } from '../src';
 import {
   accountBalance,
+  categoryTree,
   checkTxn,
+  MAX_CATEGORY_DEPTH,
+  recentCategories,
   DEFAULT_CATEGORIES,
   emptyForm,
   fmtMoney,
@@ -247,6 +250,30 @@ describe('MoneyStore', () => {
     const rows = await backend.read('moneyCategories');
     for (const r of rows) await backend.update('moneyCategories', [{ rowNumber: r.rowNumber, values: { deletedAt: 1 } }]);
     expect((await store.load()).categories).toHaveLength(0);
+  });
+
+  it('分類：只填這一層的名字、樹狀、改名只改這一層、上下移、缺上層自動補', async () => {
+    expect(categoryTree(snap.categories, '支出').map((n) => n.name).slice(0, 3)).toEqual(['食', '衣', '住']);
+    const p = await store.addCategory('食 / 三餐', '早餐', '收入');
+    expect(p).toBe('食 / 三餐 / 早餐');
+    snap = await store.load();
+    expect(snap.categories.find((c) => c.path === p)?.kind).toBe('支出'); // 跟著上層
+    await expect(store.addCategory(p, '蛋餅', '支出')).rejects.toThrow(`最多 ${MAX_CATEGORY_DEPTH} 層`);
+    await expect(store.addCategory(null, '食 / 宵夜', '支出')).rejects.toThrow('不能有「/」');
+
+    await store.renameCategory(snap.categories.find((c) => c.path === '食 / 三餐')!, '正餐');
+    snap = await store.load();
+    expect(snap.categories.some((c) => c.path === '食 / 正餐 / 早餐')).toBe(true);
+
+    const food = categoryTree(snap.categories, '支出')[0];
+    await store.moveCategory(food.children[0].cat, 1);
+    snap = await store.load();
+    expect(categoryTree(snap.categories, '支出')[0].children.map((n) => n.name)).toEqual(['飲料點心', '正餐', '食材']);
+
+    await backend.appendRaw('moneyCategories', { path: '交通 / 高鐵', kind: '支出' });
+    snap = await store.load();
+    expect(snap.categories.find((c) => c.path === '交通')?.kind).toBe('支出');
+    expect(recentCategories(snap.txns, '支出')).toEqual([]);
   });
 
   it('新增帳戶（自動建立機構）、記一筆、修改（明細少一筆會標記刪除）、刪除', async () => {

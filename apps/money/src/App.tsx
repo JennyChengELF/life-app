@@ -8,11 +8,12 @@ import { StatsView } from './components/StatsView';
 import { AccountsView } from './components/AccountsView';
 import { SettingsView } from './components/SettingsView';
 import { IssuesView } from './components/IssuesView';
+import { CategoriesView } from './components/CategoriesView';
 
 /** 綜合首頁：上線時在上一層路徑；開發時是另一個 port */
 const HOME_URL = import.meta.env.DEV ? `http://${location.hostname}:5172/` : '../';
 
-export type Tab = 'ledger' | 'stats' | 'accounts' | 'settings' | 'issues';
+export type Tab = 'ledger' | 'stats' | 'accounts' | 'settings' | 'categories' | 'issues';
 
 const TABS: { key: Tab; icon: string; label: string }[] = [
   { key: 'ledger', icon: '📒', label: '記帳' },
@@ -61,7 +62,7 @@ export function App() {
         <h1>💰 記帳</h1>
         <nav className="tabs-top">
           {TABS.map((t) => (
-            <button key={t.key} className={tab === t.key ? 'active' : ''} onClick={() => setTab(t.key)}>
+            <button key={t.key} className={tab === t.key || (tab === 'categories' && t.key === 'settings') ? 'active' : ''} onClick={() => setTab(t.key)}>
               {t.icon} {t.label}
             </button>
           ))}
@@ -119,7 +120,8 @@ export function App() {
             )}
             {tab === 'stats' && <StatsView snap={api.snap} month={month} setMonth={setMonth} />}
             {tab === 'accounts' && <AccountsView snap={api.snap} onEdit={edit} goSettings={() => setTab('settings')} />}
-            {tab === 'settings' && <SettingsView api={api} snap={api.snap} />}
+            {tab === 'settings' && <SettingsView api={api} snap={api.snap} openCategories={() => setTab('categories')} />}
+            {tab === 'categories' && <CategoriesView api={api} snap={api.snap} onBack={() => setTab('settings')} />}
             {tab === 'issues' && <IssuesView api={api} snap={api.snap} onDone={() => setTab('ledger')} />}
           </>
         ) : null}

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { Account, AccountType, Category, MoneySnapshot } from '@life/db';
+import type { Account, AccountType, MoneySnapshot } from '@life/db';
 import { ACCOUNT_TYPES } from '@life/db';
 import type { MoneyApi } from '../useMoney';
 import { amountText, parseAmount } from './common';
@@ -115,34 +115,9 @@ function AccountForm({ api, snap, acc, onDone }: { api: MoneyApi; snap: MoneySna
   );
 }
 
-function CategoryRow({ api, c }: { api: MoneyApi; c: Category }) {
-  return (
-    <div className={`list-row ${c.archived ? 'archived' : ''}`}>
-      <span className="grow">
-        {c.path} {c.isInvest && <span className="tag">投資類</span>} {c.archived && <span className="muted small">（停用）</span>}
-      </span>
-      <button
-        onClick={() => {
-          const p = prompt('新的名稱（三層用「 / 」分開；底下的分類會一起改）', c.path);
-          if (p && p.trim() !== c.path) api.run((s) => s.updateCategory(c, { path: p }));
-        }}
-      >
-        改名
-      </button>
-      <button onClick={() => api.run((s) => s.updateCategory(c, { isInvest: !c.isInvest }))}>{c.isInvest ? '取消投資類' : '設成投資類'}</button>
-      <button onClick={() => api.run((s) => s.updateCategory(c, { archived: !c.archived }))}>{c.archived ? '恢復' : '停用'}</button>
-    </div>
-  );
-}
-
-export function SettingsView({ api, snap }: { api: MoneyApi; snap: MoneySnapshot }) {
+export function SettingsView({ api, snap, openCategories }: { api: MoneyApi; snap: MoneySnapshot; openCategories: () => void }) {
   const [editAcc, setEditAcc] = useState<Account | 'new' | null>(null);
   const url = api.fileUrl();
-  const addCat = (kind: '支出' | '收入') => {
-    const p = prompt(`新增${kind}分類（三層用「 / 」分開，例：食 / 三餐 / 早餐）`);
-    if (p?.trim()) api.run((s) => s.addCategory(p, kind));
-  };
-
   return (
     <div className="settings">
       <section className="card">
@@ -178,22 +153,12 @@ export function SettingsView({ api, snap }: { api: MoneyApi; snap: MoneySnapshot
 
       <section className="card">
         <h2>分類</h2>
-        {(['支出', '收入'] as const).map((kind) => (
-          <details key={kind} open={kind === '支出'}>
-            <summary>
-              {kind}分類（{snap.categories.filter((c) => c.kind === kind).length}）
-            </summary>
-            {snap.categories
-              .filter((c) => c.kind === kind)
-              .map((c) => (
-                <CategoryRow key={c.id} api={api} c={c} />
-              ))}
-            <button className="link small" onClick={() => addCat(kind)}>
-              ＋ 新增{kind}分類
-            </button>
-          </details>
-        ))}
-        <p className="hint">「投資類」的分類不算進實際收支（例：投資買進、投資賣出、手續費）。</p>
+        <p className="muted small">
+          支出 {snap.categories.filter((c) => c.kind === '支出').length} 個、收入 {snap.categories.filter((c) => c.kind === '收入').length} 個
+        </p>
+        <button className="primary" onClick={openCategories}>
+          分類管理 ›
+        </button>
       </section>
 
       <section className="card">
