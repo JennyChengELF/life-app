@@ -11,6 +11,14 @@ const SHEETS = 'https://sheets.googleapis.com/v4/spreadsheets';
 const DRIVE = 'https://www.googleapis.com/drive/v3/files';
 const INFO_SHEET = '說明';
 const ID_KEY = (f: FileKey) => `life.sheetId.${f}`;
+/** 放所有試算表的資料夾（💡 名稱暫定） */
+const FOLDER_NAME = '生活APP';
+const FOLDER_MIME = 'application/vnd.google-apps.folder';
+const FOLDER_PROP = 'lifeAppFolder';
+const FOLDER_KEY = 'life.folderId';
+/** 試算表已經搬進資料夾過（存在檔案的 appProperties，換裝置也知道） */
+const FILED_PROP = 'lifeAppFiled';
+const FILED_KEY = 'life.filed';
 
 /** A1 表示法中的工作表名稱（加單引號） */
 const q = (title: string) => `'${title.replace(/'/g, "''")}'`;
@@ -83,10 +91,68 @@ export class SheetsBackend implements Backend {
   }
 
   async init() {
+    const folder = await this.safely(() => this.ensureFolder());
     for (const file of Object.keys(FILES) as FileKey[]) {
       const sheetTitles = await this.ensureFile(file);
       await this.ensureTables(file, sheetTitles);
+      if (folder) await this.safely(() => this.fileIntoFolder(this.sid(file), folder));
     }
+  }
+
+  /** 整理資料夾失敗不影響使用（檔案留在原處，下次再試）；登入過期照常往外丟 */
+  private async safely<T>(fn: () => Promise<T>): Promise<T | null> {
+    try {
+      return await fn();
+    } catch (e) {
+      if (e instanceof AuthError) throw e;
+      console.warn('整理資料夾失敗', e);
+      return null;
+    }
+  }
+
+  /**
+   * 所有試算表放在同一個資料夾（2026-11-18 使用者要求，比較好找）。
+   * 用 appProperties 認資料夾，使用者改名或移動資料夾都找得到。
+   */
+  private async ensureFolder(): Promise<string> {
+    const cached = localStorage.getItem(FOLDER_KEY);
+    if (cached) {
+      try {
+        const f = await this.api(`${DRIVE}/${cached}?fields=id,trashed`);
+        if (!f.trashed) return cached;
+      } catch (e) {
+        if (!(e instanceof ApiError) || (e.status !== 404 && e.status !== 403)) throw e;
+      }
+      localStorage.removeItem(FOLDER_KEY);
+    }
+    const query = `mimeType='${FOLDER_MIME}' and appProperties has { key='${FOLDER_PROP}' and value='1' } and trashed=false`;
+    const found = await this.api(`${DRIVE}?q=${encodeURIComponent(query)}&fields=files(id)&orderBy=createdTime`);
+    let id: string | undefined = found.files?.[0]?.id;
+    if (!id) {
+      const created = await this.api(`${DRIVE}?fields=id`, {
+        method: 'POST',
+        body: JSON.stringify({ name: FOLDER_NAME, mimeType: FOLDER_MIME, appProperties: { [FOLDER_PROP]: '1' } }),
+      });
+      id = created.id as string;
+    }
+    localStorage.setItem(FOLDER_KEY, id);
+    return id;
+  }
+
+  /** 試算表第一次被看到時搬進資料夾；只搬一次（之後使用者自己移到別處就不再搬） */
+  private async fileIntoFolder(fileId: string, folderId: string) {
+    const doneKey = `${FILED_KEY}.${fileId}`;
+    if (localStorage.getItem(doneKey)) return;
+    const f = await this.api(`${DRIVE}/${fileId}?fields=parents,appProperties`);
+    if (!f.appProperties?.[FILED_PROP]) {
+      const parents: string[] = f.parents ?? [];
+      const remove = parents.filter((p) => p !== folderId);
+      const params = new URLSearchParams({ fields: 'id' });
+      if (!parents.includes(folderId)) params.set('addParents', folderId);
+      if (remove.length) params.set('removeParents', remove.join(','));
+      await this.api(`${DRIVE}/${fileId}?${params}`, { method: 'PATCH', body: JSON.stringify({ appProperties: { [FILED_PROP]: '1' } }) });
+    }
+    localStorage.setItem(doneKey, '1');
   }
 
   /** 找到（或建立）這個 APP 的試算表，回傳現有的工作表（名稱 → sheetId） */
