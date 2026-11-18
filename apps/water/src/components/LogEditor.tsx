@@ -9,7 +9,10 @@ export function LogEditor(props: {
   /** 有給 drinks 才顯示「喝什麼」 */
   drink?: string;
   drinks?: string[];
-  onSave: (time: number, amount: number, drink?: string) => void;
+  /** 備註：選到 noteFor 這個飲品（或原本就有備註）時顯示 */
+  note?: string | null;
+  noteFor?: string;
+  onSave: (time: number, amount: number, drink?: string, note?: string | null) => void;
   onCancel?: () => void;
   onDelete?: () => void;
   deleteLabel?: string;
@@ -19,6 +22,8 @@ export function LogEditor(props: {
   const [err, setErr] = useState('');
   const [drink, setDrink] = useState(props.drink ?? props.drinks?.[0] ?? '');
   // 舊紀錄的飲品已從清單刪除時，仍可保留原名稱
+  const [note, setNote] = useState(props.note ?? '');
+  const showNote = props.noteFor != null && (drink === props.noteFor || note !== '');
   const options = props.drinks && drink && !props.drinks.includes(drink) ? [...props.drinks, drink] : props.drinks;
 
   const save = () => {
@@ -26,7 +31,7 @@ export function LogEditor(props: {
     const a = Number(amount);
     if (t == null) return setErr('請選擇時間');
     if (!Number.isFinite(a) || a <= 0) return setErr(`請輸入 ${props.unit}`);
-    props.onSave(t, props.unit === 'ml' ? Math.round(a) : a, options ? drink : undefined);
+    props.onSave(t, props.unit === 'ml' ? Math.round(a) : a, options ? drink : undefined, showNote ? note.trim() || null : null);
   };
 
   return (
@@ -52,6 +57,16 @@ export function LogEditor(props: {
           />
           {props.unit}
         </label>
+        {showNote && (
+          <input
+            className="note-input"
+            type="text"
+            placeholder="備註（可不填）"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            maxLength={100}
+          />
+        )}
       </div>
       {err && <p className="error-text small">{err}</p>}
       <div className="editor-actions">

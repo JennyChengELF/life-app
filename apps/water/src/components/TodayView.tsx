@@ -8,6 +8,8 @@ import { LogEditor } from './LogEditor';
 import { ProgressRing } from './ProgressRing';
 
 const QUICK = [150, 250, 500];
+/** 選這個飲品時顯示備註欄 */
+const OTHER = '其他';
 
 const WEEK = ['日', '一', '二', '三', '四', '五', '六'];
 function dateLabel(d: string) {
@@ -48,6 +50,9 @@ export function TodayView(props: {
   const [picked, setPicked] = useState<string | null>(null);
   const defaultDrink = snap.drinks[0]?.name ?? '開水';
   const drink = picked && snap.drinks.some((d) => d.name === picked) ? picked : defaultDrink;
+  // 選「其他」時可以加備註（沒填就不存）
+  const [note, setNote] = useState('');
+  const showNote = drink === OTHER;
 
   const isToday = date === todayKey();
   const logs = snap.logs.filter((l) => l.date === date).sort((a, b) => b.time - a.time);
@@ -67,15 +72,17 @@ export function TodayView(props: {
     const time = timeForDate(date);
     const tempId = `temp-${Date.now()}`;
     const d = drink;
+    const n = showNote ? note.trim() || null : null;
     setPicked(null);
+    setNote('');
     const id = await api.run(
-      (s) => s.addLog(ml, time, d),
-      (s) => ({ ...s, logs: [...s.logs, { rowNumber: -1, id: tempId, time, ml, drink: d, note: null, date, createdVia: 'water' }] }),
+      (s) => s.addLog(ml, time, d, n),
+      (s) => ({ ...s, logs: [...s.logs, { rowNumber: -1, id: tempId, time, ml, drink: d, note: n, date, createdVia: 'water' }] }),
     );
     if (id) {
       api.showToast({
         kind: 'info',
-        text: `已記錄 ${d} +${ml}ml`,
+        text: `已記錄 ${d}${n ? `（${n}）` : ''} +${ml}ml`,
         undo: () =>
           api.run(
             async (s) => {
@@ -99,7 +106,7 @@ export function TodayView(props: {
     add(Math.round(ml));
   };
 
-  const save = async (log: WaterLog, patch: { time: number; ml: number; drink: string }) => {
+  const save = async (log: WaterLog, patch: { time: number; ml: number; drink: string; note: string | null }) => {
     setEditing(null);
     await api.run((s) => s.updateLog(log, patch));
     props.onEditDone?.();
@@ -186,6 +193,17 @@ export function TodayView(props: {
             ))}
           </div>
 
+          {showNote && (
+            <input
+              className="note-input"
+              type="text"
+              placeholder="備註（可不填，例：咖啡、湯）"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              maxLength={100}
+            />
+          )}
+
           <div className="quick">
             {QUICK.map((ml) => (
               <button key={ml} className="quick-btn" onClick={() => add(ml)}>
@@ -237,7 +255,9 @@ export function TodayView(props: {
                       unit="ml"
                       drink={drinkOf(l, snap.drinks)}
                       drinks={snap.drinks.map((d) => d.name)}
-                      onSave={(time, ml, dr) => save(l, { time, ml, drink: dr ?? drinkOf(l, snap.drinks) })}
+                      note={l.note}
+                      noteFor={OTHER}
+                      onSave={(time, ml, dr, n) => save(l, { time, ml, drink: dr ?? drinkOf(l, snap.drinks), note: n ?? null })}
                       onCancel={() => {
                         setEditing(null);
                         props.onEditDone?.();
@@ -252,6 +272,7 @@ export function TodayView(props: {
                       <i className="dot" style={{ background: drinkColor(drinkOf(l, snap.drinks), snap.drinks) }} />
                       {drinkOf(l, snap.drinks)}
                     </span>
+                    {l.note && <span className="log-note">{l.note}</span>}
                     <span className="log-ml">{l.ml} ml</span>
                     {l.createdVia === 'sheet' && <span className="badge">試算表</span>}
                     <button className="link" onClick={() => setEditing(l.id)} disabled={l.rowNumber < 0}>

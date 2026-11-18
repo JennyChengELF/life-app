@@ -65,6 +65,9 @@
 .drink-pick button { border-radius: 999px; padding: 5px 14px; font-size: 0.95rem; }
 .drink-pick button.active { color: #fff; font-weight: 600; }
 .by-drink { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 14px; font-size: 0.9rem; color: var(--muted); margin: -4px 0 10px; }
+.note-input { width: 100%; margin-bottom: 10px; }
+.editor-fields .note-input { flex: 1 1 100%; margin-bottom: 0; }
+.log-note { font-size: 0.85rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 10em; }
 .drink-tag { display: inline-flex; align-items: center; font-size: 0.9rem; gap: 4px; }
 .drink-tag .dot { margin-right: 0; }
 .log-row .drink-tag { min-width: 64px; color: var(--muted); }
