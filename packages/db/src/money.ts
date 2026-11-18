@@ -27,27 +27,18 @@ export const PERSON_KINDS: LineKind[] = ['他欠我', '我欠他', '他還我', 
 /** 機構類別（2026-11-18 確認） */
 export const ORG_KINDS = ['商店', '餐飲', '銀行', '證券', '保險', '電子支付', '醫療', '公司', '政府', '其他'] as const;
 
-/** 💡 第一次使用時放的預設分類（之後可匯入舊試算表的分類、自己改） */
-export const DEFAULT_CATEGORIES: { path: string; kind: CategoryKind }[] = [
+/**
+ * 第一次使用時放的預設分類（2026-11-18 使用者決定：支出只放 食、衣、住、行、育、樂、投資；收入保留 4 個）。
+ * 只在第一次打開時放；之後可匯入舊試算表的分類、自己改。
+ */
+export const DEFAULT_CATEGORIES: { path: string; kind: CategoryKind; isInvest?: boolean }[] = [
   { path: '食', kind: '支出' },
-  { path: '食 / 三餐', kind: '支出' },
-  { path: '食 / 飲料點心', kind: '支出' },
-  { path: '食 / 食材', kind: '支出' },
   { path: '衣', kind: '支出' },
   { path: '住', kind: '支出' },
-  { path: '住 / 日用品', kind: '支出' },
-  { path: '住 / 水電瓦斯', kind: '支出' },
   { path: '行', kind: '支出' },
-  { path: '行 / 大眾交通', kind: '支出' },
-  { path: '行 / 計程車', kind: '支出' },
   { path: '育', kind: '支出' },
-  { path: '育 / 學習', kind: '支出' },
   { path: '樂', kind: '支出' },
-  { path: '樂 / 娛樂', kind: '支出' },
-  { path: '醫療', kind: '支出' },
-  { path: '人情', kind: '支出' },
-  { path: '人情 / 送禮', kind: '支出' },
-  { path: '其他支出', kind: '支出' },
+  { path: '投資', kind: '支出', isInvest: true },
   { path: '薪資', kind: '收入' },
   { path: '獎金', kind: '收入' },
   { path: '利息', kind: '收入' },

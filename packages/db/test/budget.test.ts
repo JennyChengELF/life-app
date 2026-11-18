@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { addTestCategories } from './helpers';
 import type { EntryForm, MoneySnapshot } from '../src';
 import {
   budgetDraft,
@@ -31,6 +32,7 @@ describe('預算', () => {
   beforeEach(async () => {
     store = new MoneyStore(new LocalBackend(memoryStorage()));
     await store.load();
+    await addTestCategories(store);
     await store.saveAccount({ ...acc, name: '錢包' });
     await store.saveBudget(budget('日常雜支', 12000, 9000));
     await store.saveBudget(budget('應援支出', 10000, 7000));

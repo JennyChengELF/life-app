@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { addTestCategories } from './helpers';
 import type { Account, EntryForm, MoneySnapshot, Txn } from '../src';
 import {
   accountBalance,
@@ -263,11 +264,18 @@ describe('MoneyStore', () => {
   beforeEach(async () => {
     backend = new LocalBackend(memoryStorage());
     store = new MoneyStore(backend);
+    await store.load();
+    await addTestCategories(store);
     snap = await store.load();
   });
 
   it('第一次打開放預設分類，只放一次', async () => {
+    backend = new LocalBackend(memoryStorage());
+    store = new MoneyStore(backend);
+    snap = await store.load();
     expect(snap.categories).toHaveLength(DEFAULT_CATEGORIES.length);
+    expect(categoryTree(snap.categories, '支出').map((n) => n.name)).toEqual(['食', '衣', '住', '行', '育', '樂', '投資']);
+    expect(snap.categories.find((c) => c.path === '投資')?.isInvest).toBe(true);
     for (const c of snap.categories) await store.updateCategory(c, { archived: true });
     const rows = await backend.read('moneyCategories');
     for (const r of rows) await backend.update('moneyCategories', [{ rowNumber: r.rowNumber, values: { deletedAt: 1 } }]);
@@ -275,6 +283,8 @@ describe('MoneyStore', () => {
   });
 
   it('分類：只填這一層的名字、樹狀、改名只改這一層、上下移、缺上層自動補', async () => {
+    await store.ensureCategories(['食 / 三餐', '食 / 飲料點心', '食 / 食材'], '支出');
+    snap = await store.load();
     expect(categoryTree(snap.categories, '支出').map((n) => n.name).slice(0, 3)).toEqual(['食', '衣', '住']);
     const p = await store.addCategory('食 / 三餐', '早餐', '收入');
     expect(p).toBe('食 / 三餐 / 早餐');
@@ -373,6 +383,7 @@ describe('店家 / 對象', () => {
     const backend = new LocalBackend(memoryStorage());
     const store = new MoneyStore(backend);
     await store.load();
+    await addTestCategories(store);
     const acc = { type: '現金' as const, currency: 'TWD', org: null, openingDate: null, openingBalance: null, closingDay: null, dueDay: null, fxFeeRate: null, expiryDate: null, monthlyCheck: true, archived: false, note: null };
     await store.saveAccount({ ...acc, name: '錢包' });
     await store.saveTxn(formToTxn(form({ account: '錢包', store: '八方雲集', branch: '信義店', cats: [{ category: '食 / 三餐', amount: 86 }] })));
@@ -465,6 +476,7 @@ describe('統計：佔比、年統計、首頁時間軸', () => {
     const backend = new LocalBackend(memoryStorage());
     const store = new MoneyStore(backend);
     await store.load();
+    await addTestCategories(store);
     const acc = { type: '現金' as const, currency: 'TWD', org: null, openingDate: null, openingBalance: null, closingDay: null, dueDay: null, fxFeeRate: null, expiryDate: null, monthlyCheck: true, archived: false, note: null };
     await store.saveAccount({ ...acc, name: '錢包' });
     await store.saveTxn(formToTxn({ ...form({ account: '錢包', store: '八方雲集', cats: [{ category: '食 / 三餐', amount: 86 }] }), time: at('2026-03-05 12:30') }));
@@ -495,6 +507,7 @@ describe('試算表直接填負數', () => {
     const backend = new LocalBackend(memoryStorage());
     const store = new MoneyStore(backend);
     await store.load();
+    await addTestCategories(store);
     const acc = { type: '信用卡' as const, currency: 'TWD', org: null, openingDate: null, openingBalance: null, closingDay: null, dueDay: null, fxFeeRate: null, expiryDate: null, monthlyCheck: true, archived: false, note: null };
     await store.saveAccount({ ...acc, name: 'cube信用卡' });
     await backend.appendRaw('moneyTransactions', { time: at('2026-11-17 17:03'), direction: '出', account: 'cube信用卡', amount: -3065, store: 'Google', id: 'G1' });
@@ -512,6 +525,7 @@ describe('試算表快速輸入、在 APP 裡補完', () => {
     const backend = new LocalBackend(memoryStorage());
     const store = new MoneyStore(backend);
     await store.load();
+    await addTestCategories(store);
     await store.saveAccount({ ...acc, name: 'cube信用卡' });
     await store.saveBudget({ name: '生活享樂', ideal: null, basic: null, monthly: true, goal: null, archived: false, note: null });
     await backend.appendRaw('moneyTransactions', { time: at('2026-11-17 17:03'), direction: '出', account: 'cube信用卡', amount: 3065, store: 'Google', category: '樂 / 娛樂', budget: '生活享樂' });
@@ -529,6 +543,7 @@ describe('試算表快速輸入、在 APP 裡補完', () => {
     const backend = new LocalBackend(memoryStorage());
     const store = new MoneyStore(backend);
     await store.load();
+    await addTestCategories(store);
     await store.saveAccount({ ...acc, name: 'cube信用卡' });
     await backend.appendRaw('moneyTransactions', { time: at('2026-11-17 17:03'), direction: '出', account: 'cube信用卡', amount: -3065, store: 'Google', note: 'Google One AI 2T' });
     let snap = await store.load();
@@ -567,6 +582,7 @@ describe('帳戶後幾碼', () => {
   it('存、顯示；只能填數字', async () => {
     const store = new MoneyStore(new LocalBackend(memoryStorage()));
     await store.load();
+    await addTestCategories(store);
     const acc = { type: '信用卡' as const, currency: 'TWD', org: '永豐銀行', openingDate: null, openingBalance: null, closingDay: null, dueDay: null, fxFeeRate: null, expiryDate: null, monthlyCheck: true, archived: false, note: null };
     await store.saveAccount({ ...acc, name: '大戶卡', last4: '5009' });
     const snap = await store.load();
