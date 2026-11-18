@@ -40,7 +40,8 @@ export function CategoriesView({ api, snap, onBack }: { api: MoneyApi; snap: Mon
           <span className="grow" onClick={() => hasKids && toggle(c.path)}>
             {n.name}
             {hasKids && !isOpen && <span className="muted small">（{n.children.length}）</span>}{' '}
-            {c.isInvest && <span className="tag">投資類</span>} {c.archived && <span className="muted small">停用</span>}
+            {c.isInvest && <span className="tag">投資類</span>} {c.defaultBudget && <span className="muted small">💼 {c.defaultBudget}</span>}{' '}
+            {c.archived && <span className="muted small">停用</span>}
           </span>
           {n.depth < MAX_CATEGORY_DEPTH && (
             <button onClick={() => add(n)} title="新增子分類">
@@ -62,6 +63,18 @@ export function CategoriesView({ api, snap, onBack }: { api: MoneyApi; snap: Mon
               改名
             </button>
             <button onClick={() => api.run((s) => s.updateCategory(c, { isInvest: !c.isInvest }))}>{c.isInvest ? '取消投資類' : '設成投資類'}</button>
+            {snap.budgets.length > 0 && (
+              <select className="kind-select" value={c.defaultBudget ?? ''} onChange={(e) => api.run((s) => s.setCategoryBudget(c, e.target.value || null))}>
+                <option value="">預設預算：無</option>
+                {snap.budgets
+                  .filter((b) => !b.archived || b.name === c.defaultBudget)
+                  .map((b) => (
+                    <option key={b.id} value={b.name}>
+                      預設預算：{b.name}
+                    </option>
+                  ))}
+              </select>
+            )}
             <button onClick={() => api.run((s) => s.updateCategory(c, { archived: !c.archived }))}>
               {c.archived ? '恢復' : hasKids ? '停用（底下一起）' : '停用'}
             </button>

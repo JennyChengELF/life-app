@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { TimelineEntry } from '@life/db';
-import { bowelEntries, bowelHomeMessage, editHash, fmtMoney, healthEntries, moneyDayTotals, moneyEntries, resolvePinned, sortEntries, todayKey, waterEntries, waterSummary } from '@life/db';
+import { bowelEntries, bowelHomeMessage, editHash, fmtMoney, healthEntries, loanReminders, moneyDayTotals, moneyEntries, resolvePinned, sortEntries, todayKey, waterEntries, waterSummary } from '@life/db';
 import { DateNav, Timeline } from '@life/ui/timeline';
 import { useHub } from './useHub';
 
@@ -227,6 +227,8 @@ function Day({ hub, date, setDate }: { hub: ReturnType<typeof useHub>; date: str
     ...moneyEntries(hub.moneySnap, date),
   ]);
   const money = moneyDayTotals(hub.moneySnap, date);
+  // 借出太久沒還（天數在記帳 APP 設定，2026-11-18）
+  const loans = loanReminders(hub.moneySnap);
   // 昨天排便較少（「喝水 +500ml」按鈕等喝水的加量功能做好再加）
   const bowelMsg = bowelHomeMessage(hub.bowelSnap, hub.healthSnap.body);
   const pct = w.goal > 0 ? Math.min(100, Math.round((w.total / w.goal) * 100)) : 0;
@@ -239,6 +241,15 @@ function Day({ hub, date, setDate }: { hub: ReturnType<typeof useHub>; date: str
 
   return (
     <>
+      {loans.length > 0 && (
+        <div className="messages">
+          {loans.map((l) => (
+            <a key={l.person + l.currency} className="msg warn" href={appUrl('money')}>
+              🤝 {l.person} 欠你 {fmtMoney(l.amount, l.currency)}，已經 {l.days} 天
+            </a>
+          ))}
+        </div>
+      )}
       {bowelMsg && (
         <div className="messages">
           <div className="msg info">

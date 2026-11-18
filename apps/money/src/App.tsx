@@ -9,15 +9,18 @@ import { AccountsView } from './components/AccountsView';
 import { SettingsView } from './components/SettingsView';
 import { IssuesView } from './components/IssuesView';
 import { CategoriesView } from './components/CategoriesView';
+import { BudgetsView } from './components/BudgetsView';
+import { BudgetsAdmin } from './components/BudgetsAdmin';
 
 /** 綜合首頁：上線時在上一層路徑；開發時是另一個 port */
 const HOME_URL = import.meta.env.DEV ? `http://${location.hostname}:5172/` : '../';
 
-export type Tab = 'ledger' | 'stats' | 'accounts' | 'settings' | 'categories' | 'issues';
+export type Tab = 'ledger' | 'stats' | 'budgets' | 'accounts' | 'settings' | 'categories' | 'budgetsAdmin' | 'issues';
 
 const TABS: { key: Tab; icon: string; label: string }[] = [
   { key: 'ledger', icon: '📒', label: '記帳' },
   { key: 'stats', icon: '📊', label: '統計' },
+  { key: 'budgets', icon: '💼', label: '預算' },
   { key: 'accounts', icon: '🏦', label: '帳戶' },
   { key: 'settings', icon: '⚙️', label: '設定' },
 ];
@@ -76,7 +79,7 @@ export function App() {
         <h1>💰 記帳</h1>
         <nav className="tabs-top">
           {TABS.map((t) => (
-            <button key={t.key} className={tab === t.key || (tab === 'categories' && t.key === 'settings') ? 'active' : ''} onClick={() => setTab(t.key)}>
+            <button key={t.key} className={tab === t.key || (tab === 'categories' && t.key === 'settings') || (tab === 'budgetsAdmin' && t.key === 'budgets') ? 'active' : ''} onClick={() => setTab(t.key)}>
               {t.icon} {t.label}
             </button>
           ))}
@@ -134,7 +137,13 @@ export function App() {
             )}
             {tab === 'stats' && <StatsView snap={api.snap} initialMonth={date.slice(0, 7)} />}
             {tab === 'accounts' && <AccountsView snap={api.snap} onEdit={edit} goSettings={() => setTab('settings')} />}
-            {tab === 'settings' && <SettingsView api={api} snap={api.snap} openCategories={() => setTab('categories')} />}
+            {tab === 'budgets' && (
+              <BudgetsView api={api} snap={api.snap} onEdit={edit} goAccounts={() => setTab('accounts')} goAdmin={() => setTab('budgetsAdmin')} />
+            )}
+            {tab === 'budgetsAdmin' && <BudgetsAdmin api={api} snap={api.snap} onBack={() => setTab('budgets')} />}
+            {tab === 'settings' && (
+              <SettingsView api={api} snap={api.snap} openCategories={() => setTab('categories')} openBudgets={() => setTab('budgetsAdmin')} />
+            )}
             {tab === 'categories' && <CategoriesView api={api} snap={api.snap} onBack={() => setTab('settings')} />}
             {tab === 'issues' && <IssuesView api={api} snap={api.snap} onDone={() => setTab('ledger')} />}
           </>
@@ -143,7 +152,7 @@ export function App() {
 
       <nav className="tabs-bottom">
         {TABS.map((t) => (
-          <button key={t.key} className={tab === t.key ? 'active' : ''} onClick={() => setTab(t.key)}>
+          <button key={t.key} className={tab === t.key || (tab === 'categories' && t.key === 'settings') || (tab === 'budgetsAdmin' && t.key === 'budgets') ? 'active' : ''} onClick={() => setTab(t.key)}>
             <span className="tab-icon">{t.icon}</span>
             {t.label}
           </button>

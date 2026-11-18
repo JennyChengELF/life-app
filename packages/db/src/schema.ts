@@ -11,8 +11,9 @@
  * 6：新增排便 APP、綜合 APP 的試算表（2026-11-18）
  * 7：新增記帳 APP 的試算表（帳戶、分類、交易、明細）；綜合加人物、機構（2026-11-18）
  * 8：交易加分店、帳單名稱；帳戶加國外交易手續費率；機構加國外（2026-11-18）
+ * 9：新增預算、預算分配（2026-11-18）
  */
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 
 export type ColType = 'datetime' | 'date' | 'number' | 'text' | 'bool' | 'any';
 
@@ -383,6 +384,36 @@ export const TABLES = {
       { name: 'budget', type: 'text', label: '扣 / 放進哪個預算（預算功能之後做）' },
       { name: 'note', type: 'text', label: '備註' },
       { name: 'sort', type: 'number', label: '同一筆交易內的順序' },
+      ...systemCols,
+    ],
+  },
+  moneyBudgets: {
+    file: 'money',
+    description: '預算（信封袋）。每個預算有理想金額、基本金額；每月草稿帶入基本金額。請在 APP 裡新增或修改（改名時用到的紀錄會一起改）。',
+    columns: [
+      { name: 'name', type: 'text', label: '預算名稱（必填，不可重複；例：日常雜支）' },
+      { name: 'ideal', type: 'number', label: '理想金額（每月預計要放的；加總可以超過薪資，靠年終 / 獎金補）' },
+      { name: 'basic', type: 'number', label: '基本金額（依每月花費；加總不超過薪資）' },
+      { name: 'monthly', type: 'bool', label: '每月預算（空白 = 是；FALSE = 不是每月都放，例：年度保險費）' },
+      { name: 'goal', type: 'number', label: '長期累積的目標金額（選填，顯示進度）' },
+      { name: 'archived', type: 'bool', label: '停用（TRUE）' },
+      { name: 'sort', type: 'number', label: '排序' },
+      { name: 'note', type: 'text', label: '備註' },
+      ...systemCols,
+    ],
+  },
+  moneyBudgetAllocations: {
+    file: 'money',
+    description:
+      '預算分配：某月放進某預算的錢（每月、追加、年終），以及「重新整理預算」的期初金額（期初）。預算可用 = 最新一次期初 ＋ 之後的分配 ＋ 放進預算的收入 − 扣預算的支出。建議在 APP 裡操作。',
+    columns: [
+      { name: 'month', type: 'text', label: '月份（YYYY-MM，必填）' },
+      { name: 'budget', type: 'text', label: '預算名稱（必填）' },
+      { name: 'kind', type: 'text', label: '每月、追加、年終、期初（必填）' },
+      { name: 'amount', type: 'number', label: '金額（必填；可以是負數，例：期初是負的）' },
+      { name: 'date', type: 'date', label: '期初才填：從哪一天開始算（那天開始時的金額）' },
+      { name: 'ideal', type: 'number', label: '每月才填：當時的理想金額（算「今年還差多少到理想」用）' },
+      { name: 'note', type: 'text', label: '備註' },
       ...systemCols,
     ],
   },

@@ -144,3 +144,24 @@ button.day-head { width: 100%; background: none; border: 0; border-bottom: 1px s
 .month-bars i { display: block; height: 6px; min-width: 1px; border-radius: 0 3px 3px 0; }
 .month-bars i.out { background: var(--out); }
 .month-bars i.in { background: var(--in); }
+.budget-select { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--muted); }
+.budget-select select { flex: 1; padding: 6px 8px; }
+.budget-select.missing select { border-color: var(--warn); color: var(--warn); }
+
+/* 預算表 */
+.budget-table { margin-top: 10px; }
+.bt-row { width: 100%; display: grid; grid-template-columns: minmax(5em, 1.4fr) repeat(4, minmax(4.2em, 1fr)); gap: 6px; align-items: center; padding: 8px 4px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: none; font-size: 0.88rem; color: var(--text); text-align: right; font-variant-numeric: tabular-nums; }
+.bt-row > span:first-child { text-align: left; }
+button.bt-row:hover, .bt-row.open { background: var(--bg); }
+.bt-head { color: var(--muted); font-size: 0.78rem; }
+.bt-total { font-weight: 600; }
+.bt-name small { color: var(--muted); font-size: 0.72rem; }
+.bt-avail { font-weight: 700; }
+.bt-detail { background: var(--bg); padding: 6px 10px 10px; border-bottom: 1px solid var(--line); }
+.list-row.clickable { cursor: pointer; }
+.draft-row { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1.2fr; gap: 8px; align-items: center; padding: 4px 0; font-size: 0.9rem; }
+.draft-row.three { grid-template-columns: 1.4fr 1fr 1.2fr; }
+.draft-row .num { text-align: right; }
+.draft-head { color: var(--muted); font-size: 0.8rem; font-weight: 600; }
+.num-input { text-align: right; padding: 6px 8px; }
+@media (max-width: 480px) { .bt-row { font-size: 0.8rem; gap: 4px; } }

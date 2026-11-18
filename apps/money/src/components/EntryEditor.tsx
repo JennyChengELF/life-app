@@ -11,6 +11,7 @@ import {
   splitTags,
   toInputDateTime,
   txnCurrency,
+  defaultBudgetFor,
   estimateFee,
   feeTxnFrom,
   findFeeTxn,
@@ -23,6 +24,7 @@ import type { MoneyApi } from '../useMoney';
 import { AccountSelect, amountText, parseAmount, PersonSelect } from './common';
 import { CategoryPicker } from './CategoryPicker';
 import { StorePicker } from './StorePicker';
+import { BudgetSelect } from './BudgetSelect';
 
 /** 金額輸入：自己記住打到一半的文字（例：「12.」） */
 function AmountInput({
@@ -145,6 +147,9 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
   };
 
   // 我的部分（分類＋金額）
+  /** 選了分類、還沒選預算 → 帶入預設預算（分類的預設 → 這個分類上次用的） */
+  const withBudget = <C extends EntryForm['cats'][number]>(c: C): C => (c.budget ? c : { ...c, budget: defaultBudgetFor(snap, c.category) });
+
   const catRows = (kind: '支出' | '收入') => (
     <div className="field">
       {f.shares.length || paidByMode ? '我的部分' : '分類'}
@@ -164,7 +169,13 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
               snap={snap}
               kind={kind}
               value={c.category}
-              onChange={(v) => set({ cats: f.cats.map((x, j) => (j === i ? { ...x, category: v } : x)) })}
+              onChange={(v) => set({ cats: f.cats.map((x, j) => (j === i ? withBudget({ ...x, category: v }) : x)) })}
+            />
+            <BudgetSelect
+              snap={snap}
+              kind={kind}
+              value={c.budget ?? null}
+              onChange={(v) => set({ cats: f.cats.map((x, j) => (j === i ? { ...x, budget: v } : x)) })}
             />
           </div>
         ))}
@@ -228,7 +239,7 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
       }}
       onChange={(v) => {
         const last = v ? lastCategoryOfStore(snap.txns, v, kind) : null;
-        set({ store: v, cats: last && f.cats.length === 1 && !f.cats[0].category ? [{ ...f.cats[0], category: last }] : f.cats });
+        set({ store: v, cats: last && f.cats.length === 1 && !f.cats[0].category ? [withBudget({ ...f.cats[0], category: last })] : f.cats });
       }}
     />
   );
@@ -476,7 +487,7 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
                       snap={snap}
                       kind={f.sub === '我還他' ? '收入' : '支出'}
                       value={f.cats[0]?.category ?? null}
-                      onChange={(v) => set({ cats: [{ category: v, amount: null }] })}
+                      onChange={(v) => set({ cats: [withBudget({ category: v, amount: null })] })}
                     />
                   </label>
                   <label className="field">

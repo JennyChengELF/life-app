@@ -156,6 +156,42 @@ export interface MoneyIssue {
   problems: string[];
 }
 
+export interface Budget extends RowRef {
+  name: string;
+  ideal: number | null;
+  basic: number | null;
+  /** 每月預算（false = 不是每月都放，例：年度保險費） */
+  monthly: boolean;
+  goal: number | null;
+  archived: boolean;
+  sort: number | null;
+  note: string | null;
+}
+
+/** 預算分配的種類：期初 = 「重新整理預算」那天開始時的金額 */
+export const ALLOC_KINDS = ['每月', '追加', '年終', '期初'] as const;
+export type AllocKind = (typeof ALLOC_KINDS)[number];
+
+export interface Allocation extends RowRef {
+  month: string;
+  budget: string;
+  kind: AllocKind;
+  amount: number;
+  /** 期初：從哪一天開始算 */
+  date: string | null;
+  /** 每月：當時的理想金額 */
+  ideal: number | null;
+  note: string | null;
+}
+
+export interface MoneySettings {
+  /** 「超過收入」和哪個月的收入比（2026-11-18 確認是設定值） */
+  incomeCompare: '上個月' | '本月';
+  /** 借出超過幾天沒還，首頁提醒 */
+  loanRemindDays: number;
+}
+export const DEFAULT_MONEY_SETTINGS: MoneySettings = { incomeCompare: '上個月', loanRemindDays: 30 };
+
 export interface MoneySnapshot {
   loadedAt: number;
   accounts: Account[];
@@ -164,6 +200,9 @@ export interface MoneySnapshot {
   orgs: Org[];
   /** 新 → 舊 */
   txns: Txn[];
+  budgets: Budget[];
+  allocations: Allocation[];
+  settings: MoneySettings;
   issues: MoneyIssue[];
 }
 
@@ -373,6 +412,51 @@ function toOrg(r: TableRow): Org {
     archived: v.archived === true,
     sort: num(v.sort),
     note: str(v.note),
+  };
+}
+
+function toBudget(r: TableRow): Budget {
+  const v = r.values;
+  return {
+    rowNumber: r.rowNumber,
+    id: String(v.id ?? ''),
+    name: str(v.name)!,
+    ideal: num(v.ideal),
+    basic: num(v.basic),
+    monthly: v.monthly !== false,
+    goal: num(v.goal),
+    archived: v.archived === true,
+    sort: num(v.sort),
+    note: str(v.note),
+  };
+}
+
+function toAllocation(r: TableRow): Allocation {
+  const v = r.values;
+  return {
+    rowNumber: r.rowNumber,
+    id: String(v.id ?? ''),
+    month: str(v.month)!,
+    budget: str(v.budget)!,
+    kind: str(v.kind) as AllocKind,
+    amount: num(v.amount)!,
+    date: str(v.date),
+    ideal: num(v.ideal),
+    note: str(v.note),
+  };
+}
+
+function parseMoneySettings(rows: TableRow[]): MoneySettings {
+  const kv = new Map<string, unknown>();
+  for (const r of rows) {
+    const k = str(r.values.key);
+    if (k && !kv.has(k)) kv.set(k, r.values.value);
+  }
+  const cmp = str(kv.get('money.incomeCompare'));
+  const days = Number(kv.get('money.loanRemindDays'));
+  return {
+    incomeCompare: cmp === '本月' ? '本月' : DEFAULT_MONEY_SETTINGS.incomeCompare,
+    loanRemindDays: Number.isInteger(days) && days >= 1 && days <= 365 ? days : DEFAULT_MONEY_SETTINGS.loanRemindDays,
   };
 }
 
@@ -694,7 +778,7 @@ export interface EntryForm {
   /** 沒帳戶時的幣別 */
   currency: string | null;
   /** 我的部分：分類＋金額（支出 / 收入可拆成好幾筆） */
-  cats: { category: string | null; amount: number | null; note?: string | null }[];
+  cats: { category: string | null; amount: number | null; note?: string | null; budget?: string | null }[];
   /** 分帳：別人的份額（我付錢時 = 他欠我） */
   shares: { person: string | null; amount: number | null }[];
   /** 借款、還款、不用還了的對象 */
@@ -741,7 +825,7 @@ export const formTotal = (f: EntryForm) => sum(f.cats.map((c) => c.amount)) + (f
 export function formToTxn(f: EntryForm): TxnInput {
   const base = { time: f.time, store: f.store?.trim() || null, branch: f.store?.trim() ? f.branch?.trim() || null : null, statementText: f.statementText?.trim() || null, note: f.note?.trim() || null, tags: f.tags, toAccount: null, toAmount: null, paidBy: null, currency: null };
   const cats = (kind: '支出' | '收入'): LineInput[] =>
-    f.cats.filter((c) => c.category || c.amount).map((c) => ({ kind, amount: c.amount ?? 0, category: c.category, note: c.note ?? null }));
+    f.cats.filter((c) => c.category || c.amount).map((c) => ({ kind, amount: c.amount ?? 0, category: c.category, note: c.note ?? null, budget: c.budget ?? null }));
   switch (f.mode) {
     case '支出': {
       if (f.paidBy) {
@@ -799,7 +883,7 @@ export function formToTxn(f: EntryForm): TxnInput {
         amount: null,
         currency: f.currency,
         lines: [
-          { kind: heOwes ? '支出' : '收入', amount, category: f.cats[0]?.category ?? null },
+          { kind: heOwes ? '支出' : '收入', amount, category: f.cats[0]?.category ?? null, budget: f.cats[0]?.budget ?? null },
           { kind: heOwes ? '他還我' : '我還他', amount, person: f.person },
         ],
       };
@@ -874,7 +958,7 @@ export function txnToForm(t: Txn): EntryForm {
   const f: EntryForm = { ...emptyForm('其他', t.time), store: t.store, branch: t.branch, statementText: t.statementText, note: t.note, tags: t.tags, account: t.account, currency: t.currency, cats: [] };
   const L = t.lines;
   const only = (...kinds: LineKind[]) => L.length > 0 && L.every((l) => kinds.includes(l.kind));
-  const catsOf = (kind: LineKind) => L.filter((l) => l.kind === kind).map((l) => ({ category: l.category, amount: l.amount, note: l.note }));
+  const catsOf = (kind: LineKind) => L.filter((l) => l.kind === kind).map((l) => ({ category: l.category, amount: l.amount, note: l.note, budget: l.budget }));
   if (t.direction === '轉帳') return { ...f, mode: '轉帳', amount: t.amount, toAccount: t.toAccount, toAmount: t.toAmount };
   if (t.direction === '出' && only('支出', '他欠我') && L.some((l) => l.kind === '支出') && L.every((l) => l.kind !== '他欠我' || l.debtType !== '借款')) {
     return { ...f, mode: '支出', cats: catsOf('支出'), shares: L.filter((l) => l.kind === '他欠我').map((l) => ({ person: l.person, amount: l.amount })) };
@@ -900,8 +984,8 @@ export function txnToForm(t: Txn): EntryForm {
     const inc = L.find((l) => l.kind === '收入');
     const back = L.find((l) => l.kind === '他還我');
     const pay = L.find((l) => l.kind === '我還他');
-    if (exp && back && same(exp.amount, back.amount)) return { ...f, mode: '不用還了', sub: '他還我', person: back.person, amount: back.amount, cats: [{ category: exp.category, amount: exp.amount }] };
-    if (inc && pay && same(inc.amount, pay.amount)) return { ...f, mode: '不用還了', sub: '我還他', person: pay.person, amount: pay.amount, cats: [{ category: inc.category, amount: inc.amount }] };
+    if (exp && back && same(exp.amount, back.amount)) return { ...f, mode: '不用還了', sub: '他還我', person: back.person, amount: back.amount, cats: [{ category: exp.category, amount: exp.amount, budget: exp.budget }] };
+    if (inc && pay && same(inc.amount, pay.amount)) return { ...f, mode: '不用還了', sub: '我還他', person: pay.person, amount: pay.amount, cats: [{ category: inc.category, amount: inc.amount, budget: inc.budget }] };
   }
   if (only('調整')) return { ...f, mode: '調整', amount: t.amount };
   return f;
@@ -963,7 +1047,7 @@ export class MoneyStore {
   }
 
   private async loadNow(now: number): Promise<MoneySnapshot> {
-    const [accRows, catRows, txRows, lineRows, peopleRows, orgRows, setRows] = await Promise.all([
+    const [accRows, catRows, txRows, lineRows, peopleRows, orgRows, setRows, budgetRows, allocRows] = await Promise.all([
       this.b.read('moneyAccounts'),
       this.b.read('moneyCategories'),
       this.b.read('moneyTransactions'),
@@ -971,6 +1055,8 @@ export class MoneyStore {
       this.b.read('hubPeople'),
       this.b.read('hubOrganizations'),
       this.b.read('moneySettings'),
+      this.b.read('moneyBudgets'),
+      this.b.read('moneyBudgetAllocations'),
     ]);
     const issues: MoneyIssue[] = [];
     const fixes = new Map<TableName, RowUpdate[]>();
@@ -1016,6 +1102,30 @@ export class MoneyStore {
       has(CATEGORY_KINDS, str(r.values.kind)) ? [] : [`kind 請填 支出 或 收入`],
     ).sort(bySort);
     const people = loadList('hubPeople', peopleRows, 'name', '人物名稱', toPerson).sort(bySort);
+    const budgets = loadList('moneyBudgets', budgetRows, 'name', '預算名稱', toBudget, (r) =>
+      ['ideal', 'basic', 'goal'].filter((k) => r.errors.includes(k)).map((k) => `${k} 請填數字`),
+    ).sort(bySort);
+    const budgetNames = new Set(budgets.map((b) => b.name));
+    const allocations: Allocation[] = [];
+    for (const r of allocRows) {
+      if (!isLive(r)) continue;
+      const p: string[] = [];
+      const month = str(r.values.month);
+      const kind = str(r.values.kind);
+      const budget = str(r.values.budget);
+      if (!month || !/^\d{4}-\d{2}$/.test(month)) p.push('month 請填 YYYY-MM（例：2026-11）');
+      if (!budget) p.push('沒有填預算');
+      else if (!budgetNames.has(budget)) p.push(`預算「${budget}」不在預算清單裡`);
+      if (!has(ALLOC_KINDS, kind)) p.push(`kind 請填：${ALLOC_KINDS.join('、')}`);
+      if (num(r.values.amount) == null) p.push('金額請填數字');
+      if (kind === '期初' && !str(r.values.date)) p.push('期初請填 date（從哪一天開始算）');
+      if (p.length) {
+        issue('moneyBudgetAllocations', r, p);
+        continue;
+      }
+      ensureId('moneyBudgetAllocations', r);
+      allocations.push(toAllocation(r));
+    }
     const orgs = loadList('hubOrganizations', orgRows, 'name', '機構名稱', toOrg).sort(bySort);
 
     // 交易：先讀明細，再依交易分組
@@ -1108,7 +1218,7 @@ export class MoneyStore {
       return this.loadNow(now);
     }
 
-    const snap: MoneySnapshot = { loadedAt: now, accounts, categories, people, orgs, txns, issues };
+    const snap: MoneySnapshot = { loadedAt: now, accounts, categories, people, orgs, txns, budgets, allocations, settings: parseMoneySettings(setRows), issues };
     this.last = snap;
     return snap;
   }
@@ -1418,6 +1528,122 @@ export class MoneyStore {
     if (accs.length) await this.b.update('moneyAccounts', accs);
     const txs = snap.txns.filter((t) => t.store === o.name).map((t) => ({ rowNumber: t.rowNumber, values: { store: to, updatedAt: now }, expectId: t.id }));
     if (txs.length) await this.b.update('moneyTransactions', txs);
+  }
+
+  // ── 預算 ──
+
+  async saveBudget(input: { name: string; ideal: number | null; basic: number | null; monthly: boolean; goal: number | null; archived: boolean; note: string | null }, existing?: Budget) {
+    const snap = await this.fresh();
+    const name = input.name.trim();
+    if (!name) throw new Error('請填預算名稱');
+    if (snap.budgets.some((b) => b.name === name && b.id !== existing?.id)) throw new Error(`已經有「${name}」這個預算`);
+    for (const [k, label] of [['ideal', '理想金額'], ['basic', '基本金額'], ['goal', '目標金額']] as const) {
+      const n = input[k];
+      if (n != null && (!Number.isFinite(n) || n < 0)) throw new Error(`${label}請填 0 以上的數字`);
+    }
+    const now = Date.now();
+    const values: RowValues = {
+      name,
+      ideal: input.ideal,
+      basic: input.basic,
+      monthly: input.monthly ? null : false,
+      goal: input.goal,
+      archived: input.archived || null,
+      note: input.note?.trim() || null,
+      updatedAt: now,
+    };
+    if (!existing) {
+      const sort = Math.max(0, ...snap.budgets.map((b) => b.sort ?? 0)) + 1;
+      await this.b.append('moneyBudgets', [{ ...values, sort, id: newId(now), createdAt: now }]);
+      return;
+    }
+    await this.b.update('moneyBudgets', [{ rowNumber: existing.rowNumber, values, expectId: existing.id }]);
+    if (name === existing.name) return;
+    // 改名：明細、分類的預設預算、分配一起改
+    const from = existing.name;
+    const lines: RowUpdate[] = [];
+    for (const t of snap.txns) for (const l of t.lines) if (l.budget === from) lines.push({ rowNumber: l.rowNumber, values: { budget: name, updatedAt: now }, expectId: l.id });
+    if (lines.length) await this.b.update('moneyLines', lines);
+    const cats = snap.categories.filter((c) => c.defaultBudget === from).map((c) => ({ rowNumber: c.rowNumber, values: { defaultBudget: name, updatedAt: now }, expectId: c.id }));
+    if (cats.length) await this.b.update('moneyCategories', cats);
+    const allocs = snap.allocations.filter((a) => a.budget === from).map((a) => ({ rowNumber: a.rowNumber, values: { budget: name, updatedAt: now }, expectId: a.id }));
+    if (allocs.length) await this.b.update('moneyBudgetAllocations', allocs);
+  }
+
+  /** 預算上移 / 下移 */
+  async moveBudget(b: Budget, delta: -1 | 1) {
+    const snap = await this.fresh();
+    const list = snap.budgets;
+    const i = list.findIndex((x) => x.id === b.id);
+    if (i < 0 || !list[i + delta]) return;
+    const order = list.map((x) => x.id);
+    [order[i], order[i + delta]] = [order[i + delta], order[i]];
+    const now = Date.now();
+    const us = order
+      .map((id, k) => ({ x: list.find((y) => y.id === id)!, k }))
+      .filter(({ x, k }) => x.sort !== k + 1)
+      .map(({ x, k }) => ({ rowNumber: x.rowNumber, values: { sort: k + 1, updatedAt: now }, expectId: x.id }));
+    if (us.length) await this.b.update('moneyBudgets', us);
+  }
+
+  /** 分配預算：每月（確認草稿；0 也記，代表這個月確認過）、追加、年終（0 的不記） */
+  async allocate(month: string, kind: Exclude<AllocKind, '期初'>, rows: { budget: string; amount: number; note?: string | null }[]) {
+    const snap = await this.fresh();
+    if (!/^\d{4}-\d{2}$/.test(month)) throw new Error('月份格式不對');
+    if (kind === '每月' && snap.allocations.some((a) => a.month === month && a.kind === '每月')) throw new Error(`${month} 的預算已經確認過了（要再放錢請用「追加」）`);
+    const now = Date.now();
+    const out: RowValues[] = [];
+    for (const r of rows) {
+      const b = snap.budgets.find((x) => x.name === r.budget);
+      if (!b) throw new Error(`找不到預算「${r.budget}」`);
+      if (!Number.isFinite(r.amount)) throw new Error(`「${r.budget}」金額請填數字`);
+      if (kind !== '每月' && r.amount === 0) continue;
+      out.push({ month, budget: r.budget, kind, amount: Math.round(r.amount), ideal: kind === '每月' ? b.ideal : null, note: r.note ?? null, id: newId(now), createdAt: now, updatedAt: now });
+    }
+    if (out.length) await this.b.append('moneyBudgetAllocations', out);
+  }
+
+  /** 重新整理預算（2026-11-18 確認）：某一天開始時每個預算的金額；之後只從這天開始算，以最新一次為準 */
+  async setBaseline(date: string, rows: { budget: string; amount: number }[]) {
+    const snap = await this.fresh();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('請選日期');
+    const now = Date.now();
+    const out = rows.map((r) => {
+      if (!snap.budgets.some((b) => b.name === r.budget)) throw new Error(`找不到預算「${r.budget}」`);
+      if (!Number.isFinite(r.amount)) throw new Error(`「${r.budget}」金額請填數字`);
+      return { month: date.slice(0, 7), budget: r.budget, kind: '期初', amount: Math.round(r.amount), date, id: newId(now), createdAt: now, updatedAt: now };
+    });
+    if (out.length) await this.b.append('moneyBudgetAllocations', out);
+  }
+
+  async deleteAllocation(a: Allocation) {
+    const now = Date.now();
+    await this.b.update('moneyBudgetAllocations', [{ rowNumber: a.rowNumber, values: { deletedAt: now, updatedAt: now }, expectId: a.id }]);
+  }
+
+  /** 分類的預設預算 */
+  async setCategoryBudget(c: Category, budget: string | null) {
+    await this.b.update('moneyCategories', [{ rowNumber: c.rowNumber, values: { defaultBudget: budget, updatedAt: Date.now() }, expectId: c.id }]);
+  }
+
+  /** 只改一筆明細的預算（補填） */
+  async setLineBudget(l: Line, budget: string | null) {
+    await this.b.update('moneyLines', [{ rowNumber: l.rowNumber, values: { budget, updatedAt: Date.now() }, expectId: l.id }]);
+  }
+
+  async saveMoneySettings(s: MoneySettings) {
+    if (!Number.isInteger(s.loanRemindDays) || s.loanRemindDays < 1 || s.loanRemindDays > 365) throw new Error('提醒天數請填 1–365');
+    const rows = await this.b.read('moneySettings');
+    const want: Record<string, string | number> = { 'money.incomeCompare': s.incomeCompare, 'money.loanRemindDays': s.loanRemindDays };
+    const updates: RowUpdate[] = [];
+    const appends: RowValues[] = [];
+    for (const [key, value] of Object.entries(want)) {
+      const r = rows.find((x) => str(x.values.key) === key);
+      if (r) updates.push({ rowNumber: r.rowNumber, values: { value } });
+      else appends.push({ key, value });
+    }
+    if (updates.length) await this.b.update('moneySettings', updates);
+    if (appends.length) await this.b.append('moneySettings', appends);
   }
 
   async discardIssue(issue: MoneyIssue) {

@@ -39,6 +39,7 @@ function subText(t: Txn) {
   if (t.store) parts.push(t.branch ? `${t.store}（${t.branch}）` : t.store);
   if (t.note) parts.push(t.note);
   if (t.tags.length) parts.push(t.tags.map((x) => `#${x}`).join(' '));
+  if (t.lines.some((l) => l.kind === '支出' && !l.budget)) parts.unshift('⚠️ 沒有預算');
   return parts.join('・');
 }
 

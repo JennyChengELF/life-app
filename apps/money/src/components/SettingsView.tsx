@@ -120,7 +120,41 @@ function AccountForm({ api, snap, acc, onDone }: { api: MoneyApi; snap: MoneySna
   );
 }
 
-export function SettingsView({ api, snap, openCategories }: { api: MoneyApi; snap: MoneySnapshot; openCategories: () => void }) {
+function MoneySettingsCard({ api, snap }: { api: MoneyApi; snap: MoneySnapshot }) {
+  const [cmp, setCmp] = useState(snap.settings.incomeCompare);
+  const [days, setDays] = useState(String(snap.settings.loanRemindDays));
+  const changed = cmp !== snap.settings.incomeCompare || days !== String(snap.settings.loanRemindDays);
+  return (
+    <section className="card">
+      <h2>預算與提醒</h2>
+      <label className="field">
+        「待分配」和哪個月的收入比
+        <select value={cmp} onChange={(e) => setCmp(e.target.value as typeof cmp)}>
+          <option value="上個月">上個月的收入（月初領薪水）</option>
+          <option value="本月">本月的收入（月中、月底領薪水；還沒領時會是負的）</option>
+        </select>
+      </label>
+      <label className="field">
+        借出超過幾天沒還，首頁提醒
+        <input type="number" min={1} max={365} value={days} onChange={(e) => setDays(e.target.value)} />
+      </label>
+      <div className="editor-actions">
+        <button
+          className="primary"
+          disabled={!changed || api.busy}
+          onClick={async () => {
+            const ok = await api.run((s) => s.saveMoneySettings({ incomeCompare: cmp, loanRemindDays: Number(days) }).then(() => true));
+            if (ok) api.showToast({ kind: 'info', text: '已儲存' });
+          }}
+        >
+          儲存
+        </button>
+      </div>
+    </section>
+  );
+}
+
+export function SettingsView({ api, snap, openCategories, openBudgets }: { api: MoneyApi; snap: MoneySnapshot; openCategories: () => void; openBudgets: () => void }) {
   const [editAcc, setEditAcc] = useState<Account | 'new' | null>(null);
   const url = api.fileUrl();
   return (
@@ -165,6 +199,16 @@ export function SettingsView({ api, snap, openCategories }: { api: MoneyApi; sna
           分類管理 ›
         </button>
       </section>
+
+      <section className="card">
+        <h2>預算</h2>
+        <p className="muted small">{snap.budgets.length} 個預算</p>
+        <button className="primary" onClick={openBudgets}>
+          預算設定 ›
+        </button>
+      </section>
+
+      <MoneySettingsCard api={api} snap={snap} />
 
       <section className="card">
         <h2>人物</h2>
