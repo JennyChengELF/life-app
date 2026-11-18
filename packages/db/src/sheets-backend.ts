@@ -19,6 +19,9 @@ const FOLDER_KEY = 'life.folderId';
 /** 試算表已經搬進資料夾過（存在檔案的 appProperties，換裝置也知道） */
 const FILED_PROP = 'lifeAppFiled';
 const FILED_KEY = 'life.filed';
+/** 試算表是哪個 APP 的（存在檔案的 appProperties，值是 FileKey）；用來找檔案，改檔名也找得到 */
+const FILE_PROP = 'lifeAppFile';
+const MARKED_KEY = 'life.marked';
 
 /** A1 表示法中的工作表名稱（加單引號） */
 const q = (title: string) => `'${title.replace(/'/g, "''")}'`;
@@ -96,6 +99,7 @@ export class SheetsBackend implements Backend {
       const sheetTitles = await this.ensureFile(file);
       await this.ensureTables(file, sheetTitles);
       if (folder) await this.safely(() => this.fileIntoFolder(this.sid(file), folder));
+      await this.safely(() => this.ensureMarked(file));
     }
   }
 
@@ -170,21 +174,46 @@ export class SheetsBackend implements Backend {
         localStorage.removeItem(ID_KEY(file));
       }
     }
-    // 換裝置時：在雲端硬碟找這個 APP 之前建立的檔案
-    const query = `name='${FILES[file].title}' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`;
-    const found = await this.api(`${DRIVE}?q=${encodeURIComponent(query)}&fields=files(id)&orderBy=createdTime`);
-    let id: string | undefined = found.files?.[0]?.id;
+    // 換裝置時：在雲端硬碟找這個 APP 之前建立的檔案。
+    // 先用標記找（使用者改檔名也找得到，2026-11-18 使用者決定）；舊檔案還沒有標記 → 用檔名找，找到就補上標記
+    const sheetMime = `mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`;
+    const search = async (cond: string) => {
+      const query = `${cond} and ${sheetMime}`;
+      const found = await this.api(`${DRIVE}?q=${encodeURIComponent(query)}&fields=files(id)&orderBy=createdTime`);
+      return found.files?.[0]?.id as string | undefined;
+    };
+    let id = await search(`appProperties has { key='${FILE_PROP}' and value='${file}' }`);
+    if (!id) {
+      id = await search(`name='${FILES[file].title.replace(/'/g, "\\'")}'`);
+      if (id) await this.safely(() => this.markFile(id!, file));
+    }
     let titles: Map<string, number>;
     if (id) {
       const s = await this.api(`${SHEETS}/${id}?${fields}`);
       titles = toMap(s);
     } else {
       id = await this.createFile(file);
+      await this.safely(() => this.markFile(id!, file));
       titles = new Map([INFO_SHEET, ...tablesOfFile(file)].map((t) => [t, -1]));
     }
     this.ids[file] = id;
     localStorage.setItem(ID_KEY(file), id);
     return titles;
+  }
+
+  /** 在檔案上加標記（appProperties），之後用標記找；失敗沒關係，下次再補 */
+  private async markFile(fileId: string, file: FileKey) {
+    await this.api(`${DRIVE}/${fileId}?fields=id`, { method: 'PATCH', body: JSON.stringify({ appProperties: { [FILE_PROP]: file } }) });
+    localStorage.setItem(`${MARKED_KEY}.${fileId}`, '1');
+  }
+
+  /** 這台裝置已經記得檔案 id（不會再搜尋）的舊檔案，也補上標記，換裝置時才找得到 */
+  private async ensureMarked(file: FileKey) {
+    const id = this.ids[file];
+    if (!id || localStorage.getItem(`${MARKED_KEY}.${id}`)) return;
+    const f = await this.api(`${DRIVE}/${id}?fields=appProperties`);
+    if (f.appProperties?.[FILE_PROP] === file) localStorage.setItem(`${MARKED_KEY}.${id}`, '1');
+    else await this.markFile(id, file);
   }
 
   private async createFile(file: FileKey): Promise<string> {

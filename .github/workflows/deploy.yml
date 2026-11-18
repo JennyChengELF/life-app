@@ -1,5 +1,5 @@
 # 推送到 main 時自動建置並上線到 GitHub Pages
-# 網址：https://<帳號>.github.io/life-app/（綜合首頁）、/water/（喝水）、/health/（健康）、/bowel/（排便）
+# 網址：https://<帳號>.github.io/life-app/（綜合首頁）、/water/（喝水）、/health/（健康）、/bowel/（排便）、/money/（記帳）
 name: deploy
 
 on:
@@ -49,13 +49,19 @@ jobs:
         env:
           VITE_BASE: /${{ github.event.repository.name }}/bowel/
           VITE_GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+      - name: Build money
+        run: pnpm --filter money build
+        env:
+          VITE_BASE: /${{ github.event.repository.name }}/money/
+          VITE_GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
       - name: Assemble site
         run: |
-          mkdir -p _site/water _site/health _site/bowel
+          mkdir -p _site/water _site/health _site/bowel _site/money
           cp -r apps/hub/dist/. _site/
           cp -r apps/water/dist/. _site/water/
           cp -r apps/health/dist/. _site/health/
           cp -r apps/bowel/dist/. _site/bowel/
+          cp -r apps/money/dist/. _site/money/
       - uses: actions/upload-pages-artifact@v3
   deploy:
     needs: build

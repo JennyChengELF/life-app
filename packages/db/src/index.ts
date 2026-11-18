@@ -12,4 +12,5 @@ export * from './vitals';
 export * from './lab';
 export * from './bowel';
 export * from './hub';
+export * from './money';
 export * from './timeline';

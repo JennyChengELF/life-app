@@ -9,8 +9,9 @@
  * 4：新增血壓、血糖、體溫（2026-11-17）
  * 5：新增健檢 / 檢驗：報告、檢驗項目、檢驗結果（2026-11-17）
  * 6：新增排便 APP、綜合 APP 的試算表（2026-11-18）
+ * 7：新增記帳 APP 的試算表（帳戶、分類、交易、明細）；綜合加人物、機構（2026-11-18）
  */
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 export type ColType = 'datetime' | 'date' | 'number' | 'text' | 'bool' | 'any';
 
@@ -21,7 +22,7 @@ export interface ColumnDef {
   label: string;
 }
 
-export type FileKey = 'water' | 'health' | 'bowel' | 'hub';
+export type FileKey = 'water' | 'health' | 'bowel' | 'hub' | 'money';
 
 export interface FileDef {
   /** 試算表檔名（不加版本號） */
@@ -33,7 +34,8 @@ export const FILES: Record<FileKey, FileDef> = {
   water: { title: '生活APP-喝水', description: '喝水 APP 的資料：喝水紀錄、每日目標、常用杯子、設定' },
   health: { title: '生活APP-健康', description: '健康 APP 的資料：身體量測（體重、體脂⋯⋯）、血壓、血糖、體溫、健檢 / 檢驗、偶爾量測（身高、圍度⋯⋯）、設定' },
   bowel: { title: '生活APP-排便', description: '排便 APP 的資料：排便紀錄、設定' },
-  hub: { title: '生活APP-綜合', description: '綜合 APP（首頁）的資料：設定（之後還有人物、商店⋯⋯）' },
+  hub: { title: '生活APP-綜合', description: '綜合 APP（首頁）的資料：設定、人物、機構（銀行、商店⋯⋯）' },
+  money: { title: '生活APP-記帳', description: '記帳 APP 的資料：帳戶、分類、交易（一次付款 / 收款 / 轉帳）、明細（支出、收入、分帳、借款、還款）、設定' },
 };
 
 export interface TableDef {
@@ -281,6 +283,110 @@ export const TABLES = {
       { name: 'date', type: 'date', label: '日期（APP 依 time 自動填）' },
       { name: 'createdVia', type: 'text', label: '在哪裡輸入（bowel = 排便 APP、hub = 綜合首頁、sheet = 直接在試算表）' },
       ...systemCols,
+    ],
+  },
+  hubPeople: {
+    file: 'hub',
+    description: '人物（和我相關的人）。分帳、借款會用到。可以直接新增一列，只要填 name。改名請在 APP 裡改（用到的紀錄會一起改）。',
+    columns: [
+      { name: 'name', type: 'text', label: '名稱（必填，不可重複）' },
+      { name: 'isSelf', type: 'bool', label: '是不是我自己（TRUE；全部只有一筆）' },
+      { name: 'sort', type: 'number', label: '排序' },
+      { name: 'archived', type: 'bool', label: '停用（TRUE = 選單不再出現，舊紀錄保留）' },
+      { name: 'note', type: 'text', label: '備註' },
+      ...systemCols,
+    ],
+  },
+  hubOrganizations: {
+    file: 'hub',
+    description: '機構（銀行、證券商、電子支付、商店、醫院⋯⋯）。記帳的帳戶掛在機構底下。可以直接新增一列，只要填 name。',
+    columns: [
+      { name: 'name', type: 'text', label: '名稱（必填，不可重複；例：永豐銀行）' },
+      { name: 'kind', type: 'text', label: '類別（例：銀行、證券、電子支付、商店、醫院）' },
+      { name: 'sort', type: 'number', label: '排序' },
+      { name: 'archived', type: 'bool', label: '停用（TRUE）' },
+      { name: 'note', type: 'text', label: '備註' },
+      ...systemCols,
+    ],
+  },
+  moneyAccounts: {
+    file: 'money',
+    description: '帳戶（錢放在哪裡）。一個帳戶一種幣別。建議在 APP 裡新增；改名請在 APP 裡改（用到的紀錄會一起改）。',
+    columns: [
+      { name: 'name', type: 'text', label: '帳戶名稱（必填，不可重複；例：大戶 台幣活存）' },
+      { name: 'type', type: 'text', label: '類型（現金、銀行、定存、信用卡、電子支付、儲值卡、禮券，必填）' },
+      { name: 'currency', type: 'text', label: '幣別（TWD、USD、JPY⋯⋯；空白 = TWD）' },
+      { name: 'org', type: 'text', label: '屬於哪個機構（填機構名稱，例：永豐銀行；現金可空白）' },
+      { name: 'openingDate', type: 'date', label: '期初餘額是哪一天的（那天結束時的餘額；空白 = 不顯示餘額）' },
+      { name: 'openingBalance', type: 'number', label: '那天的餘額（信用卡填那天的未繳金額，正數 = 欠款）' },
+      { name: 'closingDay', type: 'number', label: '信用卡結帳日（1–31）' },
+      { name: 'dueDay', type: 'number', label: '信用卡繳款日（1–31）' },
+      { name: 'expiryDate', type: 'date', label: '禮券 / 儲值卡到期日（選填）' },
+      { name: 'monthlyCheck', type: 'bool', label: '每月要不要盤點（空白 = 要；FALSE = 不用）' },
+      { name: 'archived', type: 'bool', label: '停用（TRUE = 記帳時不出現，舊紀錄保留）' },
+      { name: 'sort', type: 'number', label: '排序' },
+      { name: 'note', type: 'text', label: '備註' },
+      ...systemCols,
+    ],
+  },
+  moneyCategories: {
+    file: 'money',
+    description: '分類。最多三層，用「 / 」分開（例：食 / 三餐 / 早餐）。可以直接新增一列，填 path、kind。',
+    columns: [
+      { name: 'path', type: 'text', label: '分類（必填；例：食 / 三餐 / 早餐，可只有一、兩層）' },
+      { name: 'kind', type: 'text', label: '支出 或 收入（必填）' },
+      { name: 'isInvest', type: 'bool', label: '投資類（TRUE = 不算進實際收支）' },
+      { name: 'defaultBudget', type: 'text', label: '預設扣哪個預算（預算名稱；預算功能之後做）' },
+      { name: 'systemKey', type: 'text', label: '系統分類代碼（投資連動用；請勿修改）' },
+      { name: 'archived', type: 'bool', label: '停用（TRUE）' },
+      { name: 'sort', type: 'number', label: '排序' },
+      ...systemCols,
+    ],
+  },
+  moneyTransactions: {
+    file: 'money',
+    description:
+      '交易：一次付款、收款或轉帳（和帳單比對的單位）。分類、分帳等在明細 moneyLines（transaction 欄填這裡的 id）。金額一律正數，出 / 入看 direction。建議在 APP 裡新增。',
+    columns: [
+      { name: 'time', type: 'datetime', label: '消費 / 發生時間（必填）' },
+      { name: 'direction', type: 'text', label: '出（錢從帳戶出去）、入（錢進帳戶）、轉帳；沒帳戶（朋友先幫我付、不用還了）時空白' },
+      { name: 'account', type: 'text', label: '帳戶名稱（轉帳時是轉出的帳戶）' },
+      { name: 'amount', type: 'number', label: '金額（帳戶幣別，一律正數）' },
+      { name: 'paidBy', type: 'text', label: '朋友先幫我付時，填人物名稱' },
+      { name: 'currency', type: 'text', label: '幣別：只有沒帳戶時才填（有帳戶時看帳戶的幣別）；空白 = TWD' },
+      { name: 'toAccount', type: 'text', label: '轉帳：轉入的帳戶' },
+      { name: 'toAmount', type: 'number', label: '轉帳：轉入帳戶收到多少（換錢時填外幣金額；空白 = 和金額相同）' },
+      { name: 'store', type: 'text', label: '店家' },
+      { name: 'note', type: 'text', label: '備註' },
+      { name: 'tags', type: 'text', label: '標籤（多個用「、」分開）' },
+      { name: 'date', type: 'date', label: '日期（APP 依 time 自動填）' },
+      { name: 'createdVia', type: 'text', label: '在哪裡輸入（money = 記帳 APP、sheet = 直接在試算表）' },
+      ...systemCols,
+    ],
+  },
+  moneyLines: {
+    file: 'money',
+    description:
+      '明細：交易底下的一筆（支出、收入、他欠我、我欠他、他還我、我還他、調整）。金額一律正數。統計、預算看這裡。建議在 APP 裡新增。',
+    columns: [
+      { name: 'transaction', type: 'text', label: '屬於哪筆交易（moneyTransactions 的 id，必填）' },
+      { name: 'kind', type: 'text', label: '支出、收入、他欠我、我欠他、他還我、我還他、調整（必填）' },
+      { name: 'amount', type: 'number', label: '金額（一律正數，必填）' },
+      { name: 'category', type: 'text', label: '分類（支出、收入必填；填分類的 path）' },
+      { name: 'person', type: 'text', label: '人物名稱（他欠我、我欠他、他還我、我還他必填）' },
+      { name: 'debtType', type: 'text', label: '他欠我 / 我欠他時：分帳 或 借款' },
+      { name: 'budget', type: 'text', label: '扣 / 放進哪個預算（預算功能之後做）' },
+      { name: 'note', type: 'text', label: '備註' },
+      { name: 'sort', type: 'number', label: '同一筆交易內的順序' },
+      ...systemCols,
+    ],
+  },
+  moneySettings: {
+    file: 'money',
+    description: '記帳 APP 的設定，請在 APP 裡修改。',
+    columns: [
+      { name: 'key', type: 'text', label: '設定名稱' },
+      { name: 'value', type: 'any', label: '設定值' },
     ],
   },
   hubSettings: {

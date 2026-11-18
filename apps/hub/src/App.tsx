@@ -4,13 +4,13 @@ import { bowelEntries, bowelHomeMessage, editHash, healthEntries, resolvePinned,
 import { DateNav, Timeline } from '@life/ui/timeline';
 import { useHub } from './useHub';
 
-type AppKey = 'water' | 'health' | 'bowel';
+type AppKey = 'water' | 'health' | 'bowel' | 'money';
 
 /**
  * 各 APP 的網址：上線時在同一個網站的子路徑（water/、health/、bowel/）；
  * 開發時每個 APP 是不同的 port。網址有 ?local（本機測試模式）時一起帶過去。
  */
-const DEV_PORTS: Record<AppKey, number> = { water: 5173, health: 5174, bowel: 5175 };
+const DEV_PORTS: Record<AppKey, number> = { water: 5173, health: 5174, bowel: 5175, money: 5176 };
 function appUrl(app: AppKey, hash = '') {
   const q = new URLSearchParams(location.search).has('local') ? '?local' : '';
   return import.meta.env.DEV ? `http://${location.hostname}:${DEV_PORTS[app]}/${q}${hash}` : `${app}/${q}${hash}`;
@@ -35,15 +35,18 @@ const TILES: Tile[] = [
   { key: 'temp', app: 'health', hash: '#temp', icon: '🌡️', label: '記體溫' },
   { key: 'health', app: 'health', hash: '', icon: '🩺', label: '健康' },
   { key: 'bowel', app: 'bowel', hash: '', icon: '🚽', label: '排便' },
+  { key: 'moneyNew', app: 'money', hash: '#new', icon: '✏️', label: '記一筆' },
+  { key: 'money', app: 'money', hash: '', icon: '💰', label: '記帳' },
 ];
 const tileOf = (k: string) => TILES.find((t) => t.key === k)!;
 
 /**
  * 類別（2026-11-18 確認：首頁上面是自己勾的「常用」，下面是類別資料夾，所有功能都找得到）。
- * 💡 目前只有健康；記帳、子彈筆記等做好再加
+ * 💡 目前有健康、記帳；子彈筆記等做好再加
  */
 const GROUPS: { key: string; icon: string; label: string; tiles: string[] }[] = [
   { key: 'health', icon: '🩺', label: '健康', tiles: ['water', 'bowelNew', 'body', 'bp', 'glucose', 'temp', 'health', 'bowel'] },
+  { key: 'money', icon: '💰', label: '記帳', tiles: ['moneyNew', 'money'] },
 ];
 
 /** 💡 還沒設定過時的常用（和原本首頁一樣） */
