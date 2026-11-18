@@ -38,6 +38,9 @@ export function subText(t: Txn) {
   if (shared.length) parts.push(`和 ${shared.join('、')} 分帳`);
   if (t.store) parts.push(t.branch ? `${t.store}（${t.branch}）` : t.store);
   if (t.note) parts.push(t.note);
+  // 明細的備註（拆成多個分類時每一行可以有自己的備註）
+  const lineNotes = t.lines.map((l) => l.note).filter((x): x is string => !!x && x !== t.note);
+  if (lineNotes.length) parts.push(lineNotes.join('／'));
   if (t.tags.length) parts.push(t.tags.map((x) => `#${x}`).join(' '));
   if (t.lines.some((l) => l.kind === '支出' && !l.budget)) parts.unshift('⚠️ 沒有預算');
   return parts.join('・');

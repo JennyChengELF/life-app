@@ -454,7 +454,7 @@ export function recentCategories(txns: Txn[], kind: CategoryKind, n = 5): string
 const AUTO_NOTE = /國外交易服務費|^開定存|^定存|^盤點調整/;
 
 /**
- * 分類的常用備註（2026-11-18 使用者要求，自動學）：以前在這個分類寫過的備註，用最多次的在前面（一樣多次的，最近用的在前）。
+ * 分類的常用備註（2026-11-18 使用者要求，自動學）：以前在這個分類寫過的備註（整筆的備註＋這個分類那一行明細的備註），用最多次的在前面（一樣多次的，最近用的在前）。
  * 備註用「、」分開的各算一個（點常用文字時是用「、」接在後面）；分期的「1/6 期：」去掉。
  * 這個分類不到 min 個時，補上一層分類（含底下其他子分類）的。
  */
@@ -462,9 +462,12 @@ export function noteSuggestions(txns: Txn[], categories: string[], n = 8, min = 
   const collect = (match: (path: string) => boolean) => {
     const m = new Map<string, { count: number; last: number }>();
     for (const t of txns) {
-      if (!t.note || !t.lines.some((l) => l.category && match(l.category))) continue;
-      const note = t.note.replace(/^\d+\/\d+ 期：?/, '');
-      for (const part of note.split('、').map((x) => x.trim())) {
+      const hit = t.lines.filter((l) => l.category && match(l.category));
+      if (!hit.length) continue;
+      // 這一行明細自己的備註排在整筆備註前面（次數一樣時比較相關）
+      const notes = [...hit.map((l) => l.note), t.note].filter((x): x is string => !!x);
+      const parts = new Set(notes.flatMap((n) => n.replace(/^\d+\/\d+ 期：?/, '').split('、').map((x) => x.trim())));
+      for (const part of parts) {
         if (!part || AUTO_NOTE.test(part)) continue;
         const x = m.get(part) ?? { count: 0, last: 0 };
         x.count++;

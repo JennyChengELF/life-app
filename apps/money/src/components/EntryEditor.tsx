@@ -206,6 +206,10 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
               value={c.budget ?? null}
               onChange={(v) => set({ cats: f.cats.map((x, j) => (j === i ? { ...x, budget: v } : x)) })}
             />
+            {/* 明細備註（2026-11-19 使用者要求）：拆成多個分類才出現（只有一個分類時用整筆的備註） */}
+            {(f.cats.length > 1 || !!c.note) && (
+              <LineNote snap={snap} category={c.category} value={c.note ?? null} onChange={(v) => set({ cats: f.cats.map((x, j) => (j === i ? { ...x, note: v } : x)) })} />
+            )}
           </div>
         ))}
       </div>
@@ -656,5 +660,33 @@ function PayStatement({ snap, card, value, isNew, onChange }: { snap: MoneySnaps
         ))}
       </select>
     </label>
+  );
+}
+
+/** 一行明細的備註＋這個分類的常用文字（點輸入框時才出現，點了加在後面） */
+function LineNote({ snap, category, value, onChange }: { snap: MoneySnapshot; category: string | null; value: string | null; onChange: (v: string | null) => void }) {
+  const [focus, setFocus] = useState(false);
+  const all = useMemo(() => noteSuggestions(snap.txns, category ? [category] : []), [snap.txns, category]);
+  const chips = all.filter((x) => !(value ?? '').split('、').map((y) => y.trim()).includes(x));
+  return (
+    <div className="line-note">
+      <input value={value ?? ''} placeholder="這一行的備註" onFocus={() => setFocus(true)} onBlur={() => setFocus(false)} onChange={(e) => onChange(e.target.value || null)} />
+      {focus && chips.length > 0 && (
+        <div className="chips">
+          {chips.map((x) => (
+            <button
+              type="button"
+              key={x}
+              className="chip"
+              // 按下時不要讓輸入框失去焦點（常用文字才不會先消失）
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => onChange(value?.trim() ? `${value.trim()}、${x}` : x)}
+            >
+              {x}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

@@ -222,3 +222,9 @@ button.bt-row:hover, .bt-row.open { background: var(--bg); }
 .stmt-row:hover { background: var(--bg); }
 .stmt-row .grow { flex: 1; }
 .note-chips { margin: -4px 0 10px; }
+.line-note { margin-top: 6px; }
+.line-note input { width: 100%; box-sizing: border-box; }
+.line-note .chips { margin-top: 6px; }
+.line-note { margin-top: 6px; }
+.line-note input { width: 100%; box-sizing: border-box; }
+.line-note .chips { margin-top: 6px; }

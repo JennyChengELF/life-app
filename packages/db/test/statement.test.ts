@@ -313,4 +313,24 @@ describe('分類的常用備註', () => {
     expect(noteSuggestions(snap.txns, ['食 / 三餐 / 早餐'], 8, 2)).toEqual(['豆漿', '蛋餅']);
     expect(noteSuggestions(snap.txns, [])).toEqual([]);
   });
+
+  it('拆成多個分類時，每一行明細的備註只算那一行的分類；存檔後留著', async () => {
+    const store = new MoneyStore(new LocalBackend(memoryStorage()));
+    await store.load();
+    await store.saveAccount({ ...base, name: '台幣現金', type: '現金', org: null, openingBalance: 5000 });
+    await store.ensureCategories(['食 / 食材', '住 / 日用品'], '支出');
+    await store.saveTxn({
+      ...spend('2026-11-01 18:00', 1280, '台幣現金'),
+      note: '全聯',
+      lines: [
+        { kind: '支出', amount: 800, category: '食 / 食材', note: '牛肉、雞蛋' },
+        { kind: '支出', amount: 480, category: '住 / 日用品', note: '衛生紙' },
+      ],
+    });
+    const snap = await store.load();
+    expect(snap.txns[0].lines.map((l) => l.note)).toEqual(['牛肉、雞蛋', '衛生紙']);
+    expect(txnToForm(snap.txns[0]).cats.map((c) => c.note)).toEqual(['牛肉、雞蛋', '衛生紙']);
+    expect(noteSuggestions(snap.txns, ['食 / 食材'], 8, 1)).toEqual(['牛肉', '雞蛋', '全聯']);
+    expect(noteSuggestions(snap.txns, ['住 / 日用品'], 8, 1)).toEqual(['衛生紙', '全聯']);
+  });
 });
