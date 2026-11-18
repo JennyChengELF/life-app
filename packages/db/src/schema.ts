@@ -10,7 +10,7 @@
  * 5：新增健檢 / 檢驗：報告、檢驗項目、檢驗結果（2026-11-17）
  * 6：新增排便 APP、綜合 APP 的試算表（2026-11-18）
  * 7：新增記帳 APP 的試算表（帳戶、分類、交易、明細）；綜合加人物、機構（2026-11-18）
- * 8：交易加分店、帳單名稱（2026-11-18）
+ * 8：交易加分店、帳單名稱；帳戶加國外交易手續費率（2026-11-18）
  */
 export const SCHEMA_VERSION = 8;
 
@@ -322,6 +322,7 @@ export const TABLES = {
       { name: 'openingBalance', type: 'number', label: '那天的餘額（信用卡填那天的未繳金額，正數 = 欠款）' },
       { name: 'closingDay', type: 'number', label: '信用卡結帳日（1–31）' },
       { name: 'dueDay', type: 'number', label: '信用卡繳款日（1–31）' },
+      { name: 'fxFeeRate', type: 'number', label: '信用卡國外交易手續費率 %（例 1.5；空白 = 1.5）' },
       { name: 'expiryDate', type: 'date', label: '禮券 / 儲值卡到期日（選填）' },
       { name: 'monthlyCheck', type: 'bool', label: '每月要不要盤點（空白 = 要；FALSE = 不用）' },
       { name: 'archived', type: 'bool', label: '停用（TRUE = 記帳時不出現，舊紀錄保留）' },

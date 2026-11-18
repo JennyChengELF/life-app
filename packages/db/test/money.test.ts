@@ -8,6 +8,8 @@ import {
   recentCategories,
   DEFAULT_CATEGORIES,
   emptyForm,
+  estimateFee,
+  feeTxnFrom,
   fmtMoney,
   formToTxn,
   lastCategoryOfStore,
@@ -194,6 +196,7 @@ describe('計算', () => {
     openingBalance: 2000,
     closingDay: 25,
     dueDay: 10,
+    fxFeeRate: null,
     expiryDate: null,
     monthlyCheck: true,
     archived: false,
@@ -290,6 +293,7 @@ describe('MoneyStore', () => {
       openingBalance: 10000,
       closingDay: null,
       dueDay: null,
+      fxFeeRate: null,
       expiryDate: null,
       monthlyCheck: true,
       archived: false,
@@ -319,7 +323,7 @@ describe('MoneyStore', () => {
   });
 
   it('改名：帳戶、人物、分類（含底下的分類）用到的紀錄一起改', async () => {
-    const acc = { type: '現金' as const, currency: 'TWD', org: null, openingDate: null, openingBalance: null, closingDay: null, dueDay: null, expiryDate: null, monthlyCheck: true, archived: false, note: null };
+    const acc = { type: '現金' as const, currency: 'TWD', org: null, openingDate: null, openingBalance: null, closingDay: null, dueDay: null, fxFeeRate: null, expiryDate: null, monthlyCheck: true, archived: false, note: null };
     await store.saveAccount({ ...acc, name: '錢包' });
     await store.addPerson('小明');
     await store.saveTxn(formToTxn(form({ account: '錢包', cats: [{ category: '食 / 三餐', amount: 100 }], shares: [{ person: '小明', amount: 100 }] })));
@@ -354,7 +358,7 @@ describe('店家 / 對象', () => {
     const backend = new LocalBackend(memoryStorage());
     const store = new MoneyStore(backend);
     await store.load();
-    const acc = { type: '現金' as const, currency: 'TWD', org: null, openingDate: null, openingBalance: null, closingDay: null, dueDay: null, expiryDate: null, monthlyCheck: true, archived: false, note: null };
+    const acc = { type: '現金' as const, currency: 'TWD', org: null, openingDate: null, openingBalance: null, closingDay: null, dueDay: null, fxFeeRate: null, expiryDate: null, monthlyCheck: true, archived: false, note: null };
     await store.saveAccount({ ...acc, name: '錢包' });
     await store.saveTxn(formToTxn(form({ account: '錢包', store: '八方雲集', branch: '信義店', cats: [{ category: '食 / 三餐', amount: 86 }] })));
     let snap = await store.load();
@@ -373,5 +377,32 @@ describe('店家 / 對象', () => {
     snap = await store.load();
     expect(snap.txns.find((t) => t.id === id)?.store).toBe('八方雲集鍋貼');
     expect(snap.orgs.find((o) => o.name === '八方雲集鍋貼')?.kind).toBe('餐飲');
+  });
+});
+
+describe('退款（負數）、國外交易手續費', () => {
+  it('支出填負數 = 退款：交易變成「入」，統計扣掉；和消費同一筆時是折扣', () => {
+    const refund = roundTrip(form({ account: '大戶信用卡', cats: [{ category: '食 / 三餐', amount: -17 }] }));
+    expect(refund.t).toMatchObject({ direction: '入', amount: 17 });
+    expect(refund.back).toMatchObject({ mode: '支出', cats: [{ amount: -17 }] });
+    const discount = roundTrip(form({ account: '大戶信用卡', cats: [{ category: '食 / 三餐', amount: 1000 }, { category: '食 / 三餐', amount: -100 }] }));
+    expect(discount.t).toMatchObject({ direction: '出', amount: 900 });
+    const [s] = monthStats([refund.txn, discount.txn], [], refs.accounts, '2026-11');
+    expect(s.expense).toBe(883);
+    expect(checkTxn(formToTxn(form({ account: '大戶信用卡', cats: [{ category: '食 / 三餐', amount: 0 }] })), refs).join()).toContain('不是 0');
+  });
+  it('手續費另記一筆：分類跟著消費（依比例分）、店家記發卡銀行、標籤跟著', () => {
+    const buy = formToTxn(
+      form({ account: '大戶信用卡', store: 'LYSN', tags: ['Super Junior'], cats: [{ category: '食 / 三餐', amount: 600 }, { category: '住 / 日用品', amount: 120 }] }),
+    );
+    const fee = estimateFee(720, 1.5);
+    expect(fee).toBe(11);
+    const t = feeTxnFrom(buy, fee, '台新銀行');
+    expect(checkTxn(t, refs)).toEqual([]);
+    expect(t).toMatchObject({ direction: '出', amount: 11, store: '台新銀行', tags: ['Super Junior'], note: 'LYSN 國外交易服務費' });
+    expect(t.lines.map((l) => [l.category, l.amount])).toEqual([
+      ['食 / 三餐', 9],
+      ['住 / 日用品', 2],
+    ]);
   });
 });

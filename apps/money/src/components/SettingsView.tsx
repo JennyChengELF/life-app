@@ -14,6 +14,7 @@ const blankAccount = (): AccountDraft => ({
   openingBalance: null,
   closingDay: null,
   dueDay: null,
+  fxFeeRate: null,
   expiryDate: null,
   monthlyCheck: true,
   archived: false,
@@ -82,6 +83,10 @@ function AccountForm({ api, snap, acc, onDone }: { api: MoneyApi; snap: MoneySna
           <label className="field" style={{ flex: 1 }}>
             繳款日
             <input type="number" min={1} max={31} value={d.dueDay ?? ''} onChange={(e) => set({ dueDay: e.target.value ? Number(e.target.value) : null })} />
+          </label>
+          <label className="field" style={{ flex: 1 }}>
+            國外交易手續費 %
+            <input type="number" inputMode="decimal" step={0.1} min={0} placeholder="1.5" value={d.fxFeeRate ?? ''} onChange={(e) => set({ fxFeeRate: e.target.value ? Number(e.target.value) : null })} />
           </label>
         </div>
       )}

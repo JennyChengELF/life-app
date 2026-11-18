@@ -118,3 +118,5 @@ details > summary { cursor: pointer; color: var(--muted); font-size: 0.9rem; mar
 .tree-menu button { padding: 4px 10px; font-size: 0.85rem; }
 .branch { margin-top: 6px; }
 .kind-select { width: auto; padding: 4px 6px; font-size: 0.82rem; }
+.sign-btn { padding: 6px 10px; font-weight: 700; color: var(--muted); flex: none; }
+input.neg { color: var(--in); }

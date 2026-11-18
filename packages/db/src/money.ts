@@ -70,6 +70,8 @@ export interface Account extends RowRef {
   openingBalance: number | null;
   closingDay: number | null;
   dueDay: number | null;
+  /** 信用卡國外交易手續費率 %（例 1.5；空白 = 預設 1.5） */
+  fxFeeRate: number | null;
   expiryDate: string | null;
   monthlyCheck: boolean;
   archived: boolean;
@@ -321,6 +323,7 @@ function toAccount(r: TableRow): Account {
     openingBalance: num(v.openingBalance),
     closingDay: num(v.closingDay),
     dueDay: num(v.dueDay),
+    fxFeeRate: num(v.fxFeeRate),
     expiryDate: str(v.expiryDate),
     monthlyCheck: v.monthlyCheck !== false,
     archived: v.archived === true,
@@ -484,7 +487,9 @@ export function checkTxn(t: Omit<TxnInput, 'tags'> & { tags?: string[] }, refs: 
       p.push(`${at}種類「${l.kind ?? ''}」看不懂（請填：${LINE_KINDS.join('、')}）`);
       return;
     }
-    if (!(l.amount > 0)) p.push(`${at}金額請填大於 0 的數字`);
+    // 支出、收入可以是負數（退款、折扣，2026-11-18 使用者決定）；其他明細一律正數
+    const signed = l.kind === '支出' || l.kind === '收入';
+    if (!Number.isFinite(l.amount) || (signed ? l.amount === 0 : !(l.amount > 0))) p.push(`${at}金額請填${signed ? '不是 0 的數字（負數 = 退款、折扣）' : '大於 0 的數字'}`);
     else if (!intOk(l.amount)) p.push(`${at}${cur} 金額請填整數`);
     if (l.kind === '支出' || l.kind === '收入') {
       const c = l.category ? refs.categories.find((x) => x.path === normPath(l.category!)) : null;
@@ -698,10 +703,15 @@ export function formToTxn(f: EntryForm): TxnInput {
         };
       }
       const shares: LineInput[] = f.shares.filter((s) => s.person || s.amount).map((s) => ({ kind: '他欠我', amount: s.amount ?? 0, person: s.person, debtType: '分帳' }));
-      return { ...base, direction: '出', account: f.account, amount: formTotal(f), lines: [...cats('支出'), ...shares] };
+      // 加總是負的（退款）→ 錢回到帳戶
+      const total = formTotal(f);
+      return { ...base, direction: total < 0 ? '入' : '出', account: f.account, amount: Math.abs(total), lines: [...cats('支出'), ...shares] };
     }
     case '收入':
-      return { ...base, direction: '入', account: f.account, amount: sum(f.cats.map((c) => c.amount)), lines: cats('收入') };
+    {
+      const total = sum(f.cats.map((c) => c.amount));
+      return { ...base, direction: total < 0 ? '出' : '入', account: f.account, amount: Math.abs(total), lines: cats('收入') };
+    }
     case '轉帳':
       return { ...base, direction: '轉帳', account: f.account, amount: f.amount, toAccount: f.toAccount, toAmount: f.toAmount, lines: [] };
     case '借款': {
@@ -745,6 +755,34 @@ export function formToTxn(f: EntryForm): TxnInput {
   }
 }
 
+/**
+ * 國外交易手續費（2026-11-18 確認）：另外記一筆交易，分類、預算、標籤跟著消費，店家記發卡銀行。
+ * 金額依「我的部分」各分類比例分（四捨五入，零頭給最後一筆）。
+ */
+export function feeTxnFrom(purchase: TxnInput, fee: number, bank: string | null): TxnInput {
+  const mine = purchase.lines.filter((l) => l.kind === '支出' && l.amount > 0);
+  const total = sum(mine.map((l) => l.amount));
+  let left = fee;
+  const lines: LineInput[] = mine.map((l, i) => {
+    const a = i === mine.length - 1 ? left : Math.round((fee * l.amount) / total);
+    left -= a;
+    return { kind: '支出' as const, amount: a, category: l.category, budget: l.budget ?? null, note: null };
+  }).filter((l) => l.amount > 0);
+  return {
+    ...purchase,
+    direction: '出',
+    amount: fee,
+    store: bank,
+    branch: null,
+    statementText: null,
+    note: [purchase.store, '國外交易服務費'].filter(Boolean).join(' '),
+    lines,
+  };
+}
+
+/** 手續費估算：金額 × 費率，四捨五入到整數 */
+export const estimateFee = (amount: number, ratePct: number | null) => Math.round((amount * (ratePct ?? 1.5)) / 100);
+
 /** 交易 → 表單（看不出是哪一種的 → mode「其他」，畫面只能刪除或到試算表改） */
 export function txnToForm(t: Txn): EntryForm {
   const f: EntryForm = { ...emptyForm('其他', t.time), store: t.store, branch: t.branch, statementText: t.statementText, note: t.note, tags: t.tags, account: t.account, currency: t.currency, cats: [] };
@@ -761,6 +799,9 @@ export function txnToForm(t: Txn): EntryForm {
     if (debt.person === t.paidBy && same(debt.amount, sum(mine.map((c) => c.amount)))) return { ...f, mode: '支出', paidBy: t.paidBy, cats: mine };
   }
   if (t.direction === '入' && only('收入')) return { ...f, mode: '收入', cats: catsOf('收入') };
+  // 退款（負的支出）、負的收入
+  if (t.direction === '入' && only('支出')) return { ...f, mode: '支出', cats: catsOf('支出') };
+  if (t.direction === '出' && only('收入')) return { ...f, mode: '收入', cats: catsOf('收入') };
   if (L.length === 1) {
     const l = L[0];
     if (t.direction === '出' && l.kind === '他欠我' && l.debtType === '借款') return { ...f, mode: '借款', sub: '借出', person: l.person, amount: l.amount };
@@ -1103,6 +1144,7 @@ export class MoneyStore {
       openingBalance: input.openingBalance == null ? null : roundMoney(input.openingBalance, currency),
       closingDay: input.type === '信用卡' ? input.closingDay : null,
       dueDay: input.type === '信用卡' ? input.dueDay : null,
+      fxFeeRate: input.type === '信用卡' ? input.fxFeeRate : null,
       expiryDate: input.expiryDate,
       monthlyCheck: input.monthlyCheck ? null : false,
       archived: input.archived || null,

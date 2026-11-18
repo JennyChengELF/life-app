@@ -11,6 +11,8 @@ import {
   splitTags,
   toInputDateTime,
   txnCurrency,
+  estimateFee,
+  feeTxnFrom,
   lastCategoryOfStore,
   txnToForm,
 } from '@life/db';
@@ -21,22 +23,49 @@ import { CategoryPicker } from './CategoryPicker';
 import { StorePicker } from './StorePicker';
 
 /** 金額輸入：自己記住打到一半的文字（例：「12.」） */
-function AmountInput({ value, onChange, placeholder = '金額' }: { value: number | null; onChange: (n: number | null) => void; placeholder?: string }) {
+function AmountInput({
+  value,
+  onChange,
+  placeholder = '金額',
+  signed = false,
+}: {
+  value: number | null;
+  onChange: (n: number | null) => void;
+  placeholder?: string;
+  /** 可以填負數（退款、折扣）：旁邊多一個 ± 按鈕（iPhone 數字鍵盤沒有負號） */
+  signed?: boolean;
+}) {
   const [s, setS] = useState(amountText(value));
   useEffect(() => {
     if (!Object.is(parseAmount(s), value)) setS(amountText(value));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
-  return (
+  const input = (
     <input
       inputMode="decimal"
       placeholder={placeholder}
       value={s}
+      className={signed && (value ?? 0) < 0 ? 'neg' : ''}
       onChange={(e) => {
         setS(e.target.value);
         onChange(parseAmount(e.target.value));
       }}
     />
+  );
+  if (!signed) return input;
+  const flip = () => {
+    const t = s.trim();
+    const next = t.startsWith('-') ? t.slice(1) : `-${t}`;
+    setS(next);
+    onChange(parseAmount(next));
+  };
+  return (
+    <>
+      <button type="button" className="sign-btn" onClick={flip} title="正負（負數 = 退款、折扣）">
+        ±
+      </button>
+      {input}
+    </>
   );
 }
 
@@ -50,6 +79,9 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
   const [splitTotal, setSplitTotal] = useState<number | null>(null);
   const [splitN, setSplitN] = useState(2);
   const [paidByMode, setPaidByMode] = useState(!!f.paidBy);
+  /** 國外交易手續費（只有新增、信用卡時）：null = 依費率自動算 */
+  const [feeOn, setFeeOn] = useState(false);
+  const [feeEdit, setFeeEdit] = useState<number | null>(null);
   const set = (patch: Partial<EntryForm>) => setF((x) => ({ ...x, ...patch }));
 
   const editable = ENTRY_MODES.includes(f.mode as (typeof ENTRY_MODES)[number]) || f.mode === '不用還了';
@@ -71,9 +103,22 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
     if (paidByMode && !f.paidBy) p.unshift('請選誰先幫你付');
     setProblems(p);
     if (p.length) return;
-    const ok = await api.run((s) => s.saveTxn(tx, txn).then(() => true));
+    // 國外交易手續費：另外記一筆（2026-11-18 確認）
+    const card = snap.accounts.find((a) => a.name === tx.account && a.type === '信用卡');
+    const fee = feeOn && card && !txn && tx.direction === '出' ? feeAmount : null;
+    const feeTx = fee ? feeTxnFrom(tx, fee, card!.org) : null;
+    if (feeOn && feeTx) {
+      const fp = checkTxn(feeTx, snap);
+      if (!(fee! > 0)) fp.push('手續費請填大於 0 的整數');
+      if (fp.length) return setProblems(fp.map((x) => `手續費：${x}`));
+    }
+    const ok = await api.run(async (s) => {
+      await s.saveTxn(tx, txn);
+      if (feeTx) await s.saveTxn(feeTx);
+      return true;
+    });
     if (ok) {
-      api.showToast({ kind: 'info', text: txn ? '已修改' : '已記錄' });
+      api.showToast({ kind: 'info', text: txn ? '已修改' : feeTx ? '已記錄（含手續費）' : '已記錄' });
       onClose();
     }
   };
@@ -95,7 +140,7 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
         {f.cats.map((c, i) => (
           <div className="cat-line" key={i}>
             <div className="row">
-              <AmountInput value={c.amount} onChange={(n) => set({ cats: f.cats.map((x, j) => (j === i ? { ...x, amount: n } : x)) })} />
+              <AmountInput signed value={c.amount} onChange={(n) => set({ cats: f.cats.map((x, j) => (j === i ? { ...x, amount: n } : x)) })} />
               {f.cats.length > 1 && (
                 <button className="x-btn" onClick={() => set({ cats: f.cats.filter((_, j) => j !== i) })} aria-label="移除">
                   ✕
@@ -172,6 +217,8 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
   );
 
   const from = snap.accounts.find((a) => a.name === f.account);
+  const feeCard = !txn && f.mode === '支出' && !paidByMode && from?.type === '信用卡' ? from : null;
+  const feeAmount = feeEdit ?? estimateFee(Math.max(0, formTotal(f)), feeCard?.fxFeeRate ?? null);
   const to = snap.accounts.find((a) => a.name === f.toAccount);
 
   return (
@@ -307,6 +354,20 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
                 <p className="hint">
                   我付了 {fmtMoney(formTotal(f), currency)}（我的部分＋別人的份額）
                 </p>
+              )}
+              {feeCard && (
+                <div className="subbox">
+                  <label className="check">
+                    <input type="checkbox" checked={feeOn} onChange={(e) => setFeeOn(e.target.checked)} />
+                    ＋國外交易手續費（{feeCard.fxFeeRate ?? 1.5}%）
+                  </label>
+                  {feeOn && (
+                    <div className="row">
+                      <AmountInput value={feeAmount} onChange={(n) => setFeeEdit(n)} />
+                      <span className="hint">另外記一筆，分類、預算、標籤跟著這筆；店家記 {feeCard.org ?? '發卡銀行'}。對帳時可改成帳單金額。</span>
+                    </div>
+                  )}
+                </div>
               )}
             </>
           )}
