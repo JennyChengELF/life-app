@@ -122,3 +122,25 @@ details > summary { cursor: pointer; color: var(--muted); font-size: 0.9rem; mar
 input.neg { color: var(--in); }
 .check.inline { margin: 0; white-space: nowrap; color: var(--text); }
 .row.branch input:not([type='checkbox']) { flex: 1; }
+.ledger-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.ledger-head .date-nav, .ledger-head .month-nav { margin: 0; }
+button.day-head { width: 100%; background: none; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; }
+
+/* 統計：分類佔比 */
+.dist li { display: block; padding: 0; }
+.dist.sub { margin: 0 0 4px 14px; border-left: 2px solid var(--line); padding-left: 6px; }
+.dist-row { width: 100%; display: grid; grid-template-columns: minmax(5em, 8em) 1fr 3.2em 6.5em; align-items: center; gap: 8px; padding: 5px 2px; border: 0; background: none; border-radius: 6px; font-size: 0.9rem; color: var(--text); }
+.dist-row:disabled { opacity: 1; cursor: default; }
+.dist-row.can-open:hover { background: var(--bg); }
+.dist-name { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dist-pct { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; font-size: 0.85rem; }
+
+/* 年統計：每月 */
+.months { list-style: none; margin: 0 0 6px; padding: 0; }
+.month-row { width: 100%; display: grid; grid-template-columns: 3em 1fr 5.5em 5.5em; gap: 8px; align-items: center; border: 0; background: none; padding: 4px 2px; border-radius: 6px; font-size: 0.88rem; color: var(--text); }
+.month-row:hover { background: var(--bg); }
+.month-row .num { text-align: right; }
+.month-bars { display: flex; flex-direction: column; gap: 2px; }
+.month-bars i { display: block; height: 6px; min-width: 1px; border-radius: 0 3px 3px 0; }
+.month-bars i.out { background: var(--out); }
+.month-bars i.in { background: var(--in); }

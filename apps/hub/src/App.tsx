@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { TimelineEntry } from '@life/db';
-import { bowelEntries, bowelHomeMessage, editHash, healthEntries, resolvePinned, sortEntries, todayKey, waterEntries, waterSummary } from '@life/db';
+import { bowelEntries, bowelHomeMessage, editHash, fmtMoney, healthEntries, moneyDayTotals, moneyEntries, resolvePinned, sortEntries, todayKey, waterEntries, waterSummary } from '@life/db';
 import { DateNav, Timeline } from '@life/ui/timeline';
 import { useHub } from './useHub';
 
@@ -209,7 +209,7 @@ function Day({ hub, date, setDate }: { hub: ReturnType<typeof useHub>; date: str
         {hub.error && <p className="error-text">{hub.error}</p>}
       </div>
     );
-  if (hub.status === 'error' || !hub.waterSnap || !hub.healthSnap || !hub.bowelSnap)
+  if (hub.status === 'error' || !hub.waterSnap || !hub.healthSnap || !hub.bowelSnap || !hub.moneySnap)
     return (
       <div className="center">
         <p className="error-text">{hub.error ?? '讀取失敗'}</p>
@@ -220,7 +220,13 @@ function Day({ hub, date, setDate }: { hub: ReturnType<typeof useHub>; date: str
     );
 
   const w = waterSummary(hub.waterSnap, date);
-  const entries = sortEntries([...healthEntries(hub.healthSnap, date), ...waterEntries(hub.waterSnap, date), ...bowelEntries(hub.bowelSnap, date)]);
+  const entries = sortEntries([
+    ...healthEntries(hub.healthSnap, date),
+    ...waterEntries(hub.waterSnap, date),
+    ...bowelEntries(hub.bowelSnap, date),
+    ...moneyEntries(hub.moneySnap, date),
+  ]);
+  const money = moneyDayTotals(hub.moneySnap, date);
   // 昨天排便較少（「喝水 +500ml」按鈕等喝水的加量功能做好再加）
   const bowelMsg = bowelHomeMessage(hub.bowelSnap, hub.healthSnap.body);
   const pct = w.goal > 0 ? Math.min(100, Math.round((w.total / w.goal) * 100)) : 0;
@@ -253,6 +259,16 @@ function Day({ hub, date, setDate }: { hub: ReturnType<typeof useHub>; date: str
             <span className="muted small">{left > 0 ? `還差 ${left.toLocaleString()}` : '已達標 🎉'}</span>
           </span>
         </a>
+        {(money.expense !== 0 || money.income !== 0) && (
+          <a className="money-sum" href={appUrl('money')}>
+            💰 支出 <b>{fmtMoney(money.expense)}</b>
+            {money.income !== 0 && (
+              <>
+                {' '}・ 收入 <b>{fmtMoney(money.income)}</b>
+              </>
+            )}
+          </a>
+        )}
         <Timeline entries={entries} onPick={pick} />
       </section>
     </>

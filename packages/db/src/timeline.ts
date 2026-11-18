@@ -12,6 +12,8 @@ import type { BowelSnapshot } from './bowel';
 import { bowelSummary, judgeBowel } from './bowel';
 import type { WaterSnapshot } from './water';
 import { computeGoal, drinkOf, goalWeight } from './water';
+import type { MoneySnapshot } from './money';
+import { fmtMoney, txnCurrency, txnMyNet, txnTitle } from './money';
 
 /** 點一列要修改的是哪一筆 */
 export type EntryRef =
@@ -19,7 +21,8 @@ export type EntryRef =
   | { app: 'health'; kind: 'occ'; id: string }
   | { app: 'health'; kind: 'lab'; id: string }
   | { app: 'water'; kind: 'water'; id: string }
-  | { app: 'bowel'; kind: 'bowel'; id: string };
+  | { app: 'bowel'; kind: 'bowel'; id: string }
+  | { app: 'money'; kind: 'money'; id: string };
 
 export interface TimelineEntry {
   key: string;
@@ -174,6 +177,42 @@ export function bowelEntries(snap: BowelSnapshot, date: string): TimelineEntry[]
     });
 }
 
+/** 記帳（2026-11-18）：每一筆交易；金額是「我」的收支（支出負、收入正），轉帳、借還款顯示金額 */
+export function moneyEntries(snap: MoneySnapshot, date: string): TimelineEntry[] {
+  return snap.txns
+    .filter((t) => t.date === date)
+    .map((t) => {
+      const cur = txnCurrency(t, snap.accounts);
+      const { expense, income } = txnMyNet(t);
+      const net = income - expense;
+      const value = expense || income ? `${net < 0 ? '−' : '+'}${fmtMoney(Math.abs(net), cur)}` : fmtMoney(t.amount ?? 0, cur);
+      const extra = [t.store, t.direction === '轉帳' ? `${t.account} → ${t.toAccount}` : (t.account ?? (t.paidBy ? `${t.paidBy} 先付` : null))].filter(Boolean).join('・');
+      return {
+        key: t.id,
+        time: t.time,
+        icon: '💰',
+        name: txnTitle(t),
+        value,
+        extra: extra || undefined,
+        note: t.note,
+        ref: { app: 'money' as const, kind: 'money' as const, id: t.id },
+      };
+    });
+}
+
+/** 那天「我」的支出、收入合計（新台幣） */
+export function moneyDayTotals(snap: MoneySnapshot, date: string): { expense: number; income: number } {
+  let expense = 0;
+  let income = 0;
+  for (const t of snap.txns) {
+    if (t.date !== date || txnCurrency(t, snap.accounts) !== 'TWD') continue;
+    const n = txnMyNet(t);
+    expense += n.expense;
+    income += n.income;
+  }
+  return { expense, income };
+}
+
 /** 那天的喝水總量、目標（還沒有目標紀錄的日子用規則算） */
 export function waterSummary(snap: WaterSnapshot, date: string): { total: number; goal: number } {
   const total = snap.logs.filter((l) => l.date === date).reduce((s, l) => s + l.ml, 0);
@@ -190,6 +229,6 @@ export const sortEntries = (list: TimelineEntry[]) => [...list].sort((a, b) => N
 export const editHash = (ref: EntryRef) => `#edit/${ref.kind}/${ref.id}`;
 
 export function parseEditHash(hash: string): { kind: EntryRef['kind']; id: string } | null {
-  const m = /^#edit\/(body|bp|glucose|temp|occ|lab|water|bowel)\/(.+)$/.exec(hash);
+  const m = /^#edit\/(body|bp|glucose|temp|occ|lab|water|bowel|money)\/(.+)$/.exec(hash);
   return m ? { kind: m[1] as EntryRef['kind'], id: decodeURIComponent(m[2]) } : null;
 }

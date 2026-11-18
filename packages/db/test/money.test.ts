@@ -2,6 +2,11 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { Account, EntryForm, MoneySnapshot, Txn } from '../src';
 import {
   accountBalance,
+  categoryBreakdown,
+  moneyDayTotals,
+  moneyEntries,
+  monthlyTotals,
+  parseEditHash,
   categoryTree,
   checkTxn,
   MAX_CATEGORY_DEPTH,
@@ -413,5 +418,42 @@ describe('退款（負數）、國外交易手續費', () => {
     const two = feeTxnFrom({ ...buy, lines: [{ kind: '支出', amount: 600, category: '樂 / 數位內容 / LYSN' }, { kind: '支出', amount: 120, category: '樂 / 數位內容 / Weverse' }] }, 11, null);
     expect(two.lines).toHaveLength(1);
     expect(two.lines[0]).toMatchObject({ category: '樂 / 數位內容 / 國外交易手續費', amount: 11 });
+  });
+});
+
+describe('統計：佔比、年統計、首頁時間軸', () => {
+  it('分類佔比：主分類、展開子分類、直接記在上層的', () => {
+    const by = new Map([
+      ['食 / 三餐 / 午餐', 600],
+      ['食 / 三餐', 100],
+      ['食 / 飲料點心', 300],
+      ['行', 1000],
+    ]);
+    const top = categoryBreakdown(by, null);
+    expect(top.map((x) => [x.name, x.amount, Math.round(x.share * 100), x.hasChildren])).toEqual([
+      ['食', 1000, 50, true],
+      ['行', 1000, 50, false],
+    ]);
+    expect(categoryBreakdown(by, '食').map((x) => [x.name, x.amount, Math.round(x.share * 100)])).toEqual([
+      ['三餐', 700, 70],
+      ['飲料點心', 300, 30],
+    ]);
+    expect(categoryBreakdown(by, '食 / 三餐').map((x) => x.name)).toEqual(['午餐', '（三餐 本身）']);
+  });
+  it('年統計 12 個月；時間軸顯示這天的每一筆', async () => {
+    const backend = new LocalBackend(memoryStorage());
+    const store = new MoneyStore(backend);
+    await store.load();
+    const acc = { type: '現金' as const, currency: 'TWD', org: null, openingDate: null, openingBalance: null, closingDay: null, dueDay: null, fxFeeRate: null, expiryDate: null, monthlyCheck: true, archived: false, note: null };
+    await store.saveAccount({ ...acc, name: '錢包' });
+    await store.saveTxn(formToTxn({ ...form({ account: '錢包', store: '八方雲集', cats: [{ category: '食 / 三餐', amount: 86 }] }), time: at('2026-03-05 12:30') }));
+    const snap = await store.load();
+    const year = monthlyTotals(snap.txns, snap.categories, snap.accounts, '2026');
+    expect(year).toHaveLength(12);
+    expect(year[2]).toMatchObject({ month: '2026-03', expense: 86 });
+    const [e] = moneyEntries(snap, '2026-03-05');
+    expect(e).toMatchObject({ icon: '💰', name: '食 / 三餐', value: '−NT$ 86', extra: '八方雲集・錢包', ref: { app: 'money', kind: 'money' } });
+    expect(moneyDayTotals(snap, '2026-03-05')).toEqual({ expense: 86, income: 0 });
+    expect(parseEditHash(`#edit/money/${e.ref.id}`)).toEqual({ kind: 'money', id: e.ref.id });
   });
 });

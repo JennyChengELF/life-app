@@ -1,5 +1,6 @@
 import type { MoneySnapshot, Txn } from '@life/db';
-import { emptyForm, fmtMoney, monthStats, toHHmm, txnCurrency, txnMyNet, txnTitle } from '@life/db';
+import { emptyForm, fmtMoney, monthStats, startOfDay, todayKey, toHHmm, txnCurrency, txnMyNet, txnTitle } from '@life/db';
+import { DateNav } from '@life/ui/timeline';
 import type { Editing } from '../App';
 import { MonthNav } from './common';
 
@@ -41,86 +42,150 @@ function subText(t: Txn) {
   return parts.join('・');
 }
 
+function TxList({ list, snap, onEdit }: { list: Txn[]; snap: MoneySnapshot; onEdit: (e: Editing) => void }) {
+  return (
+    <ul className="tx-list">
+      {list.map((t) => (
+        <li key={t.id} className="tx-row" onClick={() => onEdit({ form: emptyForm(), txn: t })}>
+          <span className="muted small num">{toHHmm(t.time)}</span>
+          <div className="tx-main">
+            <div className="tx-title">{txnTitle(t)}</div>
+            <div className="tx-sub">{subText(t)}</div>
+          </div>
+          <TxAmount t={t} snap={snap} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** 支出 / 收入（新台幣）；外幣另外一行 */
+function Sums({ snap, prefix, small }: { snap: MoneySnapshot; prefix: string; small?: string }) {
+  const stats = monthStats(snap.txns, snap.categories, snap.accounts, prefix);
+  const twd = stats.find((s) => s.currency === 'TWD');
+  const foreign = stats.filter((s) => s.currency !== 'TWD');
+  if (small) {
+    return (
+      <p className="hint center-text">
+        {small} 支出 {fmtMoney(twd?.expense ?? 0)} ・ 收入 {fmtMoney(twd?.income ?? 0)}
+      </p>
+    );
+  }
+  return (
+    <>
+      <div className="sum-row">
+        <div>
+          <div className="sum-label">支出</div>
+          <div className="sum-value amt-out">{fmtMoney(twd?.expense ?? 0)}</div>
+        </div>
+        <div>
+          <div className="sum-label">收入</div>
+          <div className="sum-value amt-in">{fmtMoney(twd?.income ?? 0)}</div>
+        </div>
+      </div>
+      {foreign.map((s) => (
+        <p key={s.currency} className="hint">
+          另有 {s.currency}：支出 {fmtMoney(s.expense, s.currency)}、收入 {fmtMoney(s.income, s.currency)}（還沒換算）
+        </p>
+      ))}
+    </>
+  );
+}
+
+/** 新增時的時間：看的是今天 → 現在；看的是別天 → 那天的現在這個時間 */
+function timeFor(date: string) {
+  const now = Date.now();
+  const today = todayKey();
+  return date === today ? now : startOfDay(date) + (now - startOfDay(today));
+}
+
+/** 記帳頁（2026-11-18 使用者要求：預設一天一天看，可切換整個月） */
 export function LedgerView({
   snap,
-  month,
-  setMonth,
+  date,
+  setDate,
+  view,
+  setView,
   onEdit,
   editing,
 }: {
   snap: MoneySnapshot;
-  month: string;
-  setMonth: (m: string) => void;
+  date: string;
+  setDate: (d: string) => void;
+  view: 'day' | 'month';
+  setView: (v: 'day' | 'month') => void;
   onEdit: (e: Editing) => void;
   editing: boolean;
 }) {
-  const txns = snap.txns.filter((t) => t.date.startsWith(month));
-  const days = [...new Set(txns.map((t) => t.date))];
-  const stats = monthStats(snap.txns, snap.categories, snap.accounts, month);
-  const twd = stats.find((s) => s.currency === 'TWD');
+  const month = date.slice(0, 7);
+  const newEntry = (mode: '支出' | '收入' | '轉帳') => onEdit({ form: emptyForm(mode, view === 'day' ? timeFor(date) : Date.now()) });
 
   return (
     <>
       {!editing && (
         <div className="add-bar">
-          <button className="primary big" onClick={() => onEdit({ form: emptyForm('支出') })}>
+          <button className="primary big" onClick={() => newEntry('支出')}>
             ＋ 記一筆支出
           </button>
-          <button onClick={() => onEdit({ form: emptyForm('收入') })}>收入</button>
-          <button onClick={() => onEdit({ form: emptyForm('轉帳') })}>轉帳</button>
+          <button onClick={() => newEntry('收入')}>收入</button>
+          <button onClick={() => newEntry('轉帳')}>轉帳</button>
         </div>
       )}
       {!snap.accounts.length && <p className="hint warn">還沒有帳戶：請先到「⚙️ 設定」新增帳戶（例：台幣現金、信用卡）。</p>}
 
       <section className="card">
-        <MonthNav month={month} setMonth={setMonth} />
-        <div className="sum-row">
-          <div>
-            <div className="sum-label">支出</div>
-            <div className="sum-value amt-out">{fmtMoney(twd?.expense ?? 0)}</div>
-          </div>
-          <div>
-            <div className="sum-label">收入</div>
-            <div className="sum-value amt-in">{fmtMoney(twd?.income ?? 0)}</div>
+        <div className="ledger-head">
+          {view === 'day' ? <DateNav date={date} setDate={setDate} /> : <MonthNav month={month} setMonth={(m) => setDate(`${m}-01`)} />}
+          <div className="seg">
+            <button className={view === 'day' ? 'active' : ''} onClick={() => setView('day')}>
+              日
+            </button>
+            <button className={view === 'month' ? 'active' : ''} onClick={() => setView('month')}>
+              月
+            </button>
           </div>
         </div>
-        {stats
-          .filter((s) => s.currency !== 'TWD')
-          .map((s) => (
-            <p key={s.currency} className="hint">
-              另有 {s.currency}：支出 {fmtMoney(s.expense, s.currency)}、收入 {fmtMoney(s.income, s.currency)}（還沒換算）
-            </p>
-          ))}
 
-        {txns.length === 0 ? (
-          <p className="muted center-text">這個月還沒有紀錄</p>
+        {view === 'day' ? (
+          <>
+            <Sums snap={snap} prefix={date} />
+            {snap.txns.some((t) => t.date === date) ? (
+              <TxList list={snap.txns.filter((t) => t.date === date)} snap={snap} onEdit={onEdit} />
+            ) : (
+              <p className="muted center-text">這天沒有紀錄</p>
+            )}
+            <Sums snap={snap} prefix={month} small={`${Number(month.slice(5))} 月`} />
+          </>
         ) : (
-          days.map((d) => {
-            const list = txns.filter((t) => t.date === d);
-            const out = list.reduce((a, t) => (txnCurrency(t, snap.accounts) === 'TWD' ? a + txnMyNet(t).expense : a), 0);
-            return (
-              <div key={d}>
-                <div className="day-head">
-                  <span>{dayLabel(d)}</span>
-                  {out > 0 && <span>支出 {fmtMoney(out)}</span>}
-                </div>
-                <ul className="tx-list">
-                  {list.map((t) => (
-                    <li key={t.id} className="tx-row" onClick={() => onEdit({ form: emptyForm(), txn: t })}>
-                      <span className="muted small num">{toHHmm(t.time)}</span>
-                      <div className="tx-main">
-                        <div className="tx-title">{txnTitle(t)}</div>
-                        <div className="tx-sub">{subText(t)}</div>
-                      </div>
-                      <TxAmount t={t} snap={snap} />
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            );
-          })
+          <>
+            <Sums snap={snap} prefix={month} />
+            <MonthList snap={snap} month={month} onEdit={onEdit} onDay={(d) => (setDate(d), setView('day'))} />
+          </>
         )}
       </section>
+    </>
+  );
+}
+
+function MonthList({ snap, month, onEdit, onDay }: { snap: MoneySnapshot; month: string; onEdit: (e: Editing) => void; onDay: (d: string) => void }) {
+  const txns = snap.txns.filter((t) => t.date.startsWith(month));
+  if (!txns.length) return <p className="muted center-text">這個月還沒有紀錄</p>;
+  const days = [...new Set(txns.map((t) => t.date))];
+  return (
+    <>
+      {days.map((d) => {
+        const list = txns.filter((t) => t.date === d);
+        const out = list.reduce((a, t) => (txnCurrency(t, snap.accounts) === 'TWD' ? a + txnMyNet(t).expense : a), 0);
+        return (
+          <div key={d}>
+            <button className="day-head" onClick={() => onDay(d)} title="看這一天">
+              <span>{dayLabel(d)}</span>
+              {out !== 0 && <span>支出 {fmtMoney(out)}</span>}
+            </button>
+            <TxList list={list} snap={snap} onEdit={onEdit} />
+          </div>
+        );
+      })}
     </>
   );
 }

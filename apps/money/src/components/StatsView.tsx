@@ -1,31 +1,86 @@
+import { useState } from 'react';
 import type { MoneySnapshot } from '@life/db';
-import { fmtMoney, monthStats } from '@life/db';
+import { categoryBreakdown, fmtMoney, monthlyTotals, monthStats } from '@life/db';
 import { MonthNav } from './common';
 
-function Dist({ items, currency }: { items: { name: string; amount: number }[]; currency: string }) {
+const pct = (x: number) => `${(x * 100).toFixed(x >= 0.1 ? 0 : 1)}%`;
+
+/**
+ * 分類佔比（2026-11-18 使用者要求）：每個分類的金額、佔比；點一下展開子分類（子分類的佔比是佔上一層的）
+ */
+function Breakdown({ byPath, currency, parent = null, depth = 0 }: { byPath: Map<string, number>; currency: string; parent?: string | null; depth?: number }) {
+  const [open, setOpen] = useState<string | null>(null);
+  const items = categoryBreakdown(byPath, parent);
   const max = Math.max(1, ...items.map((i) => i.amount));
   return (
-    <ul className="dist">
+    <ul className={`dist ${depth ? 'sub' : ''}`}>
       {items.map((i) => (
-        <li key={i.name}>
-          <span>{i.name}</span>
-          <span className="dist-bar">
-            <i style={{ width: `${(i.amount / max) * 100}%` }} />
-          </span>
-          <span className="dist-num">{fmtMoney(i.amount, currency, false)}</span>
+        <li key={i.path + i.name}>
+          <button
+            className={`dist-row ${i.hasChildren ? 'can-open' : ''}`}
+            onClick={() => i.hasChildren && setOpen(open === i.path ? null : i.path)}
+            disabled={!i.hasChildren}
+          >
+            <span className="dist-name">
+              {i.hasChildren ? (open === i.path ? '▼ ' : '▶ ') : ''}
+              {i.name}
+            </span>
+            <span className="dist-bar">
+              <i style={{ width: `${(i.amount / max) * 100}%` }} />
+            </span>
+            <span className="dist-pct">{pct(i.share)}</span>
+            <span className="dist-num">{fmtMoney(i.amount, currency, false)}</span>
+          </button>
+          {open === i.path && <Breakdown byPath={byPath} currency={currency} parent={i.path} depth={depth + 1} />}
         </li>
       ))}
     </ul>
   );
 }
 
-export function StatsView({ snap, month, setMonth }: { snap: MoneySnapshot; month: string; setMonth: (m: string) => void }) {
-  const stats = monthStats(snap.txns, snap.categories, snap.accounts, month);
+function YearNav({ year, setYear }: { year: string; setYear: (y: string) => void }) {
+  return (
+    <div className="month-nav">
+      <button className="link" onClick={() => setYear(String(Number(year) - 1))} aria-label="前一年">
+        ◀
+      </button>
+      <span className="date-label">{year} 年</span>
+      <button className="link" onClick={() => setYear(String(Number(year) + 1))} aria-label="後一年">
+        ▶
+      </button>
+    </div>
+  );
+}
+
+export function StatsView({ snap, initialMonth }: { snap: MoneySnapshot; initialMonth: string }) {
+  const [mode, setMode] = useState<'month' | 'year'>('month');
+  const [month, setMonth] = useState(initialMonth);
+  const [year, setYear] = useState(initialMonth.slice(0, 4));
+  const prefix = mode === 'month' ? month : year;
+  const stats = monthStats(snap.txns, snap.categories, snap.accounts, prefix);
   const hasInvest = snap.categories.some((c) => c.isInvest);
+  const months = mode === 'year' ? monthlyTotals(snap.txns, snap.categories, snap.accounts, year) : [];
+  const maxMonth = Math.max(1, ...months.map((m) => Math.max(m.expense, m.income)));
+
   return (
     <section className="card">
-      <MonthNav month={month} setMonth={setMonth} />
-      {stats.length === 0 && <p className="muted center-text">這個月還沒有收支</p>}
+      <div className="ledger-head">
+        {mode === 'month' ? (
+          <MonthNav month={month} setMonth={(m) => (setMonth(m), setYear(m.slice(0, 4)))} />
+        ) : (
+          <YearNav year={year} setYear={setYear} />
+        )}
+        <div className="seg">
+          <button className={mode === 'month' ? 'active' : ''} onClick={() => setMode('month')}>
+            月
+          </button>
+          <button className={mode === 'year' ? 'active' : ''} onClick={() => setMode('year')}>
+            年
+          </button>
+        </div>
+      </div>
+
+      {stats.length === 0 && <p className="muted center-text">{mode === 'month' ? '這個月' : '這一年'}還沒有收支</p>}
       {stats.map((s) => (
         <div key={s.currency}>
           {s.currency !== 'TWD' && <h2>{s.currency}（還沒換算新台幣）</h2>}
@@ -51,21 +106,52 @@ export function StatsView({ snap, month, setMonth }: { snap: MoneySnapshot; mont
               </>
             )}
           </div>
-          {s.expenseByTop.length > 0 && (
+
+          {s.currency === 'TWD' && mode === 'year' && (
             <>
-              <h2>支出分類</h2>
-              <Dist items={s.expenseByTop} currency={s.currency} />
+              <h2>每月</h2>
+              <ul className="months">
+                {months.map((m) => (
+                  <li key={m.month}>
+                    <button
+                      className="month-row"
+                      onClick={() => {
+                        setMonth(m.month);
+                        setMode('month');
+                      }}
+                      title="看這個月"
+                    >
+                      <span>{Number(m.month.slice(5))} 月</span>
+                      <span className="month-bars">
+                        <i className="out" style={{ width: `${(m.expense / maxMonth) * 100}%` }} />
+                        <i className="in" style={{ width: `${(m.income / maxMonth) * 100}%` }} />
+                      </span>
+                      <span className="num amt-out">{fmtMoney(m.expense, 'TWD', false)}</span>
+                      <span className="num amt-in">{fmtMoney(m.income, 'TWD', false)}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <p className="hint">上排紅色是支出、下排綠色是收入；點一個月看那個月的明細。</p>
             </>
           )}
-          {s.incomeByTop.length > 0 && (
+
+          {s.expense !== 0 && (
+            <>
+              <h2>支出分類</h2>
+              <Breakdown byPath={s.expenseByPath} currency={s.currency} />
+            </>
+          )}
+          {s.income !== 0 && (
             <>
               <h2>收入分類</h2>
-              <Dist items={s.incomeByTop} currency={s.currency} />
+              <Breakdown byPath={s.incomeByPath} currency={s.currency} />
             </>
           )}
         </div>
       ))}
-      {!hasInvest && <p className="hint">在「設定 → 分類」把投資相關的分類標成「投資類」，這裡就會另外顯示實際收支。</p>}
+      <p className="hint">點有 ▶ 的分類可以展開，子分類的 % 是佔上一層的比例。</p>
+      {!hasInvest && <p className="hint">在「分類管理」把投資相關的分類設成「投資類」，這裡就會另外顯示實際收支。</p>}
     </section>
   );
 }

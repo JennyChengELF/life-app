@@ -595,9 +595,58 @@ export interface MonthStats {
   /** 第一層分類的支出（大 → 小） */
   expenseByTop: { name: string; amount: number }[];
   incomeByTop: { name: string; amount: number }[];
+  /** 每個分類（完整路徑）的金額，展開子分類用（categoryBreakdown） */
+  expenseByPath: Map<string, number>;
+  incomeByPath: Map<string, number>;
 }
 
-/** 某個月（'YYYY-MM'）的收支，依幣別分開（外幣換算新台幣之後再做） */
+export interface BreakdownItem {
+  name: string;
+  path: string;
+  amount: number;
+  /** 佔上一層（或總額）的比例 0–1 */
+  share: number;
+  /** 底下還有分類 */
+  hasChildren: boolean;
+}
+
+/**
+ * 分類佔比（2026-11-18）：某一層（parent = null 是主分類）底下每個分類的金額和佔比。
+ * 直接記在上層的（例：只選到「食」）顯示成「（食 本身）」。
+ */
+export function categoryBreakdown(byPath: Map<string, number>, parent: string | null): BreakdownItem[] {
+  const depth = parent ? pathDepth(parent) : 0;
+  const m = new Map<string, { amount: number; deeper: boolean }>();
+  let own = 0;
+  for (const [path, amount] of byPath) {
+    if (parent && path !== parent && !path.startsWith(`${parent} / `)) continue;
+    if (parent && path === parent) {
+      own += amount;
+      continue;
+    }
+    const parts = path.split(' / ');
+    const key = parts.slice(0, depth + 1).join(' / ');
+    const x = m.get(key) ?? { amount: 0, deeper: false };
+    x.amount += amount;
+    if (parts.length > depth + 1) x.deeper = true;
+    m.set(key, x);
+  }
+  const total = [...m.values()].reduce((a, x) => a + x.amount, own);
+  const items: BreakdownItem[] = [...m].map(([path, x]) => ({ name: lastName(path), path, amount: x.amount, share: total ? x.amount / total : 0, hasChildren: x.deeper }));
+  if (own) items.push({ name: `（${lastName(parent!)} 本身）`, path: parent!, amount: own, share: total ? own / total : 0, hasChildren: false });
+  return items.sort((a, b) => b.amount - a.amount);
+}
+
+/** 一年 12 個月的收支（新台幣；外幣還沒換算不算進來） */
+export function monthlyTotals(txns: Txn[], categories: Pick<Category, 'path' | 'isInvest'>[], accounts: Pick<Account, 'name' | 'currency'>[], year: string) {
+  return Array.from({ length: 12 }, (_, i) => {
+    const month = `${year}-${String(i + 1).padStart(2, '0')}`;
+    const s = monthStats(txns, categories, accounts, month).find((x) => x.currency === 'TWD');
+    return { month, expense: s?.expense ?? 0, income: s?.income ?? 0, realExpense: s?.realExpense ?? 0, realIncome: s?.realIncome ?? 0 };
+  });
+}
+
+/** 某個月（'YYYY-MM'）或某一年（'YYYY'）、某一天（'YYYY-MM-DD'）的收支，依幣別分開（外幣換算新台幣之後再做） */
 export function monthStats(txns: Txn[], categories: Pick<Category, 'path' | 'isInvest'>[], accounts: Pick<Account, 'name' | 'currency'>[], month: string): MonthStats[] {
   const invest = new Set(categories.filter((c) => c.isInvest).map((c) => c.path));
   const by = new Map<string, MonthStats & { _e: Map<string, number>; _i: Map<string, number> }>();
@@ -606,17 +655,19 @@ export function monthStats(txns: Txn[], categories: Pick<Category, 'path' | 'isI
     const cur = txnCurrency(t, accounts);
     for (const l of t.lines) {
       if (l.kind !== '支出' && l.kind !== '收入') continue;
-      const s = by.get(cur) ?? { currency: cur, income: 0, expense: 0, realIncome: 0, realExpense: 0, expenseByTop: [], incomeByTop: [], _e: new Map(), _i: new Map() };
+      const s = by.get(cur) ?? { currency: cur, income: 0, expense: 0, realIncome: 0, realExpense: 0, expenseByTop: [], incomeByTop: [], expenseByPath: new Map(), incomeByPath: new Map(), _e: new Map(), _i: new Map() };
       const real = !invest.has(l.category ?? '');
       const top = topCategory(l.category ?? '（沒有分類）');
       if (l.kind === '支出') {
         s.expense += l.amount;
         if (real) s.realExpense += l.amount;
         s._e.set(top, (s._e.get(top) ?? 0) + l.amount);
+        if (l.category) s.expenseByPath.set(l.category, (s.expenseByPath.get(l.category) ?? 0) + l.amount);
       } else {
         s.income += l.amount;
         if (real) s.realIncome += l.amount;
         s._i.set(top, (s._i.get(top) ?? 0) + l.amount);
+        if (l.category) s.incomeByPath.set(l.category, (s.incomeByPath.get(l.category) ?? 0) + l.amount);
       }
       by.set(cur, s);
     }

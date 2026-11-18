@@ -162,7 +162,7 @@ export function App() {
   useEffect(() => {
     if (!pendingEdit || !api.snap) return;
     setPendingEdit(null);
-    if (pendingEdit.kind !== 'water' && pendingEdit.kind !== 'bowel') nav.openRecord(pendingEdit.kind, pendingEdit.id, 'home');
+    if (pendingEdit.kind !== 'water' && pendingEdit.kind !== 'bowel' && pendingEdit.kind !== 'money') nav.openRecord(pendingEdit.kind, pendingEdit.id, 'home');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingEdit, api.snap]);
 

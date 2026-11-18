@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Backend, BowelSnapshot, HealthSnapshot, HubSnapshot, WaterSnapshot } from '@life/db';
-import { AuthError, BowelStore, GoogleAuth, HealthStore, HubStore, LocalBackend, SheetsBackend, WaterStore } from '@life/db';
+import type { Backend, BowelSnapshot, HealthSnapshot, HubSnapshot, MoneySnapshot, WaterSnapshot } from '@life/db';
+import { AuthError, BowelStore, GoogleAuth, HealthStore, HubStore, LocalBackend, MoneyStore, SheetsBackend, WaterStore } from '@life/db';
 
 const CLIENT_ID = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined)?.trim() ?? '';
 /** 網址加 ?local 可強制用本機測試模式 */
@@ -13,16 +13,17 @@ export type Status = 'starting' | 'need-connect' | 'loading' | 'ready' | 'error'
  * 首頁只顯示（讀取時和各 APP 一樣會補齊試算表）；要新增 / 修改就跳到那個 APP。
  */
 export function useHub() {
-  const { backend, auth, water, health, bowel, hubStore } = useMemo(() => {
+  const { backend, auth, water, health, bowel, money, hubStore } = useMemo(() => {
     const auth = CLIENT_ID && !FORCE_LOCAL ? new GoogleAuth(CLIENT_ID) : null;
     const backend: Backend = auth ? new SheetsBackend(auth) : new LocalBackend();
-    return { backend, auth, water: new WaterStore(backend, 'hub'), health: new HealthStore(backend, 'hub'), bowel: new BowelStore(backend, 'hub'), hubStore: new HubStore(backend) };
+    return { backend, auth, water: new WaterStore(backend, 'hub'), health: new HealthStore(backend, 'hub'), bowel: new BowelStore(backend, 'hub'), money: new MoneyStore(backend, 'hub'), hubStore: new HubStore(backend) };
   }, []);
 
   const [status, setStatus] = useState<Status>('starting');
   const [waterSnap, setWaterSnap] = useState<WaterSnapshot | null>(null);
   const [healthSnap, setHealthSnap] = useState<HealthSnapshot | null>(null);
   const [bowelSnap, setBowelSnap] = useState<BowelSnapshot | null>(null);
+  const [moneySnap, setMoneySnap] = useState<MoneySnapshot | null>(null);
   const [hubSnap, setHubSnap] = useState<HubSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -36,14 +37,15 @@ export function useHub() {
       });
     }
     await initPromise.current;
-    const [w, h, b, s] = await Promise.all([water.load(), health.load(), bowel.load(), hubStore.load()]);
+    const [w, h, b, s, m] = await Promise.all([water.load(), health.load(), bowel.load(), hubStore.load(), money.load()]);
+    setMoneySnap(m);
     setHubSnap(s);
     setWaterSnap(w);
     setHealthSnap(h);
     setBowelSnap(b);
     setStatus('ready');
     setError(null);
-  }, [backend, water, health, bowel, hubStore]);
+  }, [backend, water, health, bowel, money, hubStore]);
 
   const fail = useCallback((e: unknown) => {
     if (e instanceof AuthError) {
@@ -125,5 +127,5 @@ export function useHub() {
     [hubStore],
   );
 
-  return { mode: backend.kind, status, waterSnap, healthSnap, bowelSnap, hubSnap, error, busy, connect, refresh, savePinned };
+  return { mode: backend.kind, status, waterSnap, healthSnap, bowelSnap, moneySnap, hubSnap, error, busy, connect, refresh, savePinned };
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { EntryForm, Txn } from '@life/db';
-import { emptyForm, todayKey } from '@life/db';
+import { emptyForm, parseEditHash, todayKey } from '@life/db';
 import { useMoney } from './useMoney';
 import { LedgerView } from './components/LedgerView';
 import { EntryEditor } from './components/EntryEditor';
@@ -31,10 +31,14 @@ export interface Editing {
 export function App() {
   const api = useMoney();
   const [tab, setTabState] = useState<Tab>('ledger');
-  const [month, setMonth] = useState(() => todayKey().slice(0, 7));
+  const [date, setDate] = useState(todayKey);
+  const [view, setView] = useState<'day' | 'month'>('day');
   const [editing, setEditing] = useState<Editing | null>(null);
-  /** 網址 #new：一打開就記一筆（綜合首頁的按鈕） */
-  const [pendingNew, setPendingNew] = useState(location.hash === '#new');
+  /** 網址 #new：一打開就記一筆；#edit/money/id：打開那一筆（綜合首頁） */
+  const [pending] = useState(() => (location.hash === '#new' ? { id: null } : parseEditHash(location.hash)?.kind === 'money' ? { id: parseEditHash(location.hash)!.id } : null));
+  const [pendingDone, setPendingDone] = useState(false);
+  /** 從綜合首頁來的：存好或取消後回首頁 */
+  const [fromHome, setFromHome] = useState(false);
 
   const setTab = (t: Tab) => {
     setTabState(t);
@@ -47,11 +51,21 @@ export function App() {
   };
 
   useEffect(() => {
-    if (!pendingNew || !api.snap) return;
-    setPendingNew(false);
+    if (!pending || pendingDone || !api.snap) return;
+    setPendingDone(true);
     history.replaceState(null, '', location.pathname + location.search);
-    edit({ form: emptyForm('支出') });
-  }, [pendingNew, api.snap]);
+    setFromHome(true);
+    if (!pending.id) return edit({ form: emptyForm('支出') });
+    const t = api.snap.txns.find((x) => x.id === pending.id);
+    if (!t) return api.showToast({ kind: 'error', text: '找不到這一筆（可能已經刪除）' });
+    setDate(t.date);
+    edit({ form: emptyForm(), txn: t });
+  }, [pending, pendingDone, api.snap]);
+
+  const closeEditor = () => {
+    setEditing(null);
+    if (fromHome) location.href = HOME_URL + location.search;
+  };
 
   return (
     <div className="app">
@@ -112,13 +126,13 @@ export function App() {
                     api={api}
                     snap={api.snap}
                     editing={editing}
-                    onClose={() => setEditing(null)}
+                    onClose={closeEditor}
                   />
                 )}
-                <LedgerView snap={api.snap} month={month} setMonth={setMonth} onEdit={edit} editing={!!editing} />
+                <LedgerView snap={api.snap} date={date} setDate={setDate} view={view} setView={setView} onEdit={edit} editing={!!editing} />
               </>
             )}
-            {tab === 'stats' && <StatsView snap={api.snap} month={month} setMonth={setMonth} />}
+            {tab === 'stats' && <StatsView snap={api.snap} initialMonth={date.slice(0, 7)} />}
             {tab === 'accounts' && <AccountsView snap={api.snap} onEdit={edit} goSettings={() => setTab('settings')} />}
             {tab === 'settings' && <SettingsView api={api} snap={api.snap} openCategories={() => setTab('categories')} />}
             {tab === 'categories' && <CategoriesView api={api} snap={api.snap} onBack={() => setTab('settings')} />}
