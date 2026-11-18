@@ -992,6 +992,30 @@ export function feeCategoryOf(path: string): string {
 /** 手續費估算：金額 × 費率，四捨五入到整數 */
 export const estimateFee = (amount: number, ratePct: number | null) => Math.round((amount * (ratePct ?? 1.5)) / 100);
 
+/**
+ * 分期（2026-11-18 確認）：一筆拆成 N 筆，每個月同一天（月底對不到就用那個月最後一天），
+ * 備註加「1/6 期」；每個明細各自平分，除不盡的零頭放在第 1 期。每一期算在那個月的預算。
+ */
+export function installmentTxns(tx: TxnInput, n: number, accounts: Pick<Account, 'name' | 'currency'>[]): TxnInput[] {
+  if (!Number.isInteger(n) || n < 2 || n > 60) throw new Error('分期期數請填 2–60');
+  const cur = txnCurrency(tx, accounts);
+  const parts = tx.lines.map((l) => splitEven(l.amount, n, 0, cur));
+  const date = toDateKey(tx.time);
+  const timeOfDay = tx.time - startOfDay(date);
+  return Array.from({ length: n }, (_, k) => {
+    const lines = tx.lines.map((l, i) => ({ ...l, amount: parts[i][k] }));
+    const total = lineBalance(lines).out;
+    return {
+      ...tx,
+      time: startOfDay(addMonthsToDate(date, k)) + timeOfDay,
+      direction: total < 0 ? '入' : '出',
+      amount: Math.abs(total),
+      note: `${k + 1}/${n} 期${tx.note ? `：${tx.note}` : ''}`,
+      lines,
+    } as TxnInput;
+  });
+}
+
 /** 交易 → 表單（看不出是哪一種的 → mode「其他」，畫面只能刪除或到試算表改） */
 export function txnToForm(t: Txn): EntryForm {
   const f: EntryForm = { ...emptyForm('其他', t.time), store: t.store, branch: t.branch, statementText: t.statementText, note: t.note, tags: t.tags, account: t.account, currency: t.currency, cats: [] };

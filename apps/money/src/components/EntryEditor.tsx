@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { EntryForm, MoneySnapshot, Txn } from '@life/db';
+import type { EntryForm, MoneySnapshot, Txn, TxnInput } from '@life/db';
 import {
   checkTxn,
   ENTRY_MODES,
@@ -14,6 +14,7 @@ import {
   defaultBudgetFor,
   estimateFee,
   feeTxnFrom,
+  installmentTxns,
   findFeeTxn,
   isFeeTxn,
   lastCategoryOfStore,
@@ -88,6 +89,9 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
   /** 新的店家（還不在機構清單）先記在這裡，存檔時一起建立 */
   const [newForeign, setNewForeign] = useState(false);
   const [feeEdit, setFeeEdit] = useState<number | null>(null);
+  /** 分期（只有新增、用帳戶付的支出） */
+  const [installOn, setInstallOn] = useState(false);
+  const [installN, setInstallN] = useState(6);
   /** 修改前的金額：改了金額要提醒手續費那筆也要改 */
   const [initTotal] = useState(() => formTotal(f));
   const set = (patch: Partial<EntryForm>) => setF((x) => ({ ...x, ...patch }));
@@ -122,9 +126,19 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
       if (!(fee! > 0)) fp.push('手續費請填大於 0 的整數');
       if (fp.length) return setProblems(fp.map((x) => `手續費：${x}`));
     }
+    // 分期（2026-11-18 確認）：拆成每個月一筆
+    let parts: TxnInput[] | null = null;
+    if (installOn && canInstall) {
+      try {
+        parts = installmentTxns(tx, installN, snap.accounts);
+      } catch (e) {
+        return setProblems([e instanceof Error ? e.message : String(e)]);
+      }
+    }
     const ok = await api.run(async (s) => {
       if (tx.store && newForeign && !storeOrg) await s.addOrg(tx.store, null, true);
-      await s.saveTxn(tx, txn ?? (editing.target ? ({ ...editing.target, lines: [] } as unknown as Txn) : undefined));
+      if (parts) for (const part of parts) await s.saveTxn(part);
+      else await s.saveTxn(tx, txn ?? (editing.target ? ({ ...editing.target, lines: [] } as unknown as Txn) : undefined));
       if (feeTx) {
         await s.ensureCategories(feeTx.lines.map((l) => l.category ?? ''), '支出');
         await s.saveTxn(feeTx);
@@ -132,7 +146,20 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
       return true;
     });
     if (ok) {
-      api.showToast({ kind: 'info', text: txn ? (feeTx ? '已修改（補記手續費）' : feeChanged ? '已修改；手續費那筆不會自動改，記得也去改' : '已修改') : feeTx ? '已記錄（含手續費）' : '已記錄' });
+      api.showToast({
+        kind: 'info',
+        text: parts
+          ? `已記錄 ${parts.length} 期${feeTx ? '（含手續費）' : ''}`
+          : txn
+            ? feeTx
+              ? '已修改（補記手續費）'
+              : feeChanged
+                ? '已修改；手續費那筆不會自動改，記得也去改'
+                : '已修改'
+            : feeTx
+              ? '已記錄（含手續費）'
+              : '已記錄',
+      });
       onClose();
     }
   };
@@ -245,6 +272,7 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
   );
 
   const from = snap.accounts.find((a) => a.name === f.account);
+  const canInstall = !txn && !editing.target && f.mode === '支出' && !paidByMode && !!from;
   const feeCard = f.mode === '支出' && !paidByMode && from?.type === '信用卡' && !(txn && isFeeTxn(txn)) ? from : null;
   // 修改舊資料：已經記過手續費的不再重複記（2026-11-18 確認）
   const existingFee = txn ? findFeeTxn(snap.txns, txn) : null;
@@ -389,6 +417,35 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
                 <p className="hint">
                   我付了 {fmtMoney(formTotal(f), currency)}（我的部分＋別人的份額）
                 </p>
+              )}
+              {canInstall && (
+                <div className="subbox">
+                  <label className="check">
+                    <input type="checkbox" checked={installOn} onChange={(e) => setInstallOn(e.target.checked)} />
+                    分期付款
+                  </label>
+                  {installOn && (
+                    <>
+                      <div className="row">
+                        <input
+                          className="narrow"
+                          type="number"
+                          min={2}
+                          max={60}
+                          value={installN}
+                          onChange={(e) => setInstallN(Math.max(2, Math.min(60, Number(e.target.value) || 2)))}
+                        />
+                        <span className="small">期</span>
+                        {formTotal(f) > 0 && (
+                          <span className="hint">
+                            每期約 {fmtMoney(Math.floor(formTotal(f) / installN), currency)}（零頭在第 1 期）
+                          </span>
+                        )}
+                      </div>
+                      <p className="hint">會記成 {installN} 筆，每個月同一天一筆（備註「1/{installN} 期」⋯⋯），每一期算在那個月的預算。</p>
+                    </>
+                  )}
+                </div>
               )}
               {feeCard && existingFee && (
                 <div className="subbox">

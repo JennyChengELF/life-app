@@ -20,6 +20,7 @@ import {
   isFeeTxn,
   fmtMoney,
   formToTxn,
+  installmentTxns,
   lastCategoryOfStore,
   recentStores,
   LocalBackend,
@@ -535,5 +536,23 @@ describe('試算表快速輸入、在 APP 裡補完', () => {
     expect(snap.issues).toEqual([]);
     expect(snap.txns).toHaveLength(1);
     expect(snap.txns[0]).toMatchObject({ direction: '入', amount: 3065, note: 'Google One AI 2T' });
+  });
+});
+
+describe('分期', () => {
+  it('6 期：每月同一天、零頭在第 1 期、每個明細各自平分、備註加期數', () => {
+    const tx = formToTxn({
+      ...form({ account: '大戶信用卡', store: '東南旅行社', note: '員旅', cats: [{ category: '食 / 三餐', amount: 31000 }, { category: '住 / 日用品', amount: 497 }] }),
+      time: at('2026-01-31 10:00'),
+    });
+    const list = installmentTxns(tx, 6, refs.accounts);
+    expect(list).toHaveLength(6);
+    expect(list.map((t) => new Date(t.time).getDate())).toEqual([31, 28, 31, 30, 31, 30]);
+    expect(list[0].lines.map((l) => l.amount)).toEqual([5170, 87]);
+    expect(list[1].lines.map((l) => l.amount)).toEqual([5166, 82]);
+    expect(list.reduce((a, t) => a + (t.amount ?? 0), 0)).toBe(31497);
+    expect(list[0]).toMatchObject({ direction: '出', amount: 5257, note: '1/6 期：員旅', store: '東南旅行社' });
+    expect(list.every((t) => checkTxn(t, refs).length === 0)).toBe(true);
+    expect(() => installmentTxns(tx, 1, refs.accounts)).toThrow('2–60');
   });
 });
