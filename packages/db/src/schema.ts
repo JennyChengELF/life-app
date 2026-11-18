@@ -13,8 +13,9 @@
  * 8：交易加分店、帳單名稱；帳戶加國外交易手續費率；機構加國外（2026-11-18）
  * 9：新增預算、預算分配；交易加快速輸入的分類、預算（2026-11-18）
  * 10：新增定存單；帳戶加卡號 / 帳號後幾碼（2026-11-18）
+ * 11：新增帳單、帳單明細、盤點；交易加入帳日、繳哪一期（2026-11-18）
  */
-export const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 11;
 
 export type ColType = 'datetime' | 'date' | 'number' | 'text' | 'bool' | 'any';
 
@@ -372,6 +373,8 @@ export const TABLES = {
       { name: 'date', type: 'date', label: '日期（APP 依 time 自動填）' },
       { name: 'createdVia', type: 'text', label: '在哪裡輸入（money = 記帳 APP、sheet = 直接在試算表）' },
       ...systemCols,
+      { name: 'postedDate', type: 'date', label: '入帳日（對帳時 APP 自動填）' },
+      { name: 'statement', type: 'text', label: '繳卡費的轉帳：繳哪一期帳單（moneyStatements 的 id；APP 自動填）' },
     ],
   },
   moneyLines: {
@@ -433,6 +436,48 @@ export const TABLES = {
       { name: 'termMonths', type: 'number', label: '期間幾個月（續存時預設用這個）' },
       { name: 'fromAccount', type: 'text', label: '從哪個帳戶轉來（解約時預設轉回這裡）' },
       { name: 'endedDate', type: 'date', label: '解約 / 結束日（有值 = 已結束）' },
+      { name: 'note', type: 'text', label: '備註' },
+      ...systemCols,
+    ],
+  },
+  moneyStatements: {
+    file: 'money',
+    description: '帳單：某個帳戶的一期（帳戶＋結帳日）。對帳在 APP 裡做；貼帳單明細時 APP 自動建立這一列。',
+    columns: [
+      { name: 'account', type: 'text', label: '帳戶名稱（必填）' },
+      { name: 'closeDate', type: 'date', label: '結帳日（這一期的最後一天，必填）' },
+      { name: 'dueDate', type: 'date', label: '繳款期限（信用卡；APP 依繳款日自動算）' },
+      { name: 'amountDue', type: 'number', label: '應繳金額（信用卡）' },
+      { name: 'doneAt', type: 'datetime', label: '對帳完成時間（APP 自動填）' },
+      { name: 'note', type: 'text', label: '備註' },
+      ...systemCols,
+    ],
+  },
+  moneyStatementItems: {
+    file: 'money',
+    description:
+      '帳單明細：帳單上的一行。可以在 APP 直接貼，也可以貼在這裡（填 account、closeDate、date、description、amount；信用卡刷卡是正數、退款是負數；銀行存入是正數、支出是負數）。',
+    columns: [
+      { name: 'account', type: 'text', label: '帳戶名稱（必填）' },
+      { name: 'closeDate', type: 'date', label: '哪一期（結帳日，必填）' },
+      { name: 'date', type: 'date', label: '消費日 / 交易日' },
+      { name: 'postedDate', type: 'date', label: '入帳日' },
+      { name: 'description', type: 'text', label: '帳單上的說明' },
+      { name: 'amount', type: 'number', label: '金額（照帳單：信用卡刷卡正、退款負；銀行存入正、支出負，必填）' },
+      { name: 'origCurrency', type: 'text', label: '外幣幣別（選填）' },
+      { name: 'origAmount', type: 'number', label: '外幣金額（選填）' },
+      { name: 'matched', type: 'text', label: '配對到的交易 id（APP 自動填，多筆用逗號；「不配對」= 手動取消配對）' },
+      ...systemCols,
+    ],
+  },
+  moneyBalanceChecks: {
+    file: 'money',
+    description: '盤點：某個帳戶某一天的實際餘額（信用卡填未繳金額）。請在 APP 裡盤點。',
+    columns: [
+      { name: 'account', type: 'text', label: '帳戶名稱（必填）' },
+      { name: 'date', type: 'date', label: '盤點哪一天的餘額（那天結束時，必填）' },
+      { name: 'actual', type: 'number', label: '實際餘額（信用卡填未繳金額，正數 = 欠款；必填）' },
+      { name: 'bookSnapshot', type: 'number', label: '盤點當下 APP 算的餘額（之後補登不改，看「原本差多少」用）' },
       { name: 'note', type: 'text', label: '備註' },
       ...systemCols,
     ],

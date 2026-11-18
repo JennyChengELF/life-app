@@ -176,3 +176,48 @@ button.bt-row:hover, .bt-row.open { background: var(--bg); }
 .dep-row button { padding: 3px 9px; font-size: 0.82rem; }
 .dep-row.due .grow { color: var(--warn); font-weight: 600; }
 .deposits .subbox { width: 100%; }
+
+/* 帳戶明細、對帳、盤點（第 3 輪） */
+.page-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
+.page-head h2 { margin: 0; }
+.big-balance { font-size: 1.5rem; margin: 6px 0 4px; }
+.big-balance small { font-size: 0.8rem; margin-left: 6px; }
+.add-bar button.active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.sub-head { font-size: 0.95rem; margin: 16px 0 6px; }
+.count { display: inline-block; min-width: 1.6em; text-align: center; font-size: 0.75rem; border-radius: 999px; background: var(--bg); color: var(--muted); padding: 0 6px; margin-left: 4px; font-weight: 400; }
+.ok-text { color: var(--ok); }
+.warn-text { color: var(--warn); }
+.tag.ok { background: var(--ok-soft); color: var(--ok); }
+.tag.warn { background: var(--warn-soft); color: var(--warn); }
+.tag.dim { background: var(--bg); color: var(--muted); }
+.tx-title .tag, .rc-line .tag { margin-left: 6px; vertical-align: 1px; }
+.rc-item { border-bottom: 1px solid var(--line); padding: 8px 2px; }
+.rc-line { display: flex; align-items: baseline; gap: 8px; padding: 2px 0; }
+.rc-line.clickable { cursor: pointer; border-bottom: 1px solid var(--line); padding: 7px 2px; }
+.rc-line.clickable:hover { background: var(--bg); }
+.rc-line .grow, .rc-pick .grow { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.rc-line .num, .rc-pick .num { white-space: nowrap; }
+.rc-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.rc-actions button { padding: 5px 12px; font-size: 0.88rem; }
+.rc-matched { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 0.85rem; color: var(--muted); padding-left: 4px; }
+.rc-done { margin-top: 14px; }
+.rc-done summary { cursor: pointer; font-weight: 600; font-size: 0.95rem; padding: 4px 0; }
+.rc-pick { display: flex; align-items: baseline; gap: 8px; padding: 5px 0; margin: 0; color: var(--text); }
+.rc-pick.off { opacity: 0.45; text-decoration: line-through; }
+.rc-preview { max-height: 22em; overflow-y: auto; border-top: 1px solid var(--line); margin-top: 4px; }
+.subbox textarea { width: 100%; box-sizing: border-box; font: inherit; font-size: 0.9rem; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--text); resize: vertical; }
+.subbox .field.grow { flex: 1; min-width: 9em; }
+.check-form { width: 100%; }
+.check-form .row { align-items: center; }
+.check-book { font-size: 0.88rem; color: var(--muted); min-width: 10em; }
+.check-input { flex: 1; min-width: 8em; display: flex; }
+.check-input input { width: 100%; }
+.check-row { border-bottom: 1px solid var(--line); padding: 8px 2px; display: flex; flex-direction: column; gap: 4px; }
+.check-name { align-self: flex-start; font-weight: 600; padding: 0; }
+.check-name small { font-weight: 400; color: var(--muted); }
+.check-hist { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; border-bottom: 1px solid var(--line); padding: 7px 2px; font-size: 0.9rem; }
+.check-hist .grow { flex: 1; min-width: 8em; }
+.check-hist button { padding: 3px 10px; font-size: 0.82rem; }
+.stmt-row { width: 100%; display: flex; align-items: baseline; gap: 10px; background: none; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 9px 4px; color: var(--text); text-align: left; }
+.stmt-row:hover { background: var(--bg); }
+.stmt-row .grow { flex: 1; }

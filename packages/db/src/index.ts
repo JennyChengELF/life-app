@@ -15,3 +15,4 @@ export * from './hub';
 export * from './money';
 export * from './budget';
 export * from './timeline';
+export * from './statement';

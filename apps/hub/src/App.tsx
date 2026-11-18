@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { TimelineEntry } from '@life/db';
-import { bowelEntries, bowelHomeMessage, editHash, fmtMoney, depositsDue, healthEntries, loanReminders, moneyDayTotals, moneyEntries, resolvePinned, sortEntries, todayKey, waterEntries, waterSummary } from '@life/db';
+import { bowelEntries, bowelHomeMessage, editHash, fmtMoney, depositsDue, healthEntries, loanReminders, moneyDayTotals, moneyEntries, resolvePinned, stocktakeStatus, sortEntries, todayKey, waterEntries, waterSummary } from '@life/db';
 import { DateNav, Timeline } from '@life/ui/timeline';
 import { useHub } from './useHub';
 
@@ -231,6 +231,8 @@ function Day({ hub, date, setDate }: { hub: ReturnType<typeof useHub>; date: str
   const loans = loanReminders(hub.moneySnap);
   // 定存 7 天內到期、或已到期還沒處理（2026-11-18）
   const deps = depositsDue(hub.moneySnap.deposits, todayKey());
+  // 月底盤點：每月最後一天起，到盤點完或下個月 10 號（2026-11-18 確認）
+  const stocktake = stocktakeStatus(hub.moneySnap, todayKey());
   const depCur = (name: string) => hub.moneySnap!.accounts.find((a) => a.name === name)?.currency ?? 'TWD';
   // 昨天排便較少（「喝水 +500ml」按鈕等喝水的加量功能做好再加）
   const bowelMsg = bowelHomeMessage(hub.bowelSnap, hub.healthSnap.body);
@@ -244,6 +246,13 @@ function Day({ hub, date, setDate }: { hub: ReturnType<typeof useHub>; date: str
 
   return (
     <>
+      {stocktake && stocktake.pending.length > 0 && (
+        <div className="messages">
+          <a className="msg warn" href={appUrl('money', '#stocktake')}>
+            🧮 {Number(stocktake.month.slice(5))} 月底盤點：還有 {stocktake.pending.length} 個帳戶沒盤點（{stocktake.to.slice(5).replace('-', '/')} 前）
+          </a>
+        </div>
+      )}
       {deps.length > 0 && (
         <div className="messages">
           {deps.map((d) => (

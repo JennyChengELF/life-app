@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { EntryForm, MoneySnapshot, Txn, TxnInput } from '@life/db';
 import {
+  unpaidStatements,
   checkTxn,
   ENTRY_MODES,
   fmtMoney,
@@ -28,7 +29,7 @@ import { StorePicker } from './StorePicker';
 import { BudgetSelect } from './BudgetSelect';
 
 /** 金額輸入：自己記住打到一半的文字（例：「12.」） */
-function AmountInput({
+export function AmountInput({
   value,
   onChange,
   placeholder = '金額',
@@ -512,6 +513,7 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
                   ) : null}
                 </label>
               )}
+              {to?.type === '信用卡' && <PayStatement snap={snap} card={to.name} value={f.statement} isNew={!txn} onChange={(v) => set({ statement: v })} />}
               <p className="hint">提款、繳卡費、加值悠遊卡、換外幣、開定存都用轉帳（不算收支）。</p>
             </>
           )}
@@ -565,7 +567,7 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
             </>
           )}
 
-          {txn?.statementText && (
+          {(txn?.statementText || editing.form.statementText) && (
             <label className="field">
               帳單名稱
               <input value={f.statementText ?? ''} onChange={(e) => set({ statementText: e.target.value })} />
@@ -605,5 +607,38 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
         )}
       </div>
     </section>
+  );
+}
+
+/**
+ * 繳卡費：繳哪一期（2026-11-18 確認：預設最早沒繳的）。
+ * 新增時自動選最早沒繳的那一期；修改時照原本的。
+ */
+function PayStatement({ snap, card, value, isNew, onChange }: { snap: MoneySnapshot; card: string; value: string | null | undefined; isNew: boolean; onChange: (v: string | null) => void }) {
+  const unpaid = unpaidStatements(snap, card);
+  const all = snap.statements.filter((s) => s.account === card);
+  const cur = snap.accounts.find((a) => a.name === card)?.currency ?? 'TWD';
+  useEffect(() => {
+    // 新增時（或換了另一張卡）：預設最早沒繳的那一期
+    if (isNew && (value === undefined || (value && !all.some((s) => s.id === value)))) onChange(unpaid[0]?.id ?? null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [card]);
+  if (!all.length) return null;
+  const list = all.filter((s) => unpaid.includes(s) || s.id === value);
+  return (
+    <label className="field">
+      繳哪一期
+      <select value={value ?? ''} onChange={(e) => onChange(e.target.value || null)}>
+        <option value="">不指定</option>
+        {list.map((s) => (
+          <option key={s.id} value={s.id}>
+            {s.closeDate.replace(/-/g, '/')} 結帳
+            {s.amountDue != null ? `・應繳 ${fmtMoney(s.amountDue, cur)}` : ''}
+            {s.dueDate ? `・${s.dueDate.slice(5).replace('-', '/')} 前` : ''}
+            {unpaid.includes(s) ? '' : '（已繳清）'}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }

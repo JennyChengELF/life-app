@@ -5,13 +5,13 @@ import type { Editing } from '../App';
 import { MonthNav } from './common';
 
 const WEEK = ['日', '一', '二', '三', '四', '五', '六'];
-function dayLabel(date: string) {
+export function dayLabel(date: string) {
   const [y, m, d] = date.split('-').map(Number);
   return `${m}/${d}（${WEEK[new Date(y, m - 1, d).getDay()]}）`;
 }
 
 /** 列表右邊的金額：支出紅、收入綠；轉帳、借還款只顯示金額 */
-function TxAmount({ t, snap }: { t: Txn; snap: MoneySnapshot }) {
+export function TxAmount({ t, snap }: { t: Txn; snap: MoneySnapshot }) {
   const cur = txnCurrency(t, snap.accounts);
   const { expense, income } = txnMyNet(t);
   const total = t.amount ?? 0;
@@ -29,7 +29,7 @@ function TxAmount({ t, snap }: { t: Txn; snap: MoneySnapshot }) {
   return <div className="tx-amt">{fmtMoney(total, cur)}</div>;
 }
 
-function subText(t: Txn) {
+export function subText(t: Txn) {
   const parts: string[] = [];
   if (t.direction === '轉帳') parts.push(`${t.account} → ${t.toAccount}`);
   else if (t.account) parts.push(t.account);

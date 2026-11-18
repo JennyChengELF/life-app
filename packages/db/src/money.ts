@@ -142,10 +142,16 @@ export interface TxnInput {
   note: string | null;
   tags: string[];
   lines: LineInput[];
+  /** 繳卡費的轉帳：繳哪一期帳單（帳單 id）；undefined = 不改 */
+  statement?: string | null;
 }
 
-export interface Txn extends RowRef, Omit<TxnInput, 'lines'> {
+export interface Txn extends RowRef, Omit<TxnInput, 'lines' | 'statement'> {
   date: string;
+  /** 入帳日（對帳時填） */
+  postedDate: string | null;
+  /** 繳卡費的轉帳：繳哪一期帳單（帳單 id） */
+  statement: string | null;
   createdVia: string | null;
   lines: Line[];
 }
@@ -200,6 +206,42 @@ export interface Deposit extends RowRef {
   note: string | null;
 }
 
+/** 帳單（2026-11-18 確認：帳戶＋結帳日 = 一期） */
+export interface Statement extends RowRef {
+  account: string;
+  closeDate: string;
+  dueDate: string | null;
+  amountDue: number | null;
+  doneAt: number | null;
+  note: string | null;
+}
+
+/** 手動取消配對（不讓 APP 自動配對）的記號 */
+export const NO_MATCH = '不配對';
+
+/** 帳單明細：帳單上的一行（金額照帳單的正負） */
+export interface StatementItem extends RowRef {
+  account: string;
+  closeDate: string;
+  date: string | null;
+  postedDate: string | null;
+  description: string | null;
+  amount: number;
+  origCurrency: string | null;
+  origAmount: number | null;
+  /** 配對到的交易 id；[NO_MATCH] = 使用者取消配對 */
+  matched: string[];
+}
+
+/** 盤點：某帳戶某一天結束時的實際餘額（信用卡是未繳金額，正數 = 欠款） */
+export interface BalanceCheck extends RowRef {
+  account: string;
+  date: string;
+  actual: number;
+  bookSnapshot: number | null;
+  note: string | null;
+}
+
 export interface MoneySettings {
   /** 「超過收入」和哪個月的收入比（2026-11-18 確認是設定值） */
   incomeCompare: '上個月' | '本月';
@@ -220,6 +262,11 @@ export interface MoneySnapshot {
   /** 定存單（依到期日排，進行中的在前） */
   deposits: Deposit[];
   allocations: Allocation[];
+  /** 帳單（依結帳日，舊 → 新） */
+  statements: Statement[];
+  statementItems: StatementItem[];
+  /** 盤點（舊 → 新） */
+  balanceChecks: BalanceCheck[];
   settings: MoneySettings;
   issues: MoneyIssue[];
 }
@@ -340,6 +387,38 @@ export function addMonthsToDate(date: string, months: number): string {
   const [y, m, d] = date.split('-').map(Number);
   const last = new Date(y, m - 1 + months + 1, 0).getDate();
   return toDateKey(new Date(y, m - 1 + months, Math.min(d, last)).getTime());
+}
+
+/** 某年某月的第幾天（月底對不到時用那個月最後一天）→ 'YYYY-MM-DD'；month 是 1–12，可超出（自動跨年） */
+export function dayOfMonth(year: number, month: number, day: number): string {
+  const last = new Date(year, month, 0).getDate();
+  return toDateKey(new Date(year, month - 1, Math.min(day, last)).getTime());
+}
+
+/** 那個月的最後一天 */
+export const monthEnd = (date: string) => {
+  const [y, m] = date.split('-').map(Number);
+  return dayOfMonth(y, m, 31);
+};
+
+/**
+ * 預設對帳哪一期（2026-11-18 確認）：信用卡 = 最近一次已經過的結帳日；其他帳戶 = 上個月最後一天
+ */
+export function defaultCloseDate(acc: Pick<Account, 'type' | 'closingDay'>, today: string): string {
+  const [y, m] = today.split('-').map(Number);
+  if (acc.type === '信用卡' && acc.closingDay) {
+    const thisMonth = dayOfMonth(y, m, acc.closingDay);
+    return thisMonth <= today ? thisMonth : dayOfMonth(y, m - 1, acc.closingDay);
+  }
+  return dayOfMonth(y, m - 1, 31);
+}
+
+/** 繳款期限（2026-11-18 確認：依繳款日算）：結帳日之後第一個繳款日；沒設繳款日 → null */
+export function dueDateFor(acc: Pick<Account, 'type' | 'dueDay'>, closeDate: string): string | null {
+  if (acc.type !== '信用卡' || !acc.dueDay) return null;
+  const [y, m] = closeDate.split('-').map(Number);
+  const same = dayOfMonth(y, m, acc.dueDay);
+  return same > closeDate ? same : dayOfMonth(y, m + 1, acc.dueDay);
 }
 
 /** 快到期（N 天內）或已到期還沒處理的定存單 */
@@ -537,6 +616,8 @@ function toTxn(r: TableRow, lines: Line[]): Txn {
     note: str(v.note),
     tags: splitTags(v.tags),
     createdVia: str(v.createdVia),
+    postedDate: str(v.postedDate),
+    statement: str(v.statement),
     lines,
   };
 }
@@ -657,7 +738,7 @@ function checkSimple(r: TableRow, need: string, label: string, names: Set<string
 // ───────────── 計算 ─────────────
 
 /** 錢的方向：帳戶的錢 +多 / −少 */
-function accountDelta(t: Txn, name: string): number {
+export function accountDelta(t: Pick<Txn, 'account' | 'amount' | 'direction' | 'toAccount' | 'toAmount'>, name: string): number {
   let d = 0;
   if (t.account === name && t.amount != null) d += t.direction === '入' ? t.amount : -t.amount;
   if (t.direction === '轉帳' && t.toAccount === name) d += t.toAmount ?? t.amount ?? 0;
@@ -838,6 +919,8 @@ export interface EntryForm {
   statementText: string | null;
   note: string | null;
   tags: string[];
+  /** 轉帳到信用卡：繳哪一期（帳單 id） */
+  statement?: string | null;
 }
 
 export const emptyForm = (mode: EntryForm['mode'] = '支出', time = Date.now()): EntryForm => ({
@@ -896,7 +979,7 @@ export function formToTxn(f: EntryForm): TxnInput {
       return { ...base, direction: total < 0 ? '出' : '入', account: f.account, amount: Math.abs(total), lines: cats('收入') };
     }
     case '轉帳':
-      return { ...base, direction: '轉帳', account: f.account, amount: f.amount, toAccount: f.toAccount, toAmount: f.toAmount, lines: [] };
+      return { ...base, direction: '轉帳', account: f.account, amount: f.amount, toAccount: f.toAccount, toAmount: f.toAmount, statement: f.statement ?? null, lines: [] };
     case '借款': {
       const out = f.sub !== '借入';
       return {
@@ -1028,7 +1111,7 @@ export function txnToForm(t: Txn): EntryForm {
   const L = t.lines;
   const only = (...kinds: LineKind[]) => L.length > 0 && L.every((l) => kinds.includes(l.kind));
   const catsOf = (kind: LineKind) => L.filter((l) => l.kind === kind).map((l) => ({ category: l.category, amount: l.amount, note: l.note, budget: l.budget }));
-  if (t.direction === '轉帳') return { ...f, mode: '轉帳', amount: t.amount, toAccount: t.toAccount, toAmount: t.toAmount };
+  if (t.direction === '轉帳') return { ...f, mode: '轉帳', amount: t.amount, toAccount: t.toAccount, toAmount: t.toAmount, statement: t.statement };
   if (t.direction === '出' && only('支出', '他欠我') && L.some((l) => l.kind === '支出') && L.every((l) => l.kind !== '他欠我' || l.debtType !== '借款')) {
     return { ...f, mode: '支出', cats: catsOf('支出'), shares: L.filter((l) => l.kind === '他欠我').map((l) => ({ person: l.person, amount: l.amount })) };
   }
@@ -1116,7 +1199,7 @@ export class MoneyStore {
   }
 
   private async loadNow(now: number): Promise<MoneySnapshot> {
-    const [accRows, catRows, txRows, lineRows, peopleRows, orgRows, setRows, budgetRows, allocRows, depRows] = await Promise.all([
+    const [accRows, catRows, txRows, lineRows, peopleRows, orgRows, setRows, budgetRows, allocRows, depRows, stmtRows, itemRows, checkRows] = await Promise.all([
       this.b.read('moneyAccounts'),
       this.b.read('moneyCategories'),
       this.b.read('moneyTransactions'),
@@ -1127,6 +1210,9 @@ export class MoneyStore {
       this.b.read('moneyBudgets'),
       this.b.read('moneyBudgetAllocations'),
       this.b.read('moneyDeposits'),
+      this.b.read('moneyStatements'),
+      this.b.read('moneyStatementItems'),
+      this.b.read('moneyBalanceChecks'),
     ]);
     const issues: MoneyIssue[] = [];
     const fixes = new Map<TableName, RowUpdate[]>();
@@ -1226,7 +1312,7 @@ export class MoneyStore {
         issue('moneyTransactions', r, [r.errors.includes('time') ? '時間格式看不懂（例：2026/11/18 12:30）' : '沒有填時間']);
         continue;
       }
-      const bad = ['amount', 'toAmount'].filter((k) => r.errors.includes(k));
+      const bad = ['amount', 'toAmount', 'postedDate'].filter((k) => r.errors.includes(k));
       if (bad.length) {
         issue('moneyTransactions', r, bad.map((k) => `${k} 格式看不懂`));
         continue;
@@ -1373,7 +1459,87 @@ export class MoneyStore {
     }
     deposits.sort((a, b) => Number(!!a.endedDate) - Number(!!b.endedDate) || a.maturityDate.localeCompare(b.maturityDate));
 
-    const snap: MoneySnapshot = { loadedAt: now, accounts, categories, people, orgs, txns, budgets, allocations, deposits, settings: parseMoneySettings(setRows), issues };
+    // 帳單、帳單明細、盤點（2026-11-18 第 3 輪）
+    const accNames = new Set(accounts.map((a) => a.name));
+    const accProblem = (acc: string | null) => (!acc ? ['沒有填帳戶'] : accNames.has(acc) ? [] : [`帳戶「${acc}」不在帳戶清單裡`]);
+    const statements: Statement[] = [];
+    for (const r of stmtRows) {
+      if (!isLive(r)) continue;
+      const v = r.values;
+      const acc = str(v.account);
+      const close = str(v.closeDate);
+      const p = accProblem(acc);
+      if (!close) p.push(r.errors.includes('closeDate') ? 'closeDate 格式看不懂' : '沒有填結帳日');
+      else if (statements.some((x) => x.account === acc && x.closeDate === close)) p.push(`${acc} ${close} 這一期重複了`);
+      for (const k of ['dueDate', 'amountDue']) if (r.errors.includes(k)) p.push(`${k} 格式看不懂`);
+      if (p.length) {
+        issue('moneyStatements', r, p);
+        continue;
+      }
+      ensureId('moneyStatements', r);
+      statements.push({ rowNumber: r.rowNumber, id: String(v.id), account: acc!, closeDate: close!, dueDate: str(v.dueDate), amountDue: num(v.amountDue), doneAt: num(v.doneAt), note: str(v.note) });
+    }
+    const statementItems: StatementItem[] = [];
+    for (const r of itemRows) {
+      if (!isLive(r)) continue;
+      const v = r.values;
+      const acc = str(v.account);
+      const p = accProblem(acc);
+      if (!str(v.closeDate)) p.push(r.errors.includes('closeDate') ? 'closeDate 格式看不懂' : '沒有填哪一期（closeDate 結帳日）');
+      if (num(v.amount) == null) p.push(r.errors.includes('amount') ? '金額格式看不懂' : '沒有填金額');
+      for (const k of ['date', 'postedDate', 'origAmount']) if (r.errors.includes(k)) p.push(`${k} 格式看不懂`);
+      if (p.length) {
+        issue('moneyStatementItems', r, p);
+        continue;
+      }
+      ensureId('moneyStatementItems', r);
+      statementItems.push({
+        rowNumber: r.rowNumber,
+        id: String(v.id),
+        account: acc!,
+        closeDate: str(v.closeDate)!,
+        date: str(v.date),
+        postedDate: str(v.postedDate),
+        description: str(v.description),
+        amount: num(v.amount)!,
+        origCurrency: str(v.origCurrency)?.toUpperCase() ?? null,
+        origAmount: num(v.origAmount),
+        matched: (str(v.matched) ?? '').split(/[,，\s]+/).filter(Boolean),
+      });
+    }
+    // 試算表直接貼的帳單明細：那一期還沒有帳單 → 自動建立
+    const newStmts = new Map<string, RowValues>();
+    for (const it of statementItems) {
+      const key = `${it.account}\u0000${it.closeDate}`;
+      if (newStmts.has(key) || statements.some((x) => x.account === it.account && x.closeDate === it.closeDate)) continue;
+      const acc = accounts.find((a) => a.name === it.account)!;
+      newStmts.set(key, { account: it.account, closeDate: it.closeDate, dueDate: dueDateFor(acc, it.closeDate), id: newId(now), createdAt: now, updatedAt: now });
+    }
+    for (const [t, us] of fixes) if (t === 'moneyStatements' || t === 'moneyStatementItems') await this.b.update(t, us);
+    if (newStmts.size) {
+      await this.b.append('moneyStatements', [...newStmts.values()]);
+      return this.loadNow(now);
+    }
+    statements.sort((a, b) => a.closeDate.localeCompare(b.closeDate));
+    const balanceChecks: BalanceCheck[] = [];
+    for (const r of checkRows) {
+      if (!isLive(r)) continue;
+      const v = r.values;
+      const p = accProblem(str(v.account));
+      if (!str(v.date)) p.push(r.errors.includes('date') ? '日期格式看不懂' : '沒有填日期');
+      if (num(v.actual) == null) p.push(r.errors.includes('actual') ? '實際餘額格式看不懂' : '沒有填實際餘額');
+      if (p.length) {
+        issue('moneyBalanceChecks', r, p);
+        continue;
+      }
+      ensureId('moneyBalanceChecks', r);
+      balanceChecks.push({ rowNumber: r.rowNumber, id: String(v.id), account: str(v.account)!, date: str(v.date)!, actual: num(v.actual)!, bookSnapshot: num(v.bookSnapshot), note: str(v.note) });
+    }
+    balanceChecks.sort((a, b) => a.date.localeCompare(b.date) || a.rowNumber - b.rowNumber);
+    const late = fixes.get('moneyBalanceChecks');
+    if (late) await this.b.update('moneyBalanceChecks', late);
+
+    const snap: MoneySnapshot = { loadedAt: now, accounts, categories, people, orgs, txns, budgets, allocations, deposits, statements, statementItems, balanceChecks, settings: parseMoneySettings(setRows), issues };
     this.last = snap;
     return snap;
   }
@@ -1411,6 +1577,11 @@ export class MoneyStore {
       tags: input.tags.length ? input.tags.join('、') : null,
       updatedAt: now,
     };
+    // 繳哪一期：只有轉到信用卡才留
+    if (input.statement !== undefined) {
+      const ok = input.direction === '轉帳' && snap.statements.some((s) => s.id === input.statement && s.account === input.toAccount);
+      txValues.statement = ok ? input.statement : null;
+    }
     const lineValues = (l: LineInput, i: number): RowValues => ({
       kind: l.kind,
       amount: roundMoney(l.amount, cur),
@@ -1525,6 +1696,15 @@ export class MoneyStore {
         if (Object.keys(v).length) us.push({ rowNumber: t.rowNumber, values: { ...v, updatedAt: now }, expectId: t.id });
       }
       if (us.length) await this.b.update('moneyTransactions', us);
+      // 帳單、帳單明細、盤點、定存單也一起改
+      const rename = async (table: TableName, list: { rowNumber: number; id: string; account: string }[]) => {
+        const xs = list.filter((x) => x.account === from).map((x) => ({ rowNumber: x.rowNumber, values: { account: to, updatedAt: now }, expectId: x.id }));
+        if (xs.length) await this.b.update(table, xs);
+      };
+      await rename('moneyStatements', snap.statements);
+      await rename('moneyStatementItems', snap.statementItems);
+      await rename('moneyBalanceChecks', snap.balanceChecks);
+      await rename('moneyDeposits', snap.deposits);
       return;
     }
     if (what === 'person') {
@@ -1926,6 +2106,164 @@ export class MoneyStore {
     }
     if (updates.length) await this.b.update('moneySettings', updates);
     if (appends.length) await this.b.append('moneySettings', appends);
+  }
+
+  // ── 帳單對帳（2026-11-18 第 3 輪） ──
+
+  /** 找到或建立某帳戶某一期的帳單；patch 有給就順便更新 */
+  async saveStatement(account: string, closeDate: string, patch: { amountDue?: number | null; dueDate?: string | null; note?: string | null } = {}): Promise<Statement> {
+    const snap = await this.fresh();
+    const acc = snap.accounts.find((a) => a.name === account);
+    if (!acc) throw new Error(`找不到帳戶「${account}」`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(closeDate)) throw new Error('請選結帳日');
+    if (patch.amountDue != null && !Number.isFinite(patch.amountDue)) throw new Error('應繳金額請填數字');
+    const now = Date.now();
+    const v: RowValues = { updatedAt: now };
+    if (patch.amountDue !== undefined) v.amountDue = patch.amountDue == null ? null : roundMoney(patch.amountDue, acc.currency);
+    if (patch.dueDate !== undefined) v.dueDate = patch.dueDate;
+    if (patch.note !== undefined) v.note = patch.note?.trim() || null;
+    const old = snap.statements.find((s) => s.account === account && s.closeDate === closeDate);
+    if (old) {
+      if (Object.keys(v).length > 1) await this.b.update('moneyStatements', [{ rowNumber: old.rowNumber, values: v, expectId: old.id }]);
+      return old;
+    }
+    const id = newId(now);
+    await this.b.append('moneyStatements', [{ account, closeDate, dueDate: dueDateFor(acc, closeDate), ...v, id, createdAt: now }]);
+    return (await this.fresh()).statements.find((s) => s.id === id)!;
+  }
+
+  /** 存入帳單明細（在 APP 貼上的） */
+  async addStatementItems(account: string, closeDate: string, rows: Omit<StatementItem, 'rowNumber' | 'id' | 'account' | 'closeDate' | 'matched'>[]) {
+    await this.saveStatement(account, closeDate);
+    const now = Date.now();
+    const cur = (this.last ?? (await this.fresh())).accounts.find((a) => a.name === account)?.currency ?? 'TWD';
+    if (!rows.length) return;
+    await this.b.append(
+      'moneyStatementItems',
+      rows.map((r) => ({
+        account,
+        closeDate,
+        date: r.date,
+        postedDate: r.postedDate,
+        description: r.description,
+        amount: roundMoney(r.amount, cur),
+        origCurrency: r.origCurrency,
+        origAmount: r.origAmount,
+        id: newId(now),
+        createdAt: now,
+        updatedAt: now,
+      })),
+    );
+  }
+
+  /** 刪除帳單明細（清除重貼） */
+  async deleteStatementItems(items: StatementItem[]) {
+    const now = Date.now();
+    if (items.length) await this.b.update('moneyStatementItems', items.map((i) => ({ rowNumber: i.rowNumber, values: { deletedAt: now, updatedAt: now }, expectId: i.id })));
+  }
+
+  /** 手動配對 / 取消配對（txnIds = [NO_MATCH] 代表這一行不要自動配對；[] = 交給 APP 自動配對） */
+  async setItemMatch(item: StatementItem, txnIds: string[]) {
+    await this.b.update('moneyStatementItems', [{ rowNumber: item.rowNumber, values: { matched: txnIds.length ? txnIds.join(',') : null, updatedAt: Date.now() }, expectId: item.id }]);
+  }
+
+  /**
+   * 完成對帳：把配對結果（含 APP 自動配對的）寫進帳單明細；交易填上入帳日；
+   * 交易沒有帳單名稱的，填上帳單的說明（之後補登同一個名稱會自動帶入店家，2026-11-18 確認）
+   */
+  async finishReconcile(stmt: Statement, pairs: { item: StatementItem; txnIds: string[] }[]) {
+    const snap = await this.fresh();
+    const now = Date.now();
+    const itemUs: RowUpdate[] = [];
+    const txUs = new Map<string, RowUpdate>();
+    for (const { item, txnIds } of pairs) {
+      const want = txnIds.join(',');
+      if (item.matched.join(',') !== want) itemUs.push({ rowNumber: item.rowNumber, values: { matched: want || null, updatedAt: now }, expectId: item.id });
+      for (const id of txnIds) {
+        const t = snap.txns.find((x) => x.id === id);
+        if (!t) continue;
+        const v: RowValues = {};
+        const posted = item.postedDate ?? item.date;
+        if (posted && t.postedDate !== posted) v.postedDate = posted;
+        if (!t.statementText && item.description && txnIds.length === 1) v.statementText = item.description;
+        if (Object.keys(v).length) txUs.set(t.id, { rowNumber: t.rowNumber, values: { ...v, updatedAt: now }, expectId: t.id });
+      }
+    }
+    if (itemUs.length) await this.b.update('moneyStatementItems', itemUs);
+    if (txUs.size) await this.b.update('moneyTransactions', [...txUs.values()]);
+    await this.b.update('moneyStatements', [{ rowNumber: stmt.rowNumber, values: { doneAt: now, updatedAt: now }, expectId: stmt.id }]);
+  }
+
+  // ── 盤點（2026-11-18 確認：只輸入實際餘額，有差額也可以先完成；APP 不自動調整） ──
+
+  /** 記一次盤點；bookSnapshot = 這時候 APP 算的餘額（信用卡是未繳金額） */
+  async saveBalanceCheck(account: string, date: string, actual: number, note: string | null = null) {
+    const snap = await this.fresh();
+    const acc = snap.accounts.find((a) => a.name === account);
+    if (!acc) throw new Error(`找不到帳戶「${account}」`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('請選日期');
+    if (!Number.isFinite(actual)) throw new Error('實際餘額請填數字');
+    const bal = accountBalance(acc, snap.txns, date);
+    const now = Date.now();
+    await this.b.append('moneyBalanceChecks', [
+      {
+        account,
+        date,
+        actual: roundMoney(actual, acc.currency),
+        bookSnapshot: bal == null ? null : acc.type === '信用卡' ? -bal : bal,
+        note: note?.trim() || null,
+        id: newId(now),
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]);
+  }
+
+  async deleteBalanceCheck(c: BalanceCheck) {
+    const now = Date.now();
+    await this.b.update('moneyBalanceChecks', [{ rowNumber: c.rowNumber, values: { deletedAt: now, updatedAt: now }, expectId: c.id }]);
+  }
+
+  /**
+   * 調整差額（使用者按了才做）：在盤點那天記一筆「調整」，讓 APP 的餘額 = 實際餘額。
+   * diff = 實際 − APP（信用卡用未繳金額算：實際欠比較多 → 錢從卡片帳戶「出」）
+   */
+  async adjustBalance(c: BalanceCheck) {
+    const snap = await this.fresh();
+    const acc = snap.accounts.find((a) => a.name === c.account);
+    if (!acc) throw new Error(`找不到帳戶「${c.account}」`);
+    const bal = accountBalance(acc, snap.txns, c.date);
+    if (bal == null) throw new Error('這個帳戶沒有期初餘額，不能調整');
+    const book = acc.type === '信用卡' ? -bal : bal;
+    const diff = roundMoney(c.actual - book, acc.currency);
+    if (diff === 0) return;
+    const delta = acc.type === '信用卡' ? -diff : diff;
+    await this.saveTxn({
+      time: startOfDay(c.date) + 23 * 3600000 + 59 * 60000,
+      direction: delta > 0 ? '入' : '出',
+      account: acc.name,
+      amount: Math.abs(delta),
+      paidBy: null,
+      currency: null,
+      toAccount: null,
+      toAmount: null,
+      store: null,
+      branch: null,
+      statementText: null,
+      note: '盤點調整（找不到原因的差額）',
+      tags: [],
+      lines: [{ kind: '調整', amount: Math.abs(delta) }],
+    });
+  }
+
+  /** 沒有期初餘額的帳戶：用盤點的金額當期初餘額 */
+  async setOpeningFromCheck(account: string, date: string, actual: number) {
+    const snap = await this.fresh();
+    const acc = snap.accounts.find((a) => a.name === account);
+    if (!acc) throw new Error(`找不到帳戶「${account}」`);
+    await this.b.update('moneyAccounts', [
+      { rowNumber: acc.rowNumber, values: { openingDate: date, openingBalance: roundMoney(actual, acc.currency), updatedAt: Date.now() }, expectId: acc.id },
+    ]);
   }
 
   async discardIssue(issue: MoneyIssue) {

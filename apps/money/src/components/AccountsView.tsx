@@ -2,9 +2,9 @@ import { Fragment, useState } from 'react';
 import type { Account, MoneySnapshot } from '@life/db';
 import type { MoneyApi } from '../useMoney';
 import { AccountForm } from './SettingsView';
-import type { AccountDraft } from './SettingsView';
 import { DepositList } from './Deposits';
-import { accountBalance, emptyForm, fmtMoney, personBalances } from '@life/db';
+import type { AccountDraft } from './SettingsView';
+import { accountBalance, emptyForm, fmtMoney, personBalances, stocktakeStatus, todayKey } from '@life/db';
 import type { Editing } from '../App';
 
 /** 帳戶顯示的金額：信用卡顯示「未繳」 */
@@ -22,14 +22,24 @@ function totals(list: { acc: Account; bal: number | null }[]) {
 }
 
 /** 帳戶（2026-11-18 使用者要求：在這一頁直接新增、修改） */
-export function AccountsView({ api, snap, onEdit }: { api: MoneyApi; snap: MoneySnapshot; onEdit: (e: Editing) => void }) {
-  /** 正在修改的帳戶；或在某一組按＋新增（key = 那一組，initial = 先帶好的機構 / 類型） */
-  const [editAcc, setEditAcc] = useState<Account | null>(null);
+export function AccountsView({
+  api,
+  snap,
+  onEdit,
+  onOpen,
+  onStocktake,
+}: {
+  api: MoneyApi;
+  snap: MoneySnapshot;
+  onEdit: (e: Editing) => void;
+  /** 點帳戶：進帳戶明細頁（2026-11-18 確認） */
+  onOpen: (name: string) => void;
+  onStocktake: () => void;
+}) {
+  /** 在某一組按＋新增（key = 那一組，initial = 先帶好的機構 / 類型） */
   const [adding, setAdding] = useState<{ key: string; initial: Partial<AccountDraft> } | null>(null);
-  const startAdd = (key: string, initial: Partial<AccountDraft>) => {
-    setEditAcc(null);
-    setAdding({ key, initial });
-  };
+  const startAdd = (key: string, initial: Partial<AccountDraft>) => setAdding({ key, initial });
+  const st = stocktakeStatus(snap, todayKey());
   const [by, setBy] = useState<'org' | 'type'>('org');
   const [showArchived, setShowArchived] = useState(false);
   const rows = snap.accounts
@@ -49,6 +59,13 @@ export function AccountsView({ api, snap, onEdit }: { api: MoneyApi; snap: Money
 
   return (
     <>
+      {st && st.pending.length > 0 && (
+        <div className="messages">
+          <button className="msg warn" onClick={onStocktake}>
+            🧮 {Number(st.month.slice(5))} 月底盤點：還有 {st.pending.length} 個帳戶沒盤點，點這裡
+          </button>
+        </div>
+      )}
       <section className="card">
         <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
           <h2 style={{ margin: 0 }}>帳戶</h2>
@@ -73,12 +90,9 @@ export function AccountsView({ api, snap, onEdit }: { api: MoneyApi; snap: Money
               </span>
               <span className="grp-total">{list.length > 1 ? totals(list) : ''}</span>
             </div>
-            {list.map(({ acc, bal }) =>
-              editAcc?.id === acc.id ? (
-                <AccountForm key={acc.id} api={api} snap={snap} acc={acc} onDone={() => setEditAcc(null)} />
-              ) : (
+            {list.map(({ acc, bal }) => (
                 <Fragment key={acc.id}>
-                  <div className={`acc-row ${acc.archived ? 'archived' : ''}`} onClick={() => (setAdding(null), setEditAcc(acc))} title="點一下修改">
+                  <div className={`acc-row ${acc.archived ? 'archived' : ''}`} onClick={() => onOpen(acc.name)} title="點一下看明細、對帳、盤點">
                     <span className="acc-name">
                       {acc.name}
                       {acc.last4 && <small>（{acc.last4}）</small>}
@@ -90,8 +104,7 @@ export function AccountsView({ api, snap, onEdit }: { api: MoneyApi; snap: Money
                   {/* 定存帳戶：底下列出定存單（2026-11-18） */}
                   {acc.type === '定存' && <DepositList api={api} snap={snap} acc={acc} />}
                 </Fragment>
-              ),
-            )}
+              ))}
             {adding?.key === g && <AccountForm api={api} snap={snap} initial={adding.initial} onDone={() => setAdding(null)} />}
           </div>
         ))}
@@ -108,7 +121,8 @@ export function AccountsView({ api, snap, onEdit }: { api: MoneyApi; snap: Money
             <button className="primary" onClick={() => startAdd('\u0000new', {})}>
               ＋ 新增帳戶（新的銀行 / 機構）
             </button>
-            <span className="hint">在銀行旁邊按＋，就在那家新增；點帳戶可以修改</span>
+            <button onClick={onStocktake}>🧮 月底盤點</button>
+            <span className="hint">在銀行旁邊按＋，就在那家新增；點帳戶看明細、修改、對帳、盤點</span>
           </div>
         )}
       </section>
