@@ -111,14 +111,19 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
     const fee = feeOn && card && !txn && tx.direction === '出' ? feeAmount : null;
     const feeTx = fee ? feeTxnFrom(tx, fee, card!.org) : null;
     if (feeOn && feeTx) {
-      const fp = checkTxn(feeTx, snap);
+      // 「… / 國外交易手續費」分類還沒有的話，存檔時自動建立
+      const feeCats = feeTx.lines.map((l) => ({ path: l.category ?? '', kind: '支出' as const }));
+      const fp = checkTxn(feeTx, { ...snap, categories: [...snap.categories, ...feeCats] });
       if (!(fee! > 0)) fp.push('手續費請填大於 0 的整數');
       if (fp.length) return setProblems(fp.map((x) => `手續費：${x}`));
     }
     const ok = await api.run(async (s) => {
       if (tx.store && newForeign && !storeOrg) await s.addOrg(tx.store, null, true);
       await s.saveTxn(tx, txn);
-      if (feeTx) await s.saveTxn(feeTx);
+      if (feeTx) {
+        await s.ensureCategories(feeTx.lines.map((l) => l.category ?? ''), '支出');
+        await s.saveTxn(feeTx);
+      }
       return true;
     });
     if (ok) {
@@ -377,7 +382,7 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
                   {feeOn && (
                     <div className="row">
                       <AmountInput value={feeAmount} onChange={(n) => setFeeEdit(n)} />
-                      <span className="hint">另外記一筆，分類、預算、標籤跟著這筆；店家記 {feeCard.org ?? '發卡銀行'}。對帳時可改成帳單金額。</span>
+                      <span className="hint">另外記一筆，分類記在「…／國外交易手續費」，預算、標籤跟著這筆；店家記 {feeCard.org ?? '發卡銀行'}。對帳時可改成帳單金額。</span>
                     </div>
                   )}
                 </div>

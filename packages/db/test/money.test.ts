@@ -9,6 +9,7 @@ import {
   DEFAULT_CATEGORIES,
   emptyForm,
   estimateFee,
+  feeCategoryOf,
   feeTxnFrom,
   fmtMoney,
   formToTxn,
@@ -401,11 +402,16 @@ describe('退款（負數）、國外交易手續費', () => {
     const fee = estimateFee(720, 1.5);
     expect(fee).toBe(11);
     const t = feeTxnFrom(buy, fee, '台新銀行');
-    expect(checkTxn(t, refs)).toEqual([]);
     expect(t).toMatchObject({ direction: '出', amount: 11, store: '台新銀行', tags: ['Super Junior'], note: 'LYSN 國外交易服務費' });
     expect(t.lines.map((l) => [l.category, l.amount])).toEqual([
-      ['食 / 三餐', 9],
-      ['住 / 日用品', 2],
+      ['食 / 三餐 / 國外交易手續費', 9],
+      ['住 / 日用品 / 國外交易手續費', 2],
     ]);
+    expect(feeCategoryOf('樂')).toBe('樂 / 國外交易手續費');
+    expect(feeCategoryOf('樂 / 數位內容 / LYSN')).toBe('樂 / 數位內容 / 國外交易手續費');
+    // 兩個第三層分類對到同一個手續費分類 → 合併
+    const two = feeTxnFrom({ ...buy, lines: [{ kind: '支出', amount: 600, category: '樂 / 數位內容 / LYSN' }, { kind: '支出', amount: 120, category: '樂 / 數位內容 / Weverse' }] }, 11, null);
+    expect(two.lines).toHaveLength(1);
+    expect(two.lines[0]).toMatchObject({ category: '樂 / 數位內容 / 國外交易手續費', amount: 11 });
   });
 });

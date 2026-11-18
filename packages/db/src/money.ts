@@ -759,8 +759,9 @@ export function formToTxn(f: EntryForm): TxnInput {
 }
 
 /**
- * 國外交易手續費（2026-11-18 確認）：另外記一筆交易，分類、預算、標籤跟著消費，店家記發卡銀行。
- * 金額依「我的部分」各分類比例分（四捨五入，零頭給最後一筆）。
+ * 國外交易手續費（2026-11-18 確認）：另外記一筆交易，預算、標籤跟著消費，店家記發卡銀行。
+ * 分類照使用者在 Notion 的記法：消費分類底下的「國外交易手續費」（見 feeCategoryOf）。
+ * 金額依「我的部分」各分類比例分（四捨五入，零頭給最後一筆）；對到同一個手續費分類的合併。
  */
 export function feeTxnFrom(purchase: TxnInput, fee: number, bank: string | null): TxnInput {
   const mine = purchase.lines.filter((l) => l.kind === '支出' && l.amount > 0);
@@ -769,8 +770,15 @@ export function feeTxnFrom(purchase: TxnInput, fee: number, bank: string | null)
   const lines: LineInput[] = mine.map((l, i) => {
     const a = i === mine.length - 1 ? left : Math.round((fee * l.amount) / total);
     left -= a;
-    return { kind: '支出' as const, amount: a, category: l.category, budget: l.budget ?? null, note: null };
-  }).filter((l) => l.amount > 0);
+    return { kind: '支出' as const, amount: a, category: l.category ? feeCategoryOf(l.category) : null, budget: l.budget ?? null, note: null };
+  });
+  const merged: LineInput[] = [];
+  for (const l of lines) {
+    const m = merged.find((x) => x.category === l.category && x.budget === l.budget);
+    if (m) m.amount += l.amount;
+    else if (l.amount > 0) merged.push(l);
+  }
+  const final = merged.filter((l) => l.amount > 0);
   return {
     ...purchase,
     direction: '出',
@@ -779,8 +787,20 @@ export function feeTxnFrom(purchase: TxnInput, fee: number, bank: string | null)
     branch: null,
     statementText: null,
     note: [purchase.store, '國外交易服務費'].filter(Boolean).join(' '),
-    lines,
+    lines: final,
   };
+}
+
+export const FEE_CATEGORY_NAME = '國外交易手續費';
+
+/**
+ * 手續費的分類（2026-11-18 使用者決定 B）：「樂 / 數位內容」→「樂 / 數位內容 / 國外交易手續費」；
+ * 已經是最底層（例：樂 / 數位內容 / LYSN）→ 放在上一層底下「樂 / 數位內容 / 國外交易手續費」
+ */
+export function feeCategoryOf(path: string): string {
+  if (lastName(path) === FEE_CATEGORY_NAME) return path;
+  const base = pathDepth(path) < MAX_CATEGORY_DEPTH ? path : parentPath(path)!;
+  return `${base} / ${FEE_CATEGORY_NAME}`;
 }
 
 /** 手續費估算：金額 × 費率，四捨五入到整數 */
@@ -1194,6 +1214,17 @@ export class MoneyStore {
   }
 
   // ── 分類 ──
+
+  /** 確保分類存在（上層要已經存在）；用在自動建立「… / 國外交易手續費」 */
+  async ensureCategories(paths: string[], kind: CategoryKind) {
+    const snap = await this.fresh();
+    const now = Date.now();
+    let sort = Math.max(0, ...snap.categories.map((c) => c.sort ?? 0));
+    const add = [...new Set(paths.map(normPath))]
+      .filter((p) => p && !snap.categories.some((c) => c.path === p))
+      .map((p) => ({ path: p, kind: snap.categories.find((c) => c.path === parentPath(p))?.kind ?? kind, sort: ++sort, id: newId(now), createdAt: now, updatedAt: now }));
+    if (add.length) await this.b.append('moneyCategories', add);
+  }
 
   /**
    * 新增分類：在某個分類底下（parent）或新增主分類（parent = null），只填這一層的名字。
