@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { Account, AccountType, MoneySnapshot } from '@life/db';
-import { ACCOUNT_TYPES } from '@life/db';
+import { ACCOUNT_TYPES, ORG_KINDS } from '@life/db';
 import type { MoneyApi } from '../useMoney';
 import { amountText, parseAmount } from './common';
 
@@ -195,23 +195,34 @@ export function SettingsView({ api, snap, openCategories }: { api: MoneyApi; sna
 
       {snap.orgs.length > 0 && (
         <section className="card">
-          <h2>機構</h2>
+          <h2>店家 / 機構</h2>
+          <p className="hint">記帳的店家 / 對象、帳戶的銀行都在這裡（存在「生活APP-綜合」）。記帳時輸入新的店家會自動加進來。</p>
+          <details>
+            <summary>全部 {snap.orgs.length} 個</summary>
           {snap.orgs.map((o) => (
             <div className="list-row" key={o.id}>
               <span className="grow">
-                {o.name} {o.kind && <span className="muted small">{o.kind}</span>}
+                {o.name}
               </span>
+              <select className="kind-select" value={o.kind ?? ''} onChange={(e) => api.run((s) => s.updateOrg(o, { kind: e.target.value || null }))}>
+                <option value="">類別</option>
+                {ORG_KINDS.map((k) => (
+                  <option key={k}>{k}</option>
+                ))}
+                {o.kind && !(ORG_KINDS as readonly string[]).includes(o.kind) && <option>{o.kind}</option>}
+              </select>
               <button
                 onClick={() => {
-                  const n = prompt('新的名稱（帳戶會一起改）', o.name);
-                  if (n && n.trim() !== o.name) api.run((s) => s.renameOrg(o, n));
+                  const n = prompt('新的名稱（帳戶、交易的店家會一起改）', o.name);
+                  if (n && n.trim() !== o.name) api.run((s) => s.updateOrg(o, { name: n }));
                 }}
               >
                 改名
               </button>
             </div>
           ))}
-        </section>
+            </details>
+      </section>
       )}
 
       <section className="card">

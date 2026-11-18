@@ -11,12 +11,14 @@ import {
   splitTags,
   toInputDateTime,
   txnCurrency,
+  lastCategoryOfStore,
   txnToForm,
 } from '@life/db';
 import type { Editing } from '../App';
 import type { MoneyApi } from '../useMoney';
 import { AccountSelect, amountText, parseAmount, PersonSelect } from './common';
 import { CategoryPicker } from './CategoryPicker';
+import { StorePicker } from './StorePicker';
 
 /** 金額輸入：自己記住打到一半的文字（例：「12.」） */
 function AmountInput({ value, onChange, placeholder = '金額' }: { value: number | null; onChange: (n: number | null) => void; placeholder?: string }) {
@@ -155,6 +157,20 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
     );
   };
 
+  // 選店家：分類還沒選的話，帶入這家店上次用的分類（2026-11-18 確認）
+  const storePicker = (kind: '支出' | '收入') => (
+    <StorePicker
+      snap={snap}
+      value={f.store}
+      branch={f.branch}
+      onBranch={(v) => set({ branch: v })}
+      onChange={(v) => {
+        const last = v ? lastCategoryOfStore(snap.txns, v, kind) : null;
+        set({ store: v, cats: last && f.cats.length === 1 && !f.cats[0].category ? [{ ...f.cats[0], category: last }] : f.cats });
+      }}
+    />
+  );
+
   const from = snap.accounts.find((a) => a.name === f.account);
   const to = snap.accounts.find((a) => a.name === f.toAccount);
 
@@ -237,6 +253,7 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
                   </label>
                 </div>
               )}
+              {storePicker('支出')}
               {catRows('支出')}
 
               {!paidByMode && (
@@ -300,6 +317,7 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
                 存入帳戶
                 <AccountSelect snap={snap} value={f.account} onChange={(v) => set({ account: v })} />
               </label>
+              {storePicker('收入')}
               {catRows('收入')}
             </>
           )}
@@ -384,15 +402,10 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
             </>
           )}
 
-          {f.mode !== '轉帳' && f.mode !== '借款' && f.mode !== '還款' && f.mode !== '不用還了' && (
+          {txn?.statementText && (
             <label className="field">
-              店家
-              <input value={f.store ?? ''} onChange={(e) => set({ store: e.target.value })} list="money-stores" />
-              <datalist id="money-stores">
-                {[...new Set(snap.txns.map((t) => t.store).filter(Boolean))].slice(0, 50).map((s) => (
-                  <option key={s} value={s!} />
-                ))}
-              </datalist>
+              帳單名稱
+              <input value={f.statementText ?? ''} onChange={(e) => set({ statementText: e.target.value })} />
             </label>
           )}
           <label className="field">

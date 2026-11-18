@@ -10,6 +10,8 @@ import {
   emptyForm,
   fmtMoney,
   formToTxn,
+  lastCategoryOfStore,
+  recentStores,
   LocalBackend,
   memoryStorage,
   MoneyStore,
@@ -159,6 +161,8 @@ describe('計算', () => {
     toAccount: null,
     toAmount: null,
     store: null,
+    branch: null,
+    statementText: null,
     note: null,
     tags: [],
     createdVia: 'money',
@@ -342,5 +346,32 @@ describe('MoneyStore', () => {
     const rows = await backend.read('moneyTransactions');
     expect(rows[0].values.id).toBeTruthy();
     expect(rows[0].values.createdVia).toBe('sheet');
+  });
+});
+
+describe('店家 / 對象', () => {
+  it('新增交易時店家自動加進機構；試算表填的也會補；改名時交易一起改；記住上次分類', async () => {
+    const backend = new LocalBackend(memoryStorage());
+    const store = new MoneyStore(backend);
+    await store.load();
+    const acc = { type: '現金' as const, currency: 'TWD', org: null, openingDate: null, openingBalance: null, closingDay: null, dueDay: null, expiryDate: null, monthlyCheck: true, archived: false, note: null };
+    await store.saveAccount({ ...acc, name: '錢包' });
+    await store.saveTxn(formToTxn(form({ account: '錢包', store: '八方雲集', branch: '信義店', cats: [{ category: '食 / 三餐', amount: 86 }] })));
+    let snap = await store.load();
+    expect(snap.orgs.map((o) => o.name)).toEqual(['八方雲集']);
+    expect(snap.txns[0]).toMatchObject({ store: '八方雲集', branch: '信義店' });
+    expect(lastCategoryOfStore(snap.txns, '八方雲集', '支出')).toBe('食 / 三餐');
+    expect(recentStores(snap.txns)).toEqual(['八方雲集']);
+
+    const id = snap.txns[0].id;
+    await backend.appendRaw('moneyTransactions', { time: at('2026-11-18 13:00'), direction: '出', account: '錢包', amount: 20, store: '全聯', id: 'T2' });
+    await backend.appendRaw('moneyLines', { transaction: 'T2', kind: '支出', amount: 20, category: '住 / 日用品', id: 'L2' });
+    snap = await store.load();
+    expect(snap.orgs.map((o) => o.name).sort()).toEqual(['八方雲集', '全聯'].sort());
+
+    await store.updateOrg(snap.orgs.find((o) => o.name === '八方雲集')!, { name: '八方雲集鍋貼', kind: '餐飲' });
+    snap = await store.load();
+    expect(snap.txns.find((t) => t.id === id)?.store).toBe('八方雲集鍋貼');
+    expect(snap.orgs.find((o) => o.name === '八方雲集鍋貼')?.kind).toBe('餐飲');
   });
 });

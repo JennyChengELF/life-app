@@ -35,7 +35,7 @@ function subText(t: Txn) {
   if (t.paidBy) parts.push(`${t.paidBy} 先付`);
   const shared = t.lines.filter((l) => l.kind === '他欠我' && l.debtType !== '借款').map((l) => l.person);
   if (shared.length) parts.push(`和 ${shared.join('、')} 分帳`);
-  if (t.store) parts.push(t.store);
+  if (t.store) parts.push(t.branch ? `${t.store}（${t.branch}）` : t.store);
   if (t.note) parts.push(t.note);
   if (t.tags.length) parts.push(t.tags.map((x) => `#${x}`).join(' '));
   return parts.join('・');

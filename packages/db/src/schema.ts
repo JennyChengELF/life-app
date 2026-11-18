@@ -10,8 +10,9 @@
  * 5：新增健檢 / 檢驗：報告、檢驗項目、檢驗結果（2026-11-17）
  * 6：新增排便 APP、綜合 APP 的試算表（2026-11-18）
  * 7：新增記帳 APP 的試算表（帳戶、分類、交易、明細）；綜合加人物、機構（2026-11-18）
+ * 8：交易加分店、帳單名稱（2026-11-18）
  */
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 export type ColType = 'datetime' | 'date' | 'number' | 'text' | 'bool' | 'any';
 
@@ -302,7 +303,7 @@ export const TABLES = {
     description: '機構（銀行、證券商、電子支付、商店、醫院⋯⋯）。記帳的帳戶掛在機構底下。可以直接新增一列，只要填 name。',
     columns: [
       { name: 'name', type: 'text', label: '名稱（必填，不可重複；例：永豐銀行）' },
-      { name: 'kind', type: 'text', label: '類別（例：銀行、證券、電子支付、商店、醫院）' },
+      { name: 'kind', type: 'text', label: '類別（商店、餐飲、銀行、證券、保險、電子支付、醫療、公司、政府、其他）' },
       { name: 'sort', type: 'number', label: '排序' },
       { name: 'archived', type: 'bool', label: '停用（TRUE）' },
       { name: 'note', type: 'text', label: '備註' },
@@ -356,7 +357,9 @@ export const TABLES = {
       { name: 'currency', type: 'text', label: '幣別：只有沒帳戶時才填（有帳戶時看帳戶的幣別）；空白 = TWD' },
       { name: 'toAccount', type: 'text', label: '轉帳：轉入的帳戶' },
       { name: 'toAmount', type: 'number', label: '轉帳：轉入帳戶收到多少（換錢時填外幣金額；空白 = 和金額相同）' },
-      { name: 'store', type: 'text', label: '店家' },
+      { name: 'store', type: 'text', label: '店家 / 對象（填機構名稱；不在機構清單裡的會自動加進去）' },
+      { name: 'branch', type: 'text', label: '分店（選填）' },
+      { name: 'statementText', type: 'text', label: '帳單名稱（帳單上印的文字，對帳用）' },
       { name: 'note', type: 'text', label: '備註' },
       { name: 'tags', type: 'text', label: '標籤（多個用「、」分開）' },
       { name: 'date', type: 'date', label: '日期（APP 依 time 自動填）' },

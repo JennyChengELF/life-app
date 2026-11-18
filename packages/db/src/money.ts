@@ -24,6 +24,8 @@ export const CATEGORY_KINDS = ['支出', '收入'] as const;
 export type CategoryKind = (typeof CATEGORY_KINDS)[number];
 /** 和人物有關的明細 */
 export const PERSON_KINDS: LineKind[] = ['他欠我', '我欠他', '他還我', '我還他'];
+/** 機構類別（2026-11-18 確認） */
+export const ORG_KINDS = ['商店', '餐飲', '銀行', '證券', '保險', '電子支付', '醫療', '公司', '政府', '其他'] as const;
 
 /** 💡 第一次使用時放的預設分類（之後可匯入舊試算表的分類、自己改） */
 export const DEFAULT_CATEGORIES: { path: string; kind: CategoryKind }[] = [
@@ -126,7 +128,11 @@ export interface TxnInput {
   currency: string | null;
   toAccount: string | null;
   toAmount: number | null;
+  /** 店家 / 對象（機構名稱） */
   store: string | null;
+  branch: string | null;
+  /** 帳單上印的文字（對帳用） */
+  statementText: string | null;
   note: string | null;
   tags: string[];
   lines: LineInput[];
@@ -261,6 +267,26 @@ export function categoryTree(categories: Category[], kind: CategoryKind): Catego
   return build(null, false);
 }
 
+/** 最近用過的店家（新 → 舊，不重複） */
+export function recentStores(txns: Txn[], n = 8): string[] {
+  const out: string[] = [];
+  for (const t of txns) {
+    if (t.store && !out.includes(t.store)) out.push(t.store);
+    if (out.length >= n) break;
+  }
+  return out;
+}
+
+/** 這家店上次用的分類（2026-11-18 確認：選店家後自動帶入，可改） */
+export function lastCategoryOfStore(txns: Txn[], store: string, kind: CategoryKind): string | null {
+  for (const t of txns) {
+    if (t.store !== store) continue;
+    const l = t.lines.find((x) => x.kind === kind && x.category);
+    if (l) return l.category;
+  }
+  return null;
+}
+
 /** 最近用過的分類（新 → 舊，不重複） */
 export function recentCategories(txns: Txn[], kind: CategoryKind, n = 5): string[] {
   const out: string[] = [];
@@ -377,6 +403,8 @@ function toTxn(r: TableRow, lines: Line[]): Txn {
     toAccount: str(v.toAccount),
     toAmount: num(v.toAmount),
     store: str(v.store),
+    branch: str(v.branch),
+    statementText: str(v.statementText),
     note: str(v.note),
     tags: splitTags(v.tags),
     createdVia: str(v.createdVia),
@@ -619,6 +647,8 @@ export interface EntryForm {
   toAccount: string | null;
   toAmount: number | null;
   store: string | null;
+  branch: string | null;
+  statementText: string | null;
   note: string | null;
   tags: string[];
 }
@@ -637,6 +667,8 @@ export const emptyForm = (mode: EntryForm['mode'] = '支出', time = Date.now())
   toAccount: null,
   toAmount: null,
   store: null,
+  branch: null,
+  statementText: null,
   note: null,
   tags: [],
 });
@@ -648,7 +680,7 @@ export const formTotal = (f: EntryForm) => sum(f.cats.map((c) => c.amount)) + (f
 
 /** 表單 → 要存的交易（不檢查；存之前用 checkTxn 檢查） */
 export function formToTxn(f: EntryForm): TxnInput {
-  const base = { time: f.time, store: f.store?.trim() || null, note: f.note?.trim() || null, tags: f.tags, toAccount: null, toAmount: null, paidBy: null, currency: null };
+  const base = { time: f.time, store: f.store?.trim() || null, branch: f.store?.trim() ? f.branch?.trim() || null : null, statementText: f.statementText?.trim() || null, note: f.note?.trim() || null, tags: f.tags, toAccount: null, toAmount: null, paidBy: null, currency: null };
   const cats = (kind: '支出' | '收入'): LineInput[] =>
     f.cats.filter((c) => c.category || c.amount).map((c) => ({ kind, amount: c.amount ?? 0, category: c.category, note: c.note ?? null }));
   switch (f.mode) {
@@ -715,7 +747,7 @@ export function formToTxn(f: EntryForm): TxnInput {
 
 /** 交易 → 表單（看不出是哪一種的 → mode「其他」，畫面只能刪除或到試算表改） */
 export function txnToForm(t: Txn): EntryForm {
-  const f: EntryForm = { ...emptyForm('其他', t.time), store: t.store, note: t.note, tags: t.tags, account: t.account, currency: t.currency, cats: [] };
+  const f: EntryForm = { ...emptyForm('其他', t.time), store: t.store, branch: t.branch, statementText: t.statementText, note: t.note, tags: t.tags, account: t.account, currency: t.currency, cats: [] };
   const L = t.lines;
   const only = (...kinds: LineKind[]) => L.length > 0 && L.every((l) => kinds.includes(l.kind));
   const catsOf = (kind: LineKind) => L.filter((l) => l.kind === kind).map((l) => ({ category: l.category, amount: l.amount, note: l.note }));
@@ -940,6 +972,15 @@ export class MoneyStore {
       return this.loadNow(now);
     }
 
+    // 店家 / 對象不在機構清單裡（試算表直接填、匯入）→ 自動加進機構
+    const orgNames = new Set(orgs.map((o) => o.name));
+    const newOrgs = [...new Set(txns.map((t) => t.store).filter((x): x is string => !!x && !orgNames.has(x)))];
+    if (newOrgs.length) {
+      let sort = Math.max(0, ...orgs.map((o) => o.sort ?? 0));
+      await this.b.append('hubOrganizations', newOrgs.map((name) => ({ name, sort: ++sort, id: newId(now), createdAt: now, updatedAt: now })));
+      return this.loadNow(now);
+    }
+
     const snap: MoneySnapshot = { loadedAt: now, accounts, categories, people, orgs, txns, issues };
     this.last = snap;
     return snap;
@@ -956,6 +997,7 @@ export class MoneyStore {
     const snap = await this.fresh();
     const p = checkTxn(input, snap);
     if (p.length) throw new Error(p.join('；'));
+    if (input.store && !snap.orgs.some((o) => o.name === input.store)) await this.addOrg(input.store);
     const now = Date.now();
     const cur = txnCurrency(input, snap.accounts);
     const r = (n: number | null) => (n == null ? null : roundMoney(n, cur));
@@ -971,6 +1013,8 @@ export class MoneyStore {
       toAccount: input.toAccount,
       toAmount: input.toAmount == null ? null : roundMoney(input.toAmount, toCur),
       store: input.store,
+      branch: input.branch,
+      statementText: input.statementText,
       note: input.note,
       tags: input.tags.length ? input.tags.join('、') : null,
       updatedAt: now,
@@ -1216,16 +1260,24 @@ export class MoneyStore {
     await this.b.append('hubOrganizations', [{ name: n, kind, sort, id: newId(now), createdAt: now, updatedAt: now }]);
   }
 
-  async renameOrg(o: Org, name: string) {
+  /** 修改機構：改名時帳戶、交易的店家一起改 */
+  async updateOrg(o: Org, patch: { name?: string; kind?: string | null }) {
     const snap = await this.fresh();
-    const to = name.trim();
-    if (!to) throw new Error('請填名稱');
-    if (to === o.name) return;
-    if (snap.orgs.some((x) => x.name === to)) throw new Error(`已經有「${to}」`);
     const now = Date.now();
-    await this.b.update('hubOrganizations', [{ rowNumber: o.rowNumber, values: { name: to, updatedAt: now }, expectId: o.id }]);
-    const us = snap.accounts.filter((a) => a.org === o.name).map((a) => ({ rowNumber: a.rowNumber, values: { org: to, updatedAt: now }, expectId: a.id }));
-    if (us.length) await this.b.update('moneyAccounts', us);
+    const v: RowValues = { updatedAt: now };
+    const to = patch.name?.trim();
+    if (to !== undefined) {
+      if (!to) throw new Error('請填名稱');
+      if (to !== o.name && snap.orgs.some((x) => x.name === to)) throw new Error(`已經有「${to}」`);
+      v.name = to;
+    }
+    if (patch.kind !== undefined) v.kind = patch.kind || null;
+    await this.b.update('hubOrganizations', [{ rowNumber: o.rowNumber, values: v, expectId: o.id }]);
+    if (!to || to === o.name) return;
+    const accs = snap.accounts.filter((a) => a.org === o.name).map((a) => ({ rowNumber: a.rowNumber, values: { org: to, updatedAt: now }, expectId: a.id }));
+    if (accs.length) await this.b.update('moneyAccounts', accs);
+    const txs = snap.txns.filter((t) => t.store === o.name).map((t) => ({ rowNumber: t.rowNumber, values: { store: to, updatedAt: now }, expectId: t.id }));
+    if (txs.length) await this.b.update('moneyTransactions', txs);
   }
 
   async discardIssue(issue: MoneyIssue) {
