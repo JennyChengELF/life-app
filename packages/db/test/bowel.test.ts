@@ -121,10 +121,10 @@ describe('資料存取', () => {
   it('新增（先給 id）、修改部分欄位、刪除', async () => {
     const b = new LocalBackend(memoryStorage());
     const s = new BowelStore(b);
-    const id = await s.addLog({}, at('2026-11-18 08:00'), 'MYID');
+    const id = await s.addLog({}, at('2026-11-10 08:00'), 'MYID');
     expect(id).toBe('MYID');
     let snap = await s.load();
-    expect(snap.logs[0]).toMatchObject({ id: 'MYID', passed: true, types: [], amount: null, date: '2026-11-18' });
+    expect(snap.logs[0]).toMatchObject({ id: 'MYID', passed: true, types: [], amount: null, date: '2026-11-10' });
     await s.updateLog(snap.logs[0], { types: ['4', '1'], amount: '普通', symptoms: ['腹脹', '腹痛'] });
     snap = await s.load();
     // 依選項順序存
