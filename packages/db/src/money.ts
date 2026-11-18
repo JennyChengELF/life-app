@@ -100,6 +100,8 @@ export interface Person extends RowRef {
 export interface Org extends RowRef {
   name: string;
   kind: string | null;
+  /** 國外的店家 / 機構 */
+  foreign: boolean;
   archived: boolean;
   sort: number | null;
   note: string | null;
@@ -367,6 +369,7 @@ function toOrg(r: TableRow): Org {
     id: String(v.id ?? ''),
     name: str(v.name)!,
     kind: str(v.kind),
+    foreign: v.foreign === true,
     archived: v.archived === true,
     sort: num(v.sort),
     note: str(v.note),
@@ -1293,17 +1296,17 @@ export class MoneyStore {
     if (to && to !== p.name) await this.renameInTxns(snap, 'person', p.name, to);
   }
 
-  async addOrg(name: string, kind: string | null = null) {
+  async addOrg(name: string, kind: string | null = null, foreign = false) {
     const snap = this.last ?? (await this.fresh());
     const n = name.trim();
     if (!n || snap.orgs.some((o) => o.name === n)) return;
     const now = Date.now();
     const sort = Math.max(0, ...snap.orgs.map((o) => o.sort ?? 0)) + 1;
-    await this.b.append('hubOrganizations', [{ name: n, kind, sort, id: newId(now), createdAt: now, updatedAt: now }]);
+    await this.b.append('hubOrganizations', [{ name: n, kind, foreign: foreign || null, sort, id: newId(now), createdAt: now, updatedAt: now }]);
   }
 
   /** 修改機構：改名時帳戶、交易的店家一起改 */
-  async updateOrg(o: Org, patch: { name?: string; kind?: string | null }) {
+  async updateOrg(o: Org, patch: { name?: string; kind?: string | null; foreign?: boolean }) {
     const snap = await this.fresh();
     const now = Date.now();
     const v: RowValues = { updatedAt: now };
@@ -1314,6 +1317,7 @@ export class MoneyStore {
       v.name = to;
     }
     if (patch.kind !== undefined) v.kind = patch.kind || null;
+    if (patch.foreign !== undefined) v.foreign = patch.foreign || null;
     await this.b.update('hubOrganizations', [{ rowNumber: o.rowNumber, values: v, expectId: o.id }]);
     if (!to || to === o.name) return;
     const accs = snap.accounts.filter((a) => a.org === o.name).map((a) => ({ rowNumber: a.rowNumber, values: { org: to, updatedAt: now }, expectId: a.id }));

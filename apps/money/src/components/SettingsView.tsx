@@ -209,6 +209,10 @@ export function SettingsView({ api, snap, openCategories }: { api: MoneyApi; sna
               <span className="grow">
                 {o.name}
               </span>
+              <label className="check inline small">
+                <input type="checkbox" checked={o.foreign} onChange={(e) => api.run((s) => s.updateOrg(o, { foreign: e.target.checked }))} />
+                國外
+              </label>
               <select className="kind-select" value={o.kind ?? ''} onChange={(e) => api.run((s) => s.updateOrg(o, { kind: e.target.value || null }))}>
                 <option value="">類別</option>
                 {ORG_KINDS.map((k) => (

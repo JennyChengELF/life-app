@@ -373,10 +373,13 @@ describe('店家 / 對象', () => {
     snap = await store.load();
     expect(snap.orgs.map((o) => o.name).sort()).toEqual(['八方雲集', '全聯'].sort());
 
-    await store.updateOrg(snap.orgs.find((o) => o.name === '八方雲集')!, { name: '八方雲集鍋貼', kind: '餐飲' });
+    await store.updateOrg(snap.orgs.find((o) => o.name === '八方雲集')!, { name: '八方雲集鍋貼', kind: '餐飲', foreign: true });
+    await store.addOrg('LYSN', null, true);
     snap = await store.load();
     expect(snap.txns.find((t) => t.id === id)?.store).toBe('八方雲集鍋貼');
-    expect(snap.orgs.find((o) => o.name === '八方雲集鍋貼')?.kind).toBe('餐飲');
+    expect(snap.orgs.find((o) => o.name === '八方雲集鍋貼')).toMatchObject({ kind: '餐飲', foreign: true });
+    expect(snap.orgs.find((o) => o.name === 'LYSN')?.foreign).toBe(true);
+    expect(snap.orgs.find((o) => o.name === '全聯')?.foreign).toBe(false);
   });
 });
 

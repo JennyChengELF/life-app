@@ -10,7 +10,7 @@
  * 5：新增健檢 / 檢驗：報告、檢驗項目、檢驗結果（2026-11-17）
  * 6：新增排便 APP、綜合 APP 的試算表（2026-11-18）
  * 7：新增記帳 APP 的試算表（帳戶、分類、交易、明細）；綜合加人物、機構（2026-11-18）
- * 8：交易加分店、帳單名稱；帳戶加國外交易手續費率（2026-11-18）
+ * 8：交易加分店、帳單名稱；帳戶加國外交易手續費率；機構加國外（2026-11-18）
  */
 export const SCHEMA_VERSION = 8;
 
@@ -304,6 +304,7 @@ export const TABLES = {
     columns: [
       { name: 'name', type: 'text', label: '名稱（必填，不可重複；例：永豐銀行）' },
       { name: 'kind', type: 'text', label: '類別（商店、餐飲、銀行、證券、保險、電子支付、醫療、公司、政府、其他）' },
+      { name: 'foreign', type: 'bool', label: '國外的店家 / 機構（TRUE；刷卡時自動勾國外交易手續費）' },
       { name: 'sort', type: 'number', label: '排序' },
       { name: 'archived', type: 'bool', label: '停用（TRUE）' },
       { name: 'note', type: 'text', label: '備註' },

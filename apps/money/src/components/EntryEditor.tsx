@@ -80,7 +80,10 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
   const [splitN, setSplitN] = useState(2);
   const [paidByMode, setPaidByMode] = useState(!!f.paidBy);
   /** 國外交易手續費（只有新增、信用卡時）：null = 依費率自動算 */
-  const [feeOn, setFeeOn] = useState(false);
+  /** null = 自動（國外店家＋信用卡就勾） */
+  const [feeOnState, setFeeOnState] = useState<boolean | null>(null);
+  /** 新的店家（還不在機構清單）先記在這裡，存檔時一起建立 */
+  const [newForeign, setNewForeign] = useState(false);
   const [feeEdit, setFeeEdit] = useState<number | null>(null);
   const set = (patch: Partial<EntryForm>) => setF((x) => ({ ...x, ...patch }));
 
@@ -113,6 +116,7 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
       if (fp.length) return setProblems(fp.map((x) => `手續費：${x}`));
     }
     const ok = await api.run(async (s) => {
+      if (tx.store && newForeign && !storeOrg) await s.addOrg(tx.store, null, true);
       await s.saveTxn(tx, txn);
       if (feeTx) await s.saveTxn(feeTx);
       return true;
@@ -209,6 +213,11 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
       value={f.store}
       branch={f.branch}
       onBranch={(v) => set({ branch: v })}
+      foreign={storeForeign}
+      onForeign={(v) => {
+        if (storeOrg) api.run((s) => s.updateOrg(storeOrg, { foreign: v }));
+        else setNewForeign(v);
+      }}
       onChange={(v) => {
         const last = v ? lastCategoryOfStore(snap.txns, v, kind) : null;
         set({ store: v, cats: last && f.cats.length === 1 && !f.cats[0].category ? [{ ...f.cats[0], category: last }] : f.cats });
@@ -218,6 +227,10 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
 
   const from = snap.accounts.find((a) => a.name === f.account);
   const feeCard = !txn && f.mode === '支出' && !paidByMode && from?.type === '信用卡' ? from : null;
+  const storeOrg = f.store ? (snap.orgs.find((o) => o.name === f.store) ?? null) : null;
+  const storeForeign = storeOrg ? storeOrg.foreign : newForeign;
+  // 用信用卡付國外店家 → 自動勾手續費（2026-11-18）；自己改過就照自己的
+  const feeOn = feeOnState ?? storeForeign;
   const feeAmount = feeEdit ?? estimateFee(Math.max(0, formTotal(f)), feeCard?.fxFeeRate ?? null);
   const to = snap.accounts.find((a) => a.name === f.toAccount);
 
@@ -358,7 +371,7 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
               {feeCard && (
                 <div className="subbox">
                   <label className="check">
-                    <input type="checkbox" checked={feeOn} onChange={(e) => setFeeOn(e.target.checked)} />
+                    <input type="checkbox" checked={feeOn} onChange={(e) => setFeeOnState(e.target.checked)} />
                     ＋國外交易手續費（{feeCard.fxFeeRate ?? 1.5}%）
                   </label>
                   {feeOn && (

@@ -120,3 +120,5 @@ details > summary { cursor: pointer; color: var(--muted); font-size: 0.9rem; mar
 .kind-select { width: auto; padding: 4px 6px; font-size: 0.82rem; }
 .sign-btn { padding: 6px 10px; font-weight: 700; color: var(--muted); flex: none; }
 input.neg { color: var(--in); }
+.check.inline { margin: 0; white-space: nowrap; color: var(--text); }
+.row.branch input:not([type='checkbox']) { flex: 1; }

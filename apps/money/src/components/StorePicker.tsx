@@ -11,12 +11,17 @@ export function StorePicker({
   branch,
   onChange,
   onBranch,
+  foreign,
+  onForeign,
 }: {
   snap: MoneySnapshot;
   value: string | null;
   branch: string | null;
   onChange: (v: string | null) => void;
   onBranch: (v: string | null) => void;
+  /** 這個店家是不是國外的（記在機構上） */
+  foreign: boolean;
+  onForeign: (v: boolean) => void;
 }) {
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
@@ -65,7 +70,13 @@ export function StorePicker({
         </div>
       )}
       {value && (
-        <input className="branch" placeholder="分店（選填）" value={branch ?? ''} onChange={(e) => onBranch(e.target.value || null)} />
+        <div className="row branch">
+          <input placeholder="分店（選填）" value={branch ?? ''} onChange={(e) => onBranch(e.target.value || null)} />
+          <label className="check inline">
+            <input type="checkbox" checked={foreign} onChange={(e) => onForeign(e.target.checked)} />
+            國外
+          </label>
+        </div>
       )}
     </div>
   );
