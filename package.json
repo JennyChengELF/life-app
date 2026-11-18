@@ -6,6 +6,7 @@
     "dev": "pnpm --filter water dev",
     "dev:health": "pnpm --filter health dev",
     "dev:hub": "pnpm --filter hub dev",
+    "dev:bowel": "pnpm --filter bowel dev",
     "build": "pnpm -r --filter ./apps/* build",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck"

@@ -1,7 +1,7 @@
 @import '@life/ui/base.css';
 
 .hub { max-width: 640px; }
-.launcher { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin: 12px 0 16px; }
+.launcher { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 12px 0 16px; }
 .tile {
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
   background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);

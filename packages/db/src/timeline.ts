@@ -1,5 +1,5 @@
 /**
- * 一天的時間軸：把那天記的東西（身體、血壓、血糖、體溫、偶爾量測、喝水）依時間排。
+ * 一天的時間軸：把那天記的東西（身體、血壓、血糖、體溫、偶爾量測、喝水、排便）依時間排。
  * 健康 APP 的總覽、綜合首頁共用。
  */
 import type { HealthSnapshot } from './health';
@@ -8,6 +8,8 @@ import type { Judge } from './vitals';
 import { judgeBp, judgeGlucose, judgeTemp } from './vitals';
 import { judgeLab } from './lab';
 import { startOfDay } from './time';
+import type { BowelSnapshot } from './bowel';
+import { bowelSummary, judgeBowel } from './bowel';
 import type { WaterSnapshot } from './water';
 import { computeGoal, drinkOf, goalWeight } from './water';
 
@@ -16,7 +18,8 @@ export type EntryRef =
   | { app: 'health'; kind: 'body' | 'bp' | 'glucose' | 'temp'; id: string }
   | { app: 'health'; kind: 'occ'; id: string }
   | { app: 'health'; kind: 'lab'; id: string }
-  | { app: 'water'; kind: 'water'; id: string };
+  | { app: 'water'; kind: 'water'; id: string }
+  | { app: 'bowel'; kind: 'bowel'; id: string };
 
 export interface TimelineEntry {
   key: string;
@@ -152,6 +155,25 @@ export function waterEntries(snap: WaterSnapshot, date: string): TimelineEntry[]
     }));
 }
 
+export function bowelEntries(snap: BowelSnapshot, date: string): TimelineEntry[] {
+  return snap.logs
+    .filter((l) => l.date === date)
+    .map((l) => {
+      const extra = l.symptoms.filter((s) => s !== '無特殊狀況').join('、');
+      return {
+        key: l.id,
+        time: l.time,
+        icon: '💩',
+        name: '排便',
+        value: bowelSummary(l) || '（沒填細節）',
+        extra: extra || undefined,
+        judge: judgeBowel(l),
+        note: l.note,
+        ref: { app: 'bowel' as const, kind: 'bowel' as const, id: l.id },
+      };
+    });
+}
+
 /** 那天的喝水總量、目標（還沒有目標紀錄的日子用規則算） */
 export function waterSummary(snap: WaterSnapshot, date: string): { total: number; goal: number } {
   const total = snap.logs.filter((l) => l.date === date).reduce((s, l) => s + l.ml, 0);
@@ -168,6 +190,6 @@ export const sortEntries = (list: TimelineEntry[]) => [...list].sort((a, b) => N
 export const editHash = (ref: EntryRef) => `#edit/${ref.kind}/${ref.id}`;
 
 export function parseEditHash(hash: string): { kind: EntryRef['kind']; id: string } | null {
-  const m = /^#edit\/(body|bp|glucose|temp|occ|lab|water)\/(.+)$/.exec(hash);
+  const m = /^#edit\/(body|bp|glucose|temp|occ|lab|water|bowel)\/(.+)$/.exec(hash);
   return m ? { kind: m[1] as EntryRef['kind'], id: decodeURIComponent(m[2]) } : null;
 }

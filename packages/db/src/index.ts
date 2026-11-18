@@ -10,4 +10,5 @@ export * from './water';
 export * from './health';
 export * from './vitals';
 export * from './lab';
+export * from './bowel';
 export * from './timeline';

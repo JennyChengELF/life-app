@@ -1,0 +1,96 @@
+@import '@life/ui/base.css';
+
+/* 排便 APP 的主題色 */
+:root {
+  --accent: #85643f;
+  --accent-soft: #f3ebe1;
+  --poo: #8b5a2b;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --accent: #cfa171;
+    --accent-soft: #3a2d1f;
+    --poo: #c08a55;
+  }
+}
+
+.app { max-width: 720px; }
+.home-link { text-decoration: none; padding: 2px 4px; }
+.msg.bad { background: var(--danger-soft); color: var(--danger); font-weight: 600; }
+
+/* 距離上次排便 + 記錄按鈕 */
+.since { text-align: center; }
+.since-label { color: var(--muted); font-size: 0.9rem; }
+.since-value { font-size: 2rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.25; }
+.add-row { display: flex; gap: 8px; justify-content: center; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+.add-row button:not(.primary) { font-size: 0.9rem; color: var(--muted); }
+
+/* 紀錄列表 */
+.log-list { list-style: none; margin: 0; padding: 0; }
+.log-row { display: flex; align-items: flex-start; gap: 10px; padding: 10px 4px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.log-row:last-child { border-bottom: 0; }
+.log-row:hover { background: var(--bg); }
+.log-time { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 3em; }
+.log-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.log-extra { font-size: 0.8rem; color: var(--muted); }
+
+/* 詳細欄位 */
+.editor { background: var(--bg); border-radius: 10px; padding: 12px; margin: 6px 0; }
+.ed-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.ed-head input { flex: 1 1 200px; width: auto; }
+.ed-kind { font-weight: 600; }
+.field { display: block; margin-bottom: 10px; font-size: 0.9rem; color: var(--muted); }
+.field input { margin-top: 4px; color: var(--text); }
+.choice { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.choice button { border-radius: 999px; padding: 5px 12px; font-size: 0.9rem; color: var(--text); }
+.choice button.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.choice.types button { padding: 5px 10px 5px 6px; }
+.type-icon { width: 30px; height: 17px; fill: var(--poo); stroke: none; flex: none; }
+.type-icon .snake { fill: none; stroke: var(--poo); stroke-width: 5; stroke-linecap: round; }
+.type-icon .wave { fill: none; stroke: var(--poo); stroke-width: 2; stroke-linecap: round; }
+.type-icon .crack { fill: none; stroke: var(--card); stroke-width: 1.4; }
+.choice button.active .type-icon { fill: #fff; }
+.choice button.active .type-icon .snake, .choice button.active .type-icon .wave { stroke: #fff; }
+.choice button.active .type-icon .crack { stroke: var(--accent); }
+.swatch { display: inline-block; width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(0, 0, 0, 0.2); margin-right: 2px; }
+.more-btn { margin: -2px 0 6px -6px; }
+.editor-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; align-items: center; }
+
+/* 統計 */
+.month-nav { display: flex; align-items: center; justify-content: center; gap: 4px; margin-bottom: 8px; }
+.date-label { font-weight: 600; min-width: 120px; text-align: center; }
+.cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cal-head { text-align: center; font-size: 0.78rem; color: var(--muted); padding-bottom: 2px; }
+.cal-day { flex-direction: column; gap: 2px; padding: 4px 0 6px; border-radius: 10px; border-color: transparent; background: none; min-height: 52px; }
+.cal-day:hover:not(:disabled) { border-color: var(--line); }
+.cal-day.today .cal-num { color: var(--accent); font-weight: 700; }
+.cal-num { font-size: 0.82rem; color: var(--muted); }
+.cal-dot {
+  display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%;
+  font-size: 0.7rem; font-weight: 700; color: var(--card);
+}
+.cal-dot.ok { background: var(--ok); }
+.cal-dot.warn { background: var(--warn); }
+.cal-dot.bad { background: var(--danger); }
+.cal-dot.none { background: var(--muted); }
+.cal-dot.ring { border: 2px solid var(--muted); }
+.cal-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 0.8rem; color: var(--muted); margin-top: 10px; }
+.cal-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.cal-legend .cal-dot { width: 12px; height: 12px; }
+
+.chart-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.chart-head h2 { margin: 0; }
+h2.sub { margin-top: 16px; }
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+.stat-tile { background: var(--bg); border-radius: 10px; padding: 10px 12px; }
+.stat-label { font-size: 0.8rem; color: var(--muted); }
+.stat-value { font-size: 1.45rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.25; }
+.stat-value small { font-size: 0.75rem; font-weight: 400; color: var(--muted); }
+
+/* 型態分布：單一顏色的橫條 */
+.dist { list-style: none; margin: 0; padding: 0; }
+.dist li { display: grid; grid-template-columns: 9.5em 1fr 2.5em; align-items: center; gap: 8px; padding: 4px 0; }
+.dist-label { display: inline-flex; align-items: center; gap: 4px; font-size: 0.88rem; white-space: nowrap; }
+.dist-bar { height: 12px; }
+.dist-bar i { display: block; height: 100%; min-width: 2px; background: var(--accent); border-radius: 0 4px 4px 0; }
+.dist-num { text-align: right; font-variant-numeric: tabular-nums; font-size: 0.88rem; }

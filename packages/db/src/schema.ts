@@ -8,8 +8,9 @@
  * 3：體重表 healthWeights 改名為身體量測 healthBodyMeasurements 並加上身體組成欄位；新增偶爾量測、健康設定（2026-11-17）
  * 4：新增血壓、血糖、體溫（2026-11-17）
  * 5：新增健檢 / 檢驗：報告、檢驗項目、檢驗結果（2026-11-17）
+ * 6：新增排便 APP 的試算表（2026-11-18）
  */
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 export type ColType = 'datetime' | 'date' | 'number' | 'text' | 'bool' | 'any';
 
@@ -20,7 +21,7 @@ export interface ColumnDef {
   label: string;
 }
 
-export type FileKey = 'water' | 'health';
+export type FileKey = 'water' | 'health' | 'bowel';
 
 export interface FileDef {
   /** 試算表檔名（不加版本號） */
@@ -31,6 +32,7 @@ export interface FileDef {
 export const FILES: Record<FileKey, FileDef> = {
   water: { title: '生活APP-喝水', description: '喝水 APP 的資料：喝水紀錄、每日目標、常用杯子、設定' },
   health: { title: '生活APP-健康', description: '健康 APP 的資料：身體量測（體重、體脂⋯⋯）、血壓、血糖、體溫、健檢 / 檢驗、偶爾量測（身高、圍度⋯⋯）、設定' },
+  bowel: { title: '生活APP-排便', description: '排便 APP 的資料：排便紀錄、設定' },
 };
 
 export interface TableDef {
@@ -252,6 +254,37 @@ export const TABLES = {
   healthSettings: {
     file: 'health',
     description: '健康 APP 的設定，請在 APP 裡修改。',
+    columns: [
+      { name: 'key', type: 'text', label: '設定名稱' },
+      { name: 'value', type: 'any', label: '設定值' },
+    ],
+  },
+  bowelLogs: {
+    file: 'bowel',
+    description:
+      '排便紀錄，一次一列。可以直接在最下方新增一列，只要填 time，其他都選填。選項請照欄位說明填中文；可以選好幾個的用「、」分開（例：1、4）。空白 = 沒填。',
+    columns: [
+      { name: 'time', type: 'datetime', label: '時間（必填）' },
+      { name: 'passed', type: 'bool', label: '有沒有排出（FALSE = 有便意但沒排出，不算次數；空白 = 有排出）' },
+      { name: 'types', type: 'text', label: '型態（布里斯托 1–7、未觀察；可以填好幾個，例：1、4）' },
+      { name: 'amount', type: 'text', label: '量（極少、少量、普通、普通偏多、大量）' },
+      { name: 'color', type: 'text', label: '顏色（黃色、黃褐色、褐色、深褐色、綠色、黑色、紅色、灰白色、未觀察）' },
+      { name: 'afterFeeling', type: 'text', label: '排便後感受（排乾淨、排不乾淨、仍有便意）' },
+      { name: 'ease', type: 'text', label: '順暢度（順暢、稍微用力、非常用力）' },
+      { name: 'urgency', type: 'text', label: '急迫程度（無、稍急、非常急、來不及）' },
+      { name: 'duration', type: 'text', label: '花多久（5分鐘內、5～10分鐘、10～20分鐘、20分鐘以上）' },
+      { name: 'smellLevel', type: 'text', label: '氣味強度（很淡、普通、較臭、非常臭、未觀察）' },
+      { name: 'smellType', type: 'text', label: '特殊氣味（甜味、酸味、腐敗味、其他、無特殊氣味、未觀察）' },
+      { name: 'symptoms', type: 'text', label: '症狀（可以填好幾個，用「、」分開；選項見 APP）' },
+      { name: 'note', type: 'text', label: '備註' },
+      { name: 'date', type: 'date', label: '日期（APP 依 time 自動填）' },
+      { name: 'createdVia', type: 'text', label: '在哪裡輸入（bowel = 排便 APP、hub = 綜合首頁、sheet = 直接在試算表）' },
+      ...systemCols,
+    ],
+  },
+  bowelSettings: {
+    file: 'bowel',
+    description: '排便 APP 的設定，請在 APP 裡修改。',
     columns: [
       { name: 'key', type: 'text', label: '設定名稱' },
       { name: 'value', type: 'any', label: '設定值' },
