@@ -4,7 +4,7 @@ import { ACCOUNT_TYPES, ORG_KINDS } from '@life/db';
 import type { MoneyApi } from '../useMoney';
 import { amountText, parseAmount } from './common';
 
-type AccountDraft = Omit<Account, 'rowNumber' | 'id' | 'sort'>;
+export type AccountDraft = Omit<Account, 'rowNumber' | 'id' | 'sort'>;
 const blankAccount = (): AccountDraft => ({
   name: '',
   type: '現金',
@@ -21,8 +21,21 @@ const blankAccount = (): AccountDraft => ({
   note: null,
 });
 
-export function AccountForm({ api, snap, acc, onDone }: { api: MoneyApi; snap: MoneySnapshot; acc?: Account; onDone: () => void }) {
-  const [d, setD] = useState<AccountDraft>(() => (acc ? { ...acc } : blankAccount()));
+export function AccountForm({
+  api,
+  snap,
+  acc,
+  initial,
+  onDone,
+}: {
+  api: MoneyApi;
+  snap: MoneySnapshot;
+  acc?: Account;
+  /** 新增時先帶好的（例：在「永豐銀行」按＋ → 機構帶永豐銀行） */
+  initial?: Partial<AccountDraft>;
+  onDone: () => void;
+}) {
+  const [d, setD] = useState<AccountDraft>(() => (acc ? { ...acc } : { ...blankAccount(), ...initial }));
   const [bal, setBal] = useState(amountText(acc?.openingBalance));
   const set = (p: Partial<AccountDraft>) => setD((x) => ({ ...x, ...p }));
   const save = async () => {

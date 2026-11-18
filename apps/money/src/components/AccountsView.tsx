@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { Account, MoneySnapshot } from '@life/db';
 import type { MoneyApi } from '../useMoney';
 import { AccountForm } from './SettingsView';
+import type { AccountDraft } from './SettingsView';
 import { accountBalance, emptyForm, fmtMoney, personBalances } from '@life/db';
 import type { Editing } from '../App';
 
@@ -21,16 +22,27 @@ function totals(list: { acc: Account; bal: number | null }[]) {
 
 /** 帳戶（2026-11-18 使用者要求：在這一頁直接新增、修改） */
 export function AccountsView({ api, snap, onEdit }: { api: MoneyApi; snap: MoneySnapshot; onEdit: (e: Editing) => void }) {
-  const [editAcc, setEditAcc] = useState<Account | 'new' | null>(null);
+  /** 正在修改的帳戶；或在某一組按＋新增（key = 那一組，initial = 先帶好的機構 / 類型） */
+  const [editAcc, setEditAcc] = useState<Account | null>(null);
+  const [adding, setAdding] = useState<{ key: string; initial: Partial<AccountDraft> } | null>(null);
+  const startAdd = (key: string, initial: Partial<AccountDraft>) => {
+    setEditAcc(null);
+    setAdding({ key, initial });
+  };
   const [by, setBy] = useState<'org' | 'type'>('org');
   const [showArchived, setShowArchived] = useState(false);
   const rows = snap.accounts
     .filter((a) => showArchived || !a.archived)
     .map((acc) => ({ acc, bal: accountBalance(acc, snap.txns) }));
   const groups = new Map<string, typeof rows>();
+  /** 每一組按＋時要先帶好的 */
+  const groupInitial = new Map<string, Partial<AccountDraft>>();
   for (const r of rows) {
     const g = by === 'org' ? (r.acc.org ?? (r.acc.type === '現金' ? '💵 現金' : '（沒有機構）')) : r.acc.type;
     groups.set(g, [...(groups.get(g) ?? []), r]);
+    if (!groupInitial.has(g)) {
+      groupInitial.set(g, by === 'org' ? (r.acc.org ? { org: r.acc.org, type: r.acc.type === '現金' ? '銀行' : r.acc.type } : { type: r.acc.type }) : { type: r.acc.type });
+    }
   }
   const people = personBalances(snap.txns, snap.accounts).filter((b) => b.net !== 0);
 
@@ -48,18 +60,21 @@ export function AccountsView({ api, snap, onEdit }: { api: MoneyApi; snap: Money
             </button>
           </div>
         </div>
-        {!snap.accounts.length && editAcc !== 'new' && <p className="muted">還沒有帳戶，按下面的「＋ 新增帳戶」。</p>}
+        {!snap.accounts.length && !adding && <p className="muted">還沒有帳戶，按下面的「＋ 新增帳戶」。</p>}
         {[...groups].map(([g, list]) => (
           <div className="grp" key={g}>
             <div className="grp-head">
               <span>{g}</span>
               <span className="grp-total">{list.length > 1 ? totals(list) : ''}</span>
+              <button className="grp-add" onClick={() => startAdd(g, groupInitial.get(g) ?? {})} title={`在「${g}」新增帳戶`}>
+                ＋
+              </button>
             </div>
             {list.map(({ acc, bal }) =>
-              editAcc !== 'new' && editAcc?.id === acc.id ? (
+              editAcc?.id === acc.id ? (
                 <AccountForm key={acc.id} api={api} snap={snap} acc={acc} onDone={() => setEditAcc(null)} />
               ) : (
-                <div key={acc.id} className={`acc-row ${acc.archived ? 'archived' : ''}`} onClick={() => setEditAcc(acc)} title="點一下修改">
+                <div key={acc.id} className={`acc-row ${acc.archived ? 'archived' : ''}`} onClick={() => (setAdding(null), setEditAcc(acc))} title="點一下修改">
                   <span className="acc-name">
                     {acc.name}
                     <small>{by === 'org' ? acc.type : (acc.org ?? '')}</small>
@@ -69,6 +84,7 @@ export function AccountsView({ api, snap, onEdit }: { api: MoneyApi; snap: Money
                 </div>
               ),
             )}
+            {adding?.key === g && <AccountForm api={api} snap={snap} initial={adding.initial} onDone={() => setAdding(null)} />}
           </div>
         ))}
         {snap.accounts.some((a) => a.archived) && (
@@ -77,14 +93,14 @@ export function AccountsView({ api, snap, onEdit }: { api: MoneyApi; snap: Money
             顯示停用的帳戶
           </label>
         )}
-        {editAcc === 'new' ? (
-          <AccountForm api={api} snap={snap} onDone={() => setEditAcc(null)} />
+        {adding?.key === '\u0000new' ? (
+          <AccountForm api={api} snap={snap} initial={adding.initial} onDone={() => setAdding(null)} />
         ) : (
           <div className="editor-actions">
-            <button className="primary" onClick={() => setEditAcc('new')}>
-              ＋ 新增帳戶
+            <button className="primary" onClick={() => startAdd('\u0000new', {})}>
+              ＋ 新增帳戶（新的銀行 / 機構）
             </button>
-            <span className="hint">點帳戶可以修改</span>
+            <span className="hint">在銀行旁邊按＋，就在那家新增；點帳戶可以修改</span>
           </div>
         )}
       </section>
