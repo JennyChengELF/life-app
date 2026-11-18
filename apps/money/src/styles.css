@@ -166,4 +166,5 @@ button.bt-row:hover, .bt-row.open { background: var(--bg); }
 .num-input { text-align: right; padding: 6px 8px; }
 @media (max-width: 480px) { .bt-row { font-size: 0.8rem; gap: 4px; } }
 .grp-head { align-items: center; }
-.grp-add { padding: 2px 10px; font-size: 0.85rem; color: var(--accent); border-style: dashed; margin-left: 4px; }
+.grp-add { padding: 2px 9px; font-size: 0.85rem; color: var(--accent); border-style: dashed; margin-right: 8px; }
+.grp-name { display: inline-flex; align-items: center; }

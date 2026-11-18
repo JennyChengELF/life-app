@@ -64,11 +64,13 @@ export function AccountsView({ api, snap, onEdit }: { api: MoneyApi; snap: Money
         {[...groups].map(([g, list]) => (
           <div className="grp" key={g}>
             <div className="grp-head">
-              <span>{g}</span>
+              <span className="grp-name">
+                <button className="grp-add" onClick={() => startAdd(g, groupInitial.get(g) ?? {})} title={`在「${g}」新增帳戶`}>
+                  ＋
+                </button>
+                {g}
+              </span>
               <span className="grp-total">{list.length > 1 ? totals(list) : ''}</span>
-              <button className="grp-add" onClick={() => startAdd(g, groupInitial.get(g) ?? {})} title={`在「${g}」新增帳戶`}>
-                ＋
-              </button>
             </div>
             {list.map(({ acc, bal }) =>
               editAcc?.id === acc.id ? (
