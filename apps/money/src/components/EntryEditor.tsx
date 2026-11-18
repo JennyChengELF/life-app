@@ -13,6 +13,8 @@ import {
   txnCurrency,
   estimateFee,
   feeTxnFrom,
+  findFeeTxn,
+  isFeeTxn,
   lastCategoryOfStore,
   txnToForm,
 } from '@life/db';
@@ -79,12 +81,13 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
   const [splitTotal, setSplitTotal] = useState<number | null>(null);
   const [splitN, setSplitN] = useState(2);
   const [paidByMode, setPaidByMode] = useState(!!f.paidBy);
-  /** 國外交易手續費（只有新增、信用卡時）：null = 依費率自動算 */
-  /** null = 自動（國外店家＋信用卡就勾） */
+  /** 國外交易手續費（信用卡支出）：null = 自動（新增時國外店家就勾；修改時不勾） */
   const [feeOnState, setFeeOnState] = useState<boolean | null>(null);
   /** 新的店家（還不在機構清單）先記在這裡，存檔時一起建立 */
   const [newForeign, setNewForeign] = useState(false);
   const [feeEdit, setFeeEdit] = useState<number | null>(null);
+  /** 修改前的金額：改了金額要提醒手續費那筆也要改 */
+  const [initTotal] = useState(() => formTotal(f));
   const set = (patch: Partial<EntryForm>) => setF((x) => ({ ...x, ...patch }));
 
   const editable = ENTRY_MODES.includes(f.mode as (typeof ENTRY_MODES)[number]) || f.mode === '不用還了';
@@ -108,7 +111,7 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
     if (p.length) return;
     // 國外交易手續費：另外記一筆（2026-11-18 確認）
     const card = snap.accounts.find((a) => a.name === tx.account && a.type === '信用卡');
-    const fee = feeOn && card && !txn && tx.direction === '出' ? feeAmount : null;
+    const fee = feeOn && feeCard && card && !existingFee && tx.direction === '出' ? feeAmount : null;
     const feeTx = fee ? feeTxnFrom(tx, fee, card!.org) : null;
     if (feeOn && feeTx) {
       // 「… / 國外交易手續費」分類還沒有的話，存檔時自動建立
@@ -127,7 +130,7 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
       return true;
     });
     if (ok) {
-      api.showToast({ kind: 'info', text: txn ? '已修改' : feeTx ? '已記錄（含手續費）' : '已記錄' });
+      api.showToast({ kind: 'info', text: txn ? (feeTx ? '已修改（補記手續費）' : feeChanged ? '已修改；手續費那筆不會自動改，記得也去改' : '已修改') : feeTx ? '已記錄（含手續費）' : '已記錄' });
       onClose();
     }
   };
@@ -231,11 +234,14 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
   );
 
   const from = snap.accounts.find((a) => a.name === f.account);
-  const feeCard = !txn && f.mode === '支出' && !paidByMode && from?.type === '信用卡' ? from : null;
+  const feeCard = f.mode === '支出' && !paidByMode && from?.type === '信用卡' && !(txn && isFeeTxn(txn)) ? from : null;
+  // 修改舊資料：已經記過手續費的不再重複記（2026-11-18 確認）
+  const existingFee = txn ? findFeeTxn(snap.txns, txn) : null;
+  const feeChanged = !!existingFee && formTotal(f) !== initTotal;
   const storeOrg = f.store ? (snap.orgs.find((o) => o.name === f.store) ?? null) : null;
   const storeForeign = storeOrg ? storeOrg.foreign : newForeign;
   // 用信用卡付國外店家 → 自動勾手續費（2026-11-18）；自己改過就照自己的
-  const feeOn = feeOnState ?? storeForeign;
+  const feeOn = feeOnState ?? (txn ? false : storeForeign);
   const feeAmount = feeEdit ?? estimateFee(Math.max(0, formTotal(f)), feeCard?.fxFeeRate ?? null);
   const to = snap.accounts.find((a) => a.name === f.toAccount);
 
@@ -373,11 +379,21 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
                   我付了 {fmtMoney(formTotal(f), currency)}（我的部分＋別人的份額）
                 </p>
               )}
-              {feeCard && (
+              {feeCard && existingFee && (
+                <div className="subbox">
+                  <p className="small">已記國外交易手續費 {fmtMoney(existingFee.amount ?? 0, currency)}</p>
+                  {feeChanged && (
+                    <p className="hint warn">
+                      金額改了，手續費那筆不會自動跟著改，記得也去改（照費率約 {fmtMoney(estimateFee(Math.max(0, formTotal(f)), feeCard.fxFeeRate ?? null), currency)}）。
+                    </p>
+                  )}
+                </div>
+              )}
+              {feeCard && !existingFee && (
                 <div className="subbox">
                   <label className="check">
                     <input type="checkbox" checked={feeOn} onChange={(e) => setFeeOnState(e.target.checked)} />
-                    ＋國外交易手續費（{feeCard.fxFeeRate ?? 1.5}%）
+                    {txn ? '＋補記' : '＋'}國外交易手續費（{feeCard.fxFeeRate ?? 1.5}%）
                   </label>
                   {feeOn && (
                     <div className="row">

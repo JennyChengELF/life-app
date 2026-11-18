@@ -16,6 +16,8 @@ import {
   estimateFee,
   feeCategoryOf,
   feeTxnFrom,
+  findFeeTxn,
+  isFeeTxn,
   fmtMoney,
   formToTxn,
   lastCategoryOfStore,
@@ -418,6 +420,18 @@ describe('退款（負數）、國外交易手續費', () => {
     const two = feeTxnFrom({ ...buy, lines: [{ kind: '支出', amount: 600, category: '樂 / 數位內容 / LYSN' }, { kind: '支出', amount: 120, category: '樂 / 數位內容 / Weverse' }] }, 11, null);
     expect(two.lines).toHaveLength(1);
     expect(two.lines[0]).toMatchObject({ category: '樂 / 數位內容 / 國外交易手續費', amount: 11 });
+  });
+  it('補記手續費：找得到已記過的（同時間、同帳戶、手續費分類），手續費本身不算消費', () => {
+    const mk = (id: string, input: ReturnType<typeof formToTxn>) => ({ ...input, id, rowNumber: 2, date: '2026-11-10', createdVia: null, lines: input.lines.map((l, i) => ({ ...l, id: `${id}-${i}`, rowNumber: 2, transaction: id, sort: i, budget: null, note: null })) }) as unknown as Txn;
+    const buy = mk('buy', formToTxn(form({ account: '大戶信用卡', store: 'LYSN', cats: [{ category: '食 / 三餐', amount: 720 }] })));
+    const fee = mk('fee', feeTxnFrom(buy, 11, '台新銀行'));
+    const other = mk('other', formToTxn(form({ account: '台幣現金', cats: [{ category: '食 / 三餐', amount: 50 }] })));
+    expect(isFeeTxn(fee)).toBe(true);
+    expect(isFeeTxn(buy)).toBe(false);
+    expect(findFeeTxn([buy, other], buy)).toBeNull();
+    expect(findFeeTxn([buy, other, fee], buy)?.id).toBe('fee');
+    // 別張卡同時間的手續費不算
+    expect(findFeeTxn([buy, { ...fee, account: '台幣現金' }], buy)).toBeNull();
   });
 });
 

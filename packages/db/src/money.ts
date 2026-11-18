@@ -844,6 +844,18 @@ export function feeTxnFrom(purchase: TxnInput, fee: number, bank: string | null)
 
 export const FEE_CATEGORY_NAME = '國外交易手續費';
 
+/** 這筆本身是不是手續費（每一行的分類都是「…／國外交易手續費」） */
+export const isFeeTxn = (t: { lines: { category: string | null }[] }) =>
+  t.lines.length > 0 && t.lines.every((l) => !!l.category && lastName(l.category) === FEE_CATEGORY_NAME);
+
+/**
+ * 找這筆消費已經記過的手續費（2026-11-18 確認：修改舊資料時可以補記，已記過的不再重複記）。
+ * 手續費是另一筆交易、沒有連結，用「同一個時間、同一個帳戶、分類是…／國外交易手續費」判斷。
+ */
+export function findFeeTxn(txns: Txn[], purchase: Txn): Txn | null {
+  return txns.find((t) => t.id !== purchase.id && t.time === purchase.time && t.account === purchase.account && isFeeTxn(t)) ?? null;
+}
+
 /**
  * 手續費的分類（2026-11-18 使用者決定 B）：「樂 / 數位內容」→「樂 / 數位內容 / 國外交易手續費」；
  * 已經是最底層（例：樂 / 數位內容 / LYSN）→ 放在上一層底下「樂 / 數位內容 / 國外交易手續費」
