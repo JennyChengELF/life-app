@@ -154,6 +154,8 @@ export interface MoneyIssue {
   id: string | null;
   raw: Record<string, unknown>;
   problems: string[];
+  /** 交易沒有明細時：「在 APP 裡補完」用的表單（金額、帳戶、店家都帶好） */
+  draft?: EntryForm;
 }
 
 export interface Budget extends RowRef {
@@ -567,7 +569,7 @@ export function checkTxn(t: Omit<TxnInput, 'tags'> & { tags?: string[] }, refs: 
   if (t.toAccount || t.toAmount != null) p.push('只有轉帳才填轉入帳戶 / 轉入金額');
 
   if (!t.lines.length) {
-    p.push('沒有明細（請在 APP 裡記，或在 moneyLines 加明細）');
+    p.push('沒有分類：請在這一列的 category 欄填分類（例：樂 / 數位內容），或按「在 APP 裡補完」');
     return p;
   }
   t.lines.forEach((l, i) => {
@@ -1064,8 +1066,8 @@ export class MoneyStore {
     const issues: MoneyIssue[] = [];
     const fixes = new Map<TableName, RowUpdate[]>();
     const fix = (t: TableName, u: RowUpdate) => fixes.set(t, [...(fixes.get(t) ?? []), u]);
-    const issue = (table: TableName, r: TableRow, problems: string[]) =>
-      issues.push({ table, rowNumber: r.rowNumber, id: str(r.values.id), raw: r.raw, problems });
+    const issue = (table: TableName, r: TableRow, problems: string[], draft?: EntryForm) =>
+      issues.push({ table, rowNumber: r.rowNumber, id: str(r.values.id), raw: r.raw, problems, ...(draft ? { draft } : {}) });
     /** 使用者在試算表新增的列：補 id */
     const ensureId = (table: TableName, r: TableRow, extra: RowValues = {}) => {
       const id = str(r.values.id);
@@ -1150,6 +1152,9 @@ export class MoneyStore {
     const refs: MoneyRefs = { accounts, categories, people };
     const txns: Txn[] = [];
     const usedTx = new Set<string>();
+    // 快速輸入（2026-11-18）：試算表的交易填了 category → 自動建立明細
+    const quickLines: RowValues[] = [];
+    const quickClear: RowUpdate[] = [];
     for (const r of txRows) {
       if (!isLive(r)) continue;
       if (r.errors.includes('time') || num(r.values.time) == null) {
@@ -1175,9 +1180,47 @@ export class MoneyStore {
         t.amount = -t.amount;
       }
       const dir = str(r.values.direction);
+      const quickCat = str(r.values.category) ? normPath(str(r.values.category)!) : null;
+      const quickBudget = str(r.values.budget);
+      if (!lines.length && quickCat && (t.direction === '出' || t.direction === '入') && t.amount != null && has(DIRECTIONS, dir)) {
+        const c = categories.find((x) => x.path === quickCat);
+        if (c) {
+          // 支出分類：出是正、入（退款）是負；收入分類相反
+          const sign = (c.kind === '支出') === (t.direction === '出') ? 1 : -1;
+          quickLines.push({
+            transaction: id,
+            kind: c.kind,
+            amount: sign * t.amount,
+            category: c.path,
+            budget: quickBudget && budgets.some((b) => b.name === quickBudget) ? quickBudget : null,
+            sort: 1,
+            id: newId(now),
+            createdAt: now,
+            updatedAt: now,
+          });
+          quickClear.push({ rowNumber: r.rowNumber, values: { category: null, budget: null, updatedAt: now }, expectId: id });
+          continue;
+        }
+      }
       const p = dir && !has(DIRECTIONS, dir) ? [`direction「${dir}」看不懂（請填：出、入、轉帳）`] : checkTxn(t, refs);
+      if (quickCat && !categories.some((x) => x.path === quickCat)) p.unshift(`分類「${quickCat}」不在分類清單裡（請在「🏷️ 分類」新增，或改成清單裡的名稱）`);
       if (p.length) {
-        issue('moneyTransactions', r, p);
+        // 沒有明細：準備「在 APP 裡補完」的表單（試算表填的負數照原樣 = 退款）
+        let draft: EntryForm | undefined;
+        if (!lines.length && dir !== '轉帳') {
+          const rawAmt = num(r.values.amount);
+          draft = {
+            ...emptyForm(dir === '入' ? '收入' : '支出', t.time),
+            account: t.account,
+            store: t.store,
+            branch: t.branch,
+            statementText: t.statementText,
+            note: t.note,
+            tags: t.tags,
+            cats: [{ category: quickCat && categories.some((x) => x.path === quickCat) ? quickCat : null, amount: rawAmt, budget: quickBudget }],
+          };
+        }
+        issue('moneyTransactions', r, p, draft);
         continue;
       }
       txns.push(t);
@@ -1189,6 +1232,11 @@ export class MoneyStore {
     }
 
     for (const [t, us] of fixes) await this.b.update(t, us);
+    if (quickLines.length) {
+      await this.b.append('moneyLines', quickLines);
+      await this.b.update('moneyTransactions', quickClear);
+      return this.loadNow(now);
+    }
     txns.sort((a, b) => b.time - a.time);
 
     // 第一次使用：放預設分類（只放一次；使用者刪光也不會再放）

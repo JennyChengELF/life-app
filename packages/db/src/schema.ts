@@ -11,7 +11,7 @@
  * 6：新增排便 APP、綜合 APP 的試算表（2026-11-18）
  * 7：新增記帳 APP 的試算表（帳戶、分類、交易、明細）；綜合加人物、機構（2026-11-18）
  * 8：交易加分店、帳單名稱；帳戶加國外交易手續費率；機構加國外（2026-11-18）
- * 9：新增預算、預算分配（2026-11-18）
+ * 9：新增預算、預算分配；交易加快速輸入的分類、預算（2026-11-18）
  */
 export const SCHEMA_VERSION = 9;
 
@@ -365,6 +365,8 @@ export const TABLES = {
       { name: 'statementText', type: 'text', label: '帳單名稱（帳單上印的文字，對帳用）' },
       { name: 'note', type: 'text', label: '備註' },
       { name: 'tags', type: 'text', label: '標籤（多個用「、」分開）' },
+      { name: 'category', type: 'text', label: '快速輸入：在試算表直接記帳時填分類（例：樂 / 數位內容），APP 打開時自動建立明細，這格會清空' },
+      { name: 'budget', type: 'text', label: '快速輸入：預算（和 category 一起用）' },
       { name: 'date', type: 'date', label: '日期（APP 依 time 自動填）' },
       { name: 'createdVia', type: 'text', label: '在哪裡輸入（money = 記帳 APP、sheet = 直接在試算表）' },
       ...systemCols,

@@ -30,6 +30,8 @@ const TABS: { key: Tab; icon: string; label: string }[] = [
 export interface Editing {
   form: EntryForm;
   txn?: Txn;
+  /** 「在 APP 裡補完」：存回試算表原本那一列（不另外多一筆） */
+  target?: { rowNumber: number; id: string };
 }
 
 export function App() {
@@ -146,7 +148,14 @@ export function App() {
               <SettingsView api={api} snap={api.snap} openBudgets={() => setTab('budgetsAdmin')} />
             )}
             {tab === 'categories' && <CategoriesView api={api} snap={api.snap} />}
-            {tab === 'issues' && <IssuesView api={api} snap={api.snap} onDone={() => setTab('ledger')} />}
+            {tab === 'issues' && (
+              <IssuesView
+                api={api}
+                snap={api.snap}
+                onDone={() => setTab('ledger')}
+                onFix={(i) => i.draft && i.id && edit({ form: i.draft, target: { rowNumber: i.rowNumber, id: i.id } })}
+              />
+            )}
           </>
         ) : null}
       </main>

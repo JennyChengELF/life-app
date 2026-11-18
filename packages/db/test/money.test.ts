@@ -498,3 +498,42 @@ describe('試算表直接填負數', () => {
     expect(txnToForm(snap.txns[0])).toMatchObject({ mode: '支出', cats: [{ amount: -3065 }] });
   });
 });
+
+describe('試算表快速輸入、在 APP 裡補完', () => {
+  const acc = { type: '信用卡' as const, currency: 'TWD', org: null, openingDate: null, openingBalance: null, closingDay: null, dueDay: null, fxFeeRate: null, expiryDate: null, monthlyCheck: true, archived: false, note: null };
+  it('交易填 category → 自動建立明細、清空 category；負數 = 退款', async () => {
+    const backend = new LocalBackend(memoryStorage());
+    const store = new MoneyStore(backend);
+    await store.load();
+    await store.saveAccount({ ...acc, name: 'cube信用卡' });
+    await store.saveBudget({ name: '生活享樂', ideal: null, basic: null, monthly: true, goal: null, archived: false, note: null });
+    await backend.appendRaw('moneyTransactions', { time: at('2026-11-17 17:03'), direction: '出', account: 'cube信用卡', amount: 3065, store: 'Google', category: '樂 / 娛樂', budget: '生活享樂' });
+    await backend.appendRaw('moneyTransactions', { time: at('2026-11-18 10:00'), direction: '出', account: 'cube信用卡', amount: -500, store: 'Google', category: '樂 / 娛樂' });
+    const snap = await store.load();
+    expect(snap.issues).toEqual([]);
+    const [refund, buy] = snap.txns;
+    expect(buy.lines[0]).toMatchObject({ kind: '支出', amount: 3065, category: '樂 / 娛樂', budget: '生活享樂' });
+    expect(refund).toMatchObject({ direction: '入', amount: 500 });
+    expect(refund.lines[0]).toMatchObject({ kind: '支出', amount: -500 });
+    const rows = await backend.read('moneyTransactions');
+    expect(rows.every((r) => r.values.category == null)).toBe(true);
+  });
+  it('沒填分類：說明怎麼補，並準備好「在 APP 裡補完」的表單（負數照原樣）', async () => {
+    const backend = new LocalBackend(memoryStorage());
+    const store = new MoneyStore(backend);
+    await store.load();
+    await store.saveAccount({ ...acc, name: 'cube信用卡' });
+    await backend.appendRaw('moneyTransactions', { time: at('2026-11-17 17:03'), direction: '出', account: 'cube信用卡', amount: -3065, store: 'Google', note: 'Google One AI 2T' });
+    let snap = await store.load();
+    const [i] = snap.issues;
+    expect(i.problems.join()).toContain('category');
+    expect(i.draft).toMatchObject({ mode: '支出', account: 'cube信用卡', store: 'Google', note: 'Google One AI 2T', cats: [{ amount: -3065 }] });
+    // 補完：同一列寫回（不會多一筆）
+    const f = { ...i.draft!, cats: [{ ...i.draft!.cats[0], category: '樂 / 娛樂' }] };
+    await store.saveTxn(formToTxn(f), { rowNumber: i.rowNumber, id: i.id!, lines: [] } as unknown as Txn);
+    snap = await store.load();
+    expect(snap.issues).toEqual([]);
+    expect(snap.txns).toHaveLength(1);
+    expect(snap.txns[0]).toMatchObject({ direction: '入', amount: 3065, note: 'Google One AI 2T' });
+  });
+});

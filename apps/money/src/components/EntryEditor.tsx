@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { EntryForm, MoneySnapshot } from '@life/db';
+import type { EntryForm, MoneySnapshot, Txn } from '@life/db';
 import {
   checkTxn,
   ENTRY_MODES,
@@ -124,7 +124,7 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
     }
     const ok = await api.run(async (s) => {
       if (tx.store && newForeign && !storeOrg) await s.addOrg(tx.store, null, true);
-      await s.saveTxn(tx, txn);
+      await s.saveTxn(tx, txn ?? (editing.target ? ({ ...editing.target, lines: [] } as unknown as Txn) : undefined));
       if (feeTx) {
         await s.ensureCategories(feeTx.lines.map((l) => l.category ?? ''), '支出');
         await s.saveTxn(feeTx);
