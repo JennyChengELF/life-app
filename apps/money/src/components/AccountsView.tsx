@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import type { Account, MoneySnapshot } from '@life/db';
 import type { MoneyApi } from '../useMoney';
 import { AccountForm } from './SettingsView';
 import type { AccountDraft } from './SettingsView';
+import { DepositList } from './Deposits';
 import { accountBalance, emptyForm, fmtMoney, personBalances } from '@life/db';
 import type { Editing } from '../App';
 
@@ -76,14 +77,18 @@ export function AccountsView({ api, snap, onEdit }: { api: MoneyApi; snap: Money
               editAcc?.id === acc.id ? (
                 <AccountForm key={acc.id} api={api} snap={snap} acc={acc} onDone={() => setEditAcc(null)} />
               ) : (
-                <div key={acc.id} className={`acc-row ${acc.archived ? 'archived' : ''}`} onClick={() => (setAdding(null), setEditAcc(acc))} title="點一下修改">
-                  <span className="acc-name">
-                    {acc.name}
-                    <small>{by === 'org' ? acc.type : (acc.org ?? '')}</small>
-                    {acc.currency !== 'TWD' && <small>{acc.currency}</small>}
-                  </span>
-                  <BalanceText acc={acc} bal={bal} />
-                </div>
+                <Fragment key={acc.id}>
+                  <div className={`acc-row ${acc.archived ? 'archived' : ''}`} onClick={() => (setAdding(null), setEditAcc(acc))} title="點一下修改">
+                    <span className="acc-name">
+                      {acc.name}
+                      <small>{by === 'org' ? acc.type : (acc.org ?? '')}</small>
+                      {acc.currency !== 'TWD' && <small>{acc.currency}</small>}
+                    </span>
+                    <BalanceText acc={acc} bal={bal} />
+                  </div>
+                  {/* 定存帳戶：底下列出定存單（2026-11-18） */}
+                  {acc.type === '定存' && <DepositList api={api} snap={snap} acc={acc} />}
+                </Fragment>
               ),
             )}
             {adding?.key === g && <AccountForm api={api} snap={snap} initial={adding.initial} onDone={() => setAdding(null)} />}

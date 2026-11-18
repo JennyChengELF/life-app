@@ -168,3 +168,11 @@ button.bt-row:hover, .bt-row.open { background: var(--bg); }
 .grp-head { align-items: center; }
 .grp-add { padding: 2px 9px; font-size: 0.85rem; color: var(--accent); border-style: dashed; margin-right: 8px; }
 .grp-name { display: inline-flex; align-items: center; }
+
+/* 定存單 */
+.deposits { padding: 2px 4px 8px 26px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.dep-row { display: flex; align-items: center; gap: 6px; width: 100%; padding: 4px 0; font-size: 0.88rem; flex-wrap: wrap; }
+.dep-row .grow { flex: 1; min-width: 12em; }
+.dep-row button { padding: 3px 9px; font-size: 0.82rem; }
+.dep-row.due .grow { color: var(--warn); font-weight: 600; }
+.deposits .subbox { width: 100%; }

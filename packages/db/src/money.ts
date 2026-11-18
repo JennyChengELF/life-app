@@ -8,7 +8,7 @@
 import type { Backend, RowUpdate, RowValues, TableRow } from './backend';
 import { newId } from './ids';
 import type { TableName } from './schema';
-import { toDateKey } from './time';
+import { startOfDay, toDateKey } from './time';
 
 // ───────────── 選項 ─────────────
 
@@ -186,6 +186,18 @@ export interface Allocation extends RowRef {
   note: string | null;
 }
 
+export interface Deposit extends RowRef {
+  account: string;
+  principal: number;
+  rate: number | null;
+  startDate: string;
+  maturityDate: string;
+  termMonths: number | null;
+  fromAccount: string | null;
+  endedDate: string | null;
+  note: string | null;
+}
+
 export interface MoneySettings {
   /** 「超過收入」和哪個月的收入比（2026-11-18 確認是設定值） */
   incomeCompare: '上個月' | '本月';
@@ -203,6 +215,8 @@ export interface MoneySnapshot {
   /** 新 → 舊 */
   txns: Txn[];
   budgets: Budget[];
+  /** 定存單（依到期日排，進行中的在前） */
+  deposits: Deposit[];
   allocations: Allocation[];
   settings: MoneySettings;
   issues: MoneyIssue[];
@@ -310,6 +324,26 @@ export function categoryTree(categories: Category[], kind: CategoryKind): Catego
         return { cat: c, name: lastName(c.path), depth: pathDepth(c.path), hidden, children: build(c.path, hidden) };
       });
   return build(null, false);
+}
+
+/** 預估定存利息：本金 × 年利率 × 天數 / 365（四捨五入到幣別單位） */
+export function estimateInterest(dep: Pick<Deposit, 'principal' | 'rate' | 'startDate' | 'maturityDate'>, currency = 'TWD'): number {
+  if (!dep.rate) return 0;
+  const days = Math.round((startOfDay(dep.maturityDate) - startOfDay(dep.startDate)) / 86400000);
+  return roundMoney((dep.principal * dep.rate * days) / 36500, currency);
+}
+
+/** 'YYYY-MM-DD' 加幾個月（月底對不到時用那個月最後一天） */
+export function addMonthsToDate(date: string, months: number): string {
+  const [y, m, d] = date.split('-').map(Number);
+  const last = new Date(y, m - 1 + months + 1, 0).getDate();
+  return toDateKey(new Date(y, m - 1 + months, Math.min(d, last)).getTime());
+}
+
+/** 快到期（N 天內）或已到期還沒處理的定存單 */
+export function depositsDue(deposits: Deposit[], today: string, days = 7): Deposit[] {
+  const limit = toDateKey(startOfDay(today) + days * 86400000);
+  return deposits.filter((d) => !d.endedDate && d.maturityDate <= limit);
 }
 
 /** 最近用過的店家（新 → 舊，不重複） */
@@ -1052,7 +1086,7 @@ export class MoneyStore {
   }
 
   private async loadNow(now: number): Promise<MoneySnapshot> {
-    const [accRows, catRows, txRows, lineRows, peopleRows, orgRows, setRows, budgetRows, allocRows] = await Promise.all([
+    const [accRows, catRows, txRows, lineRows, peopleRows, orgRows, setRows, budgetRows, allocRows, depRows] = await Promise.all([
       this.b.read('moneyAccounts'),
       this.b.read('moneyCategories'),
       this.b.read('moneyTransactions'),
@@ -1062,6 +1096,7 @@ export class MoneyStore {
       this.b.read('moneySettings'),
       this.b.read('moneyBudgets'),
       this.b.read('moneyBudgetAllocations'),
+      this.b.read('moneyDeposits'),
     ]);
     const issues: MoneyIssue[] = [];
     const fixes = new Map<TableName, RowUpdate[]>();
@@ -1274,7 +1309,41 @@ export class MoneyStore {
       return this.loadNow(now);
     }
 
-    const snap: MoneySnapshot = { loadedAt: now, accounts, categories, people, orgs, txns, budgets, allocations, settings: parseMoneySettings(setRows), issues };
+    // 定存單
+    const deposits: Deposit[] = [];
+    for (const r of depRows) {
+      if (!isLive(r)) continue;
+      const v = r.values;
+      const p: string[] = [];
+      const acc = str(v.account);
+      if (!acc) p.push('沒有填定存帳戶');
+      else if (!accounts.some((a) => a.name === acc)) p.push(`帳戶「${acc}」不在帳戶清單裡`);
+      if (!(num(v.principal)! > 0)) p.push('本金請填大於 0 的數字');
+      if (!str(v.startDate)) p.push('沒有填起存日');
+      if (!str(v.maturityDate)) p.push('沒有填到期日');
+      for (const k of ['rate', 'startDate', 'maturityDate', 'endedDate', 'termMonths']) if (r.errors.includes(k)) p.push(`${k} 格式看不懂`);
+      if (p.length) {
+        issue('moneyDeposits', r, p);
+        continue;
+      }
+      ensureId('moneyDeposits', r);
+      deposits.push({
+        rowNumber: r.rowNumber,
+        id: String(v.id),
+        account: acc!,
+        principal: num(v.principal)!,
+        rate: num(v.rate),
+        startDate: str(v.startDate)!,
+        maturityDate: str(v.maturityDate)!,
+        termMonths: num(v.termMonths),
+        fromAccount: str(v.fromAccount),
+        endedDate: str(v.endedDate),
+        note: str(v.note),
+      });
+    }
+    deposits.sort((a, b) => Number(!!a.endedDate) - Number(!!b.endedDate) || a.maturityDate.localeCompare(b.maturityDate));
+
+    const snap: MoneySnapshot = { loadedAt: now, accounts, categories, people, orgs, txns, budgets, allocations, deposits, settings: parseMoneySettings(setRows), issues };
     this.last = snap;
     return snap;
   }
@@ -1584,6 +1653,131 @@ export class MoneyStore {
     if (accs.length) await this.b.update('moneyAccounts', accs);
     const txs = snap.txns.filter((t) => t.store === o.name).map((t) => ({ rowNumber: t.rowNumber, values: { store: to, updatedAt: now }, expectId: t.id }));
     if (txs.length) await this.b.update('moneyTransactions', txs);
+  }
+
+  // ── 定存單（2026-11-18 確認：每個幣別一個定存帳戶，裡面放多張定存單） ──
+
+  /** 開定存：記一筆「活存 → 定存」的轉帳，同時建立定存單 */
+  async openDeposit(input: { fromAccount: string; account: string; principal: number; rate: number | null; startDate: string; maturityDate: string; termMonths: number | null; note: string | null }) {
+    const snap = await this.fresh();
+    const dep = snap.accounts.find((a) => a.name === input.account);
+    if (!dep || dep.type !== '定存') throw new Error('請選定存帳戶（類型是「定存」的帳戶）');
+    if (!(input.principal > 0)) throw new Error('本金請填大於 0 的數字');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(input.maturityDate)) throw new Error('請填起存日和到期日');
+    if (input.maturityDate <= input.startDate) throw new Error('到期日要在起存日之後');
+    if (input.rate != null && (!Number.isFinite(input.rate) || input.rate < 0)) throw new Error('利率請填 0 以上的數字');
+    await this.saveTxn({
+      time: startOfDay(input.startDate) + 9 * 3600000,
+      direction: '轉帳',
+      account: input.fromAccount,
+      amount: input.principal,
+      paidBy: null,
+      currency: null,
+      toAccount: input.account,
+      toAmount: null,
+      store: dep.org,
+      branch: null,
+      statementText: null,
+      note: input.note ? `開定存：${input.note}` : '開定存',
+      tags: [],
+      lines: [],
+    });
+    const now = Date.now();
+    await this.b.append('moneyDeposits', [
+      {
+        account: input.account,
+        principal: roundMoney(input.principal, dep.currency),
+        rate: input.rate,
+        startDate: input.startDate,
+        maturityDate: input.maturityDate,
+        termMonths: input.termMonths,
+        fromAccount: input.fromAccount,
+        note: input.note?.trim() || null,
+        id: newId(now),
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]);
+  }
+
+  /** 利息記成收入（分類：利息，沒有就用第一個收入分類） */
+  private async interestTxn(snap: MoneySnapshot, account: string, interest: number, date: string, dep: Deposit) {
+    const cat = snap.categories.find((c) => c.path === '利息' && c.kind === '收入') ?? snap.categories.find((c) => c.kind === '收入' && !c.archived);
+    if (!cat) throw new Error('請先建立收入分類（例：利息）');
+    const acc = snap.accounts.find((a) => a.name === dep.account);
+    await this.saveTxn({
+      time: startOfDay(date) + 9 * 3600000,
+      direction: '入',
+      account,
+      amount: interest,
+      paidBy: null,
+      currency: null,
+      toAccount: null,
+      toAmount: null,
+      store: acc?.org ?? null,
+      branch: null,
+      statementText: null,
+      note: `定存利息（本金 ${dep.principal.toLocaleString()}）`,
+      tags: [],
+      lines: [{ kind: '收入', amount: interest, category: cat.path }],
+    });
+  }
+
+  /** 解約回活存：本金轉回（轉帳），利息記收入，定存單收進「已結束」 */
+  async closeDeposit(dep: Deposit, input: { toAccount: string; interest: number; date: string }) {
+    const snap = await this.fresh();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) throw new Error('請選日期');
+    if (!Number.isFinite(input.interest) || input.interest < 0) throw new Error('利息請填 0 以上的數字');
+    await this.saveTxn({
+      time: startOfDay(input.date) + 9 * 3600000,
+      direction: '轉帳',
+      account: dep.account,
+      amount: dep.principal,
+      paidBy: null,
+      currency: null,
+      toAccount: input.toAccount,
+      toAmount: null,
+      store: snap.accounts.find((a) => a.name === dep.account)?.org ?? null,
+      branch: null,
+      statementText: null,
+      note: '定存到期解約',
+      tags: [],
+      lines: [],
+    });
+    if (input.interest > 0) await this.interestTxn(snap, input.toAccount, input.interest, input.date, dep);
+    await this.b.update('moneyDeposits', [{ rowNumber: dep.rowNumber, values: { endedDate: input.date, updatedAt: Date.now() }, expectId: dep.id }]);
+  }
+
+  /** 續存：同一張定存單換新的到期日；利息可以選「一起存進去」（本金增加）或轉到別的帳戶 */
+  async renewDeposit(dep: Deposit, input: { maturityDate: string; interest: number; interestTo: 'deposit' | string; rate: number | null }) {
+    const snap = await this.fresh();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.maturityDate) || input.maturityDate <= dep.maturityDate) throw new Error('新的到期日要在原本的到期日之後');
+    if (!Number.isFinite(input.interest) || input.interest < 0) throw new Error('利息請填 0 以上的數字');
+    const toDeposit = input.interestTo === 'deposit';
+    if (input.interest > 0) await this.interestTxn(snap, toDeposit ? dep.account : input.interestTo, input.interest, dep.maturityDate, dep);
+    const acc = snap.accounts.find((a) => a.name === dep.account);
+    await this.b.update('moneyDeposits', [
+      {
+        rowNumber: dep.rowNumber,
+        values: {
+          startDate: dep.maturityDate,
+          maturityDate: input.maturityDate,
+          principal: toDeposit ? roundMoney(dep.principal + input.interest, acc?.currency ?? 'TWD') : dep.principal,
+          rate: input.rate,
+          updatedAt: Date.now(),
+        },
+        expectId: dep.id,
+      },
+    ]);
+  }
+
+  /** 修改定存單（只改資料，不動交易） */
+  async updateDeposit(dep: Deposit, patch: { rate?: number | null; maturityDate?: string; note?: string | null }) {
+    const v: RowValues = { updatedAt: Date.now() };
+    if (patch.rate !== undefined) v.rate = patch.rate;
+    if (patch.maturityDate !== undefined) v.maturityDate = patch.maturityDate;
+    if (patch.note !== undefined) v.note = patch.note?.trim() || null;
+    await this.b.update('moneyDeposits', [{ rowNumber: dep.rowNumber, values: v, expectId: dep.id }]);
   }
 
   // ── 預算 ──

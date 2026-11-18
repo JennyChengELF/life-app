@@ -12,8 +12,9 @@
  * 7：新增記帳 APP 的試算表（帳戶、分類、交易、明細）；綜合加人物、機構（2026-11-18）
  * 8：交易加分店、帳單名稱；帳戶加國外交易手續費率；機構加國外（2026-11-18）
  * 9：新增預算、預算分配；交易加快速輸入的分類、預算（2026-11-18）
+ * 10：新增定存單（2026-11-18）
  */
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 
 export type ColType = 'datetime' | 'date' | 'number' | 'text' | 'bool' | 'any';
 
@@ -415,6 +416,22 @@ export const TABLES = {
       { name: 'amount', type: 'number', label: '金額（必填；可以是負數，例：期初是負的）' },
       { name: 'date', type: 'date', label: '期初才填：從哪一天開始算（那天開始時的金額）' },
       { name: 'ideal', type: 'number', label: '每月才填：當時的理想金額（算「今年還差多少到理想」用）' },
+      { name: 'note', type: 'text', label: '備註' },
+      ...systemCols,
+    ],
+  },
+  moneyDeposits: {
+    file: 'money',
+    description: '定存單：定存帳戶裡的一張定存（本金、利率、到期日）。定存帳戶的餘額還是看交易（開定存 = 活存轉到定存）。建議在 APP 裡操作。',
+    columns: [
+      { name: 'account', type: 'text', label: '定存帳戶名稱（必填）' },
+      { name: 'principal', type: 'number', label: '本金（必填）' },
+      { name: 'rate', type: 'number', label: '年利率 %（選填）' },
+      { name: 'startDate', type: 'date', label: '起存日（必填）' },
+      { name: 'maturityDate', type: 'date', label: '到期日（必填；續存時改成新的到期日）' },
+      { name: 'termMonths', type: 'number', label: '期間幾個月（續存時預設用這個）' },
+      { name: 'fromAccount', type: 'text', label: '從哪個帳戶轉來（解約時預設轉回這裡）' },
+      { name: 'endedDate', type: 'date', label: '解約 / 結束日（有值 = 已結束）' },
       { name: 'note', type: 'text', label: '備註' },
       ...systemCols,
     ],

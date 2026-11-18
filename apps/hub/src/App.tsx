@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { TimelineEntry } from '@life/db';
-import { bowelEntries, bowelHomeMessage, editHash, fmtMoney, healthEntries, loanReminders, moneyDayTotals, moneyEntries, resolvePinned, sortEntries, todayKey, waterEntries, waterSummary } from '@life/db';
+import { bowelEntries, bowelHomeMessage, editHash, fmtMoney, depositsDue, healthEntries, loanReminders, moneyDayTotals, moneyEntries, resolvePinned, sortEntries, todayKey, waterEntries, waterSummary } from '@life/db';
 import { DateNav, Timeline } from '@life/ui/timeline';
 import { useHub } from './useHub';
 
@@ -229,6 +229,9 @@ function Day({ hub, date, setDate }: { hub: ReturnType<typeof useHub>; date: str
   const money = moneyDayTotals(hub.moneySnap, date);
   // 借出太久沒還（天數在記帳 APP 設定，2026-11-18）
   const loans = loanReminders(hub.moneySnap);
+  // 定存 7 天內到期、或已到期還沒處理（2026-11-18）
+  const deps = depositsDue(hub.moneySnap.deposits, todayKey());
+  const depCur = (name: string) => hub.moneySnap!.accounts.find((a) => a.name === name)?.currency ?? 'TWD';
   // 昨天排便較少（「喝水 +500ml」按鈕等喝水的加量功能做好再加）
   const bowelMsg = bowelHomeMessage(hub.bowelSnap, hub.healthSnap.body);
   const pct = w.goal > 0 ? Math.min(100, Math.round((w.total / w.goal) * 100)) : 0;
@@ -241,6 +244,16 @@ function Day({ hub, date, setDate }: { hub: ReturnType<typeof useHub>; date: str
 
   return (
     <>
+      {deps.length > 0 && (
+        <div className="messages">
+          {deps.map((d) => (
+            <a key={d.id} className="msg warn" href={appUrl('money')}>
+              🏦 定存 {fmtMoney(d.principal, depCur(d.account))}（{d.account}）{d.maturityDate < todayKey() ? '已經' : '將在 '}
+              {d.maturityDate.slice(5).replace('-', '/')} 到期，記得解約或續存
+            </a>
+          ))}
+        </div>
+      )}
       {loans.length > 0 && (
         <div className="messages">
           {loans.map((l) => (
