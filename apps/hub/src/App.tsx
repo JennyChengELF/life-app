@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { TimelineEntry } from '@life/db';
-import { bowelEntries, bowelHomeMessage, editHash, healthEntries, sortEntries, todayKey, waterEntries, waterSummary } from '@life/db';
+import { bowelEntries, bowelHomeMessage, editHash, healthEntries, resolvePinned, sortEntries, todayKey, waterEntries, waterSummary } from '@life/db';
 import { DateNav, Timeline } from '@life/ui/timeline';
 import { useHub } from './useHub';
 
@@ -16,16 +16,160 @@ function appUrl(app: AppKey, hash = '') {
   return import.meta.env.DEV ? `http://${location.hostname}:${DEV_PORTS[app]}/${q}${hash}` : `${app}/${q}${hash}`;
 }
 
-const TILES: { app: AppKey; hash: string; icon: string; label: string }[] = [
-  { app: 'water', hash: '', icon: '💧', label: '喝水' },
+interface Tile {
+  key: string;
+  app: AppKey;
+  hash: string;
+  icon: string;
+  label: string;
+}
+
+/** 所有按鈕（key 存在設定裡，不要改） */
+const TILES: Tile[] = [
+  { key: 'water', app: 'water', hash: '', icon: '💧', label: '喝水' },
   // 一鍵記錄：打開排便 APP 就記一筆、展開詳細欄位，填完回首頁（2026-11-18 確認）
-  { app: 'bowel', hash: '#new', icon: '💩', label: '記排便' },
-  { app: 'health', hash: '#new', icon: '⚖️', label: '記體重' },
-  { app: 'health', hash: '#bp', icon: '🩸', label: '記血壓' },
-  { app: 'health', hash: '#glucose', icon: '🍬', label: '記血糖' },
-  { app: 'health', hash: '', icon: '🩺', label: '健康' },
-  { app: 'bowel', hash: '', icon: '📅', label: '排便' },
+  { key: 'bowelNew', app: 'bowel', hash: '#new', icon: '💩', label: '記排便' },
+  { key: 'body', app: 'health', hash: '#new', icon: '⚖️', label: '記體重' },
+  { key: 'bp', app: 'health', hash: '#bp', icon: '🩸', label: '記血壓' },
+  { key: 'glucose', app: 'health', hash: '#glucose', icon: '🍬', label: '記血糖' },
+  { key: 'temp', app: 'health', hash: '#temp', icon: '🌡️', label: '記體溫' },
+  { key: 'health', app: 'health', hash: '', icon: '🩺', label: '健康' },
+  { key: 'bowel', app: 'bowel', hash: '', icon: '🚽', label: '排便' },
 ];
+const tileOf = (k: string) => TILES.find((t) => t.key === k)!;
+
+/**
+ * 類別（2026-11-18 確認：首頁上面是自己勾的「常用」，下面是類別資料夾，所有功能都找得到）。
+ * 💡 目前只有健康；記帳、子彈筆記等做好再加
+ */
+const GROUPS: { key: string; icon: string; label: string; tiles: string[] }[] = [
+  { key: 'health', icon: '🩺', label: '健康', tiles: ['water', 'bowelNew', 'body', 'bp', 'glucose', 'temp', 'health', 'bowel'] },
+];
+
+/** 💡 還沒設定過時的常用（和原本首頁一樣） */
+const DEFAULT_PINNED = ['water', 'bowelNew', 'body', 'bp', 'glucose'];
+
+function TileLink({ t }: { t: Tile }) {
+  return (
+    <a className="tile" href={appUrl(t.app, t.hash)}>
+      <span className="tile-icon">{t.icon}</span>
+      {t.label}
+    </a>
+  );
+}
+
+function Launcher({ hub }: { hub: ReturnType<typeof useHub> }) {
+  const pinned = resolvePinned(
+    hub.hubSnap?.settings.pinned ?? null,
+    TILES.map((t) => t.key),
+    DEFAULT_PINNED,
+  );
+  const [open, setOpen] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string[] | null>(null);
+  // 還沒連上試算表時不能存設定
+  const canEdit = hub.status === 'ready' && !!hub.hubSnap;
+
+  if (editing) return <PinEditor initial={editing} hub={hub} onClose={() => setEditing(null)} />;
+
+  const group = GROUPS.find((g) => g.key === open);
+  return (
+    <>
+      <div className="launch-head">
+        <span className="muted small">常用</span>
+        {canEdit && (
+          <button className="link small" onClick={() => setEditing(pinned)}>
+            ✏️ 編輯
+          </button>
+        )}
+      </div>
+      {pinned.length > 0 ? (
+        <nav className="launcher">
+          {pinned.map((k) => (
+            <TileLink key={k} t={tileOf(k)} />
+          ))}
+        </nav>
+      ) : (
+        <p className="muted small">還沒有常用的按鈕，按「編輯」勾選。</p>
+      )}
+      <nav className="groups">
+        {GROUPS.map((g) => (
+          <button key={g.key} className={open === g.key ? 'active' : ''} aria-expanded={open === g.key} onClick={() => setOpen(open === g.key ? null : g.key)}>
+            {g.icon} {g.label} {open === g.key ? '▴' : '▾'}
+          </button>
+        ))}
+      </nav>
+      {group && (
+        <nav className="launcher group-tiles">
+          {group.tiles.map((k) => (
+            <TileLink key={k} t={tileOf(k)} />
+          ))}
+        </nav>
+      )}
+    </>
+  );
+}
+
+/** 勾選常用的按鈕、調整順序 */
+function PinEditor({ initial, hub, onClose }: { initial: string[]; hub: ReturnType<typeof useHub>; onClose: () => void }) {
+  const [keys, setKeys] = useState(initial);
+  const move = (k: string, d: -1 | 1) => {
+    const i = keys.indexOf(k);
+    const j = i + d;
+    if (j < 0 || j >= keys.length) return;
+    const next = [...keys];
+    [next[i], next[j]] = [next[j], next[i]];
+    setKeys(next);
+  };
+  const toggle = (k: string) => setKeys(keys.includes(k) ? keys.filter((x) => x !== k) : [...keys, k]);
+  // 勾選的依順序在前，沒勾的照原本順序在後
+  const rows = [...keys.map(tileOf), ...TILES.filter((t) => !keys.includes(t.key))];
+  return (
+    <section className="card pin-editor">
+      <h2>首頁常用的按鈕</h2>
+      <p className="muted small">勾選的會顯示在首頁上面，用 ↑↓ 調整順序。沒勾的在下面的類別裡還是找得到。</p>
+      <ul className="order-list">
+        {rows.map((t) => {
+          const on = keys.includes(t.key);
+          const i = keys.indexOf(t.key);
+          return (
+            <li key={t.key} className={on ? '' : 'off'}>
+              <label className="check">
+                <input type="checkbox" checked={on} onChange={() => toggle(t.key)} />
+                {t.icon} {t.label}
+              </label>
+              {on && (
+                <>
+                  <button className="icon-small" onClick={() => move(t.key, -1)} disabled={i === 0} aria-label={`${t.label} 往前`}>
+                    ↑
+                  </button>
+                  <button className="icon-small" onClick={() => move(t.key, 1)} disabled={i === keys.length - 1} aria-label={`${t.label} 往後`}>
+                    ↓
+                  </button>
+                </>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      {hub.error && <p className="error-text small">{hub.error}</p>}
+      <div className="editor-actions">
+        <button
+          className="primary"
+          disabled={hub.busy}
+          onClick={async () => {
+            if (await hub.savePinned(keys)) onClose();
+          }}
+        >
+          儲存
+        </button>
+        <button onClick={onClose}>取消</button>
+        <button className="link" onClick={() => setKeys(DEFAULT_PINNED)}>
+          恢復預設
+        </button>
+      </div>
+    </section>
+  );
+}
 
 export function App() {
   const hub = useHub();
@@ -43,14 +187,7 @@ export function App() {
       </header>
       {hub.mode === 'local' && <div className="mode-banner">本機測試模式：資料只存在這個瀏覽器，還沒接上 Google 試算表</div>}
       <main>
-        <nav className="launcher">
-          {TILES.map((t) => (
-            <a key={t.label} className="tile" href={appUrl(t.app, t.hash)}>
-              <span className="tile-icon">{t.icon}</span>
-              {t.label}
-            </a>
-          ))}
-        </nav>
+        <Launcher hub={hub} />
         <Day hub={hub} date={date} setDate={setDate} />
       </main>
     </div>

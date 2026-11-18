@@ -8,7 +8,7 @@
  * 3：體重表 healthWeights 改名為身體量測 healthBodyMeasurements 並加上身體組成欄位；新增偶爾量測、健康設定（2026-11-17）
  * 4：新增血壓、血糖、體溫（2026-11-17）
  * 5：新增健檢 / 檢驗：報告、檢驗項目、檢驗結果（2026-11-17）
- * 6：新增排便 APP 的試算表（2026-11-18）
+ * 6：新增排便 APP、綜合 APP 的試算表（2026-11-18）
  */
 export const SCHEMA_VERSION = 6;
 
@@ -21,7 +21,7 @@ export interface ColumnDef {
   label: string;
 }
 
-export type FileKey = 'water' | 'health' | 'bowel';
+export type FileKey = 'water' | 'health' | 'bowel' | 'hub';
 
 export interface FileDef {
   /** 試算表檔名（不加版本號） */
@@ -33,6 +33,7 @@ export const FILES: Record<FileKey, FileDef> = {
   water: { title: '生活APP-喝水', description: '喝水 APP 的資料：喝水紀錄、每日目標、常用杯子、設定' },
   health: { title: '生活APP-健康', description: '健康 APP 的資料：身體量測（體重、體脂⋯⋯）、血壓、血糖、體溫、健檢 / 檢驗、偶爾量測（身高、圍度⋯⋯）、設定' },
   bowel: { title: '生活APP-排便', description: '排便 APP 的資料：排便紀錄、設定' },
+  hub: { title: '生活APP-綜合', description: '綜合 APP（首頁）的資料：設定（之後還有人物、商店⋯⋯）' },
 };
 
 export interface TableDef {
@@ -280,6 +281,14 @@ export const TABLES = {
       { name: 'date', type: 'date', label: '日期（APP 依 time 自動填）' },
       { name: 'createdVia', type: 'text', label: '在哪裡輸入（bowel = 排便 APP、hub = 綜合首頁、sheet = 直接在試算表）' },
       ...systemCols,
+    ],
+  },
+  hubSettings: {
+    file: 'hub',
+    description: '綜合 APP（首頁）的設定，請在 APP 裡修改。',
+    columns: [
+      { name: 'key', type: 'text', label: '設定名稱' },
+      { name: 'value', type: 'any', label: '設定值' },
     ],
   },
   bowelSettings: {
