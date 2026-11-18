@@ -10,6 +10,7 @@ import {
   itemToForm,
   LocalBackend,
   memoryStorage,
+  noteSuggestions,
   MoneyStore,
   NO_MATCH,
   parseDateTimeText,
@@ -289,5 +290,27 @@ describe('月底盤點', () => {
     snap = await store.load();
     expect(bookBalance(snap.accounts.find((a) => a.name === '舊帳戶')!, snap.txns, '2026-12-02')).toBe(8000);
     expect(snap.issues).toEqual([]);
+  });
+});
+
+describe('分類的常用備註', () => {
+  it('用最多次的在前；「、」分開各算一個；不夠時補上一層的；自動產生的不算', async () => {
+    const store = new MoneyStore(new LocalBackend(memoryStorage()));
+    await store.load();
+    await store.saveAccount({ ...base, name: '台幣現金', type: '現金', org: null, openingBalance: 5000 });
+    await store.ensureCategories(['食', '食 / 三餐', '食 / 三餐 / 早餐', '食 / 三餐 / 午餐', '食 / 飲料點心'], '支出');
+    const eat = (time: string, cat: string, note: string) =>
+      store.saveTxn({ ...spend(time, 100, '台幣現金'), note, lines: [{ kind: '支出', amount: 100, category: cat }] });
+    await eat('2026-11-01 08:00', '食 / 三餐 / 早餐', '蛋餅');
+    await eat('2026-11-02 08:00', '食 / 三餐 / 早餐', '蛋餅、豆漿');
+    await eat('2026-11-03 08:00', '食 / 三餐 / 早餐', '1/3 期：豆漿');
+    await eat('2026-11-03 12:00', '食 / 三餐 / 午餐', '便當');
+    await eat('2026-11-04 12:00', '食 / 三餐 / 午餐', '和同事聚餐');
+    await eat('2026-11-04 15:00', '食 / 飲料點心', '珍奶');
+    await eat('2026-11-05 12:00', '食 / 三餐 / 午餐', '樂 / 數位 國外交易服務費');
+    const snap = await store.load();
+    expect(noteSuggestions(snap.txns, ['食 / 三餐 / 早餐'])).toEqual(['豆漿', '蛋餅', '和同事聚餐', '便當']);
+    expect(noteSuggestions(snap.txns, ['食 / 三餐 / 早餐'], 8, 2)).toEqual(['豆漿', '蛋餅']);
+    expect(noteSuggestions(snap.txns, [])).toEqual([]);
   });
 });

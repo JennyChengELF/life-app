@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { EntryForm, MoneySnapshot, Txn, TxnInput } from '@life/db';
 import {
+  noteSuggestions,
   unpaidStatements,
   checkTxn,
   ENTRY_MODES,
@@ -271,6 +272,11 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
       }}
     />
   );
+
+  // 分類的常用備註（2026-11-18 使用者要求）：選了分類才出現，已經寫在備註裡的不再出現
+  const noteCats = f.cats.map((c) => c.category ?? '').filter(Boolean).join(' ');
+  const allNoteChips = useMemo(() => noteSuggestions(snap.txns, noteCats ? noteCats.split(' ') : []), [snap.txns, noteCats]);
+  const noteChips = allNoteChips.filter((x) => !(f.note ?? '').split('、').map((y) => y.trim()).includes(x));
 
   const from = snap.accounts.find((a) => a.name === f.account);
   const canInstall = !txn && !editing.target && f.mode === '支出' && !paidByMode && !!from;
@@ -577,6 +583,16 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
             備註
             <input value={f.note ?? ''} onChange={(e) => set({ note: e.target.value })} />
           </label>
+          {noteChips.length > 0 && (
+            <div className="chips note-chips">
+              <span className="chips-label">常用</span>
+              {noteChips.map((x) => (
+                <button type="button" key={x} className="chip" onClick={() => set({ note: f.note?.trim() ? `${f.note.trim()}、${x}` : x })}>
+                  {x}
+                </button>
+              ))}
+            </div>
+          )}
           <label className="field">
             標籤（多個用「、」分開，例：2026東京）
             <input defaultValue={f.tags.join('、')} onChange={(e) => set({ tags: splitTags(e.target.value) })} />

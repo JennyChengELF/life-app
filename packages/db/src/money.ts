@@ -459,6 +459,40 @@ export function recentCategories(txns: Txn[], kind: CategoryKind, n = 5): string
   return out;
 }
 
+/** APP 自動產生的備註（分期、手續費、定存、盤點）不算常用文字 */
+const AUTO_NOTE = /國外交易服務費|^開定存|^定存|^盤點調整/;
+
+/**
+ * 分類的常用備註（2026-11-18 使用者要求，自動學）：以前在這個分類寫過的備註，用最多次的在前面（一樣多次的，最近用的在前）。
+ * 備註用「、」分開的各算一個（點常用文字時是用「、」接在後面）；分期的「1/6 期：」去掉。
+ * 這個分類不到 min 個時，補上一層分類（含底下其他子分類）的。
+ */
+export function noteSuggestions(txns: Txn[], categories: string[], n = 8, min = 5): string[] {
+  const collect = (match: (path: string) => boolean) => {
+    const m = new Map<string, { count: number; last: number }>();
+    for (const t of txns) {
+      if (!t.note || !t.lines.some((l) => l.category && match(l.category))) continue;
+      const note = t.note.replace(/^\d+\/\d+ 期：?/, '');
+      for (const part of note.split('、').map((x) => x.trim())) {
+        if (!part || AUTO_NOTE.test(part)) continue;
+        const x = m.get(part) ?? { count: 0, last: 0 };
+        x.count++;
+        x.last = Math.max(x.last, t.time);
+        m.set(part, x);
+      }
+    }
+    return [...m].sort((a, b) => b[1].count - a[1].count || b[1].last - a[1].last).map(([k]) => k);
+  };
+  const cats = [...new Set(categories.filter(Boolean).map(normPath))];
+  if (!cats.length) return [];
+  const out = collect((p) => cats.includes(p));
+  if (out.length < min) {
+    const ups = cats.map(parentPath).filter((p): p is string => !!p);
+    if (ups.length) for (const x of collect((p) => ups.some((u) => p === u || p.startsWith(`${u} / `)))) if (!out.includes(x)) out.push(x);
+  }
+  return out.slice(0, n);
+}
+
 export function splitTags(v: unknown): string[] {
   const s = str(v);
   if (!s) return [];

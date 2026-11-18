@@ -221,3 +221,4 @@ button.bt-row:hover, .bt-row.open { background: var(--bg); }
 .stmt-row { width: 100%; display: flex; align-items: baseline; gap: 10px; background: none; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 9px 4px; color: var(--text); text-align: left; }
 .stmt-row:hover { background: var(--bg); }
 .stmt-row .grow { flex: 1; }
+.note-chips { margin: -4px 0 10px; }
