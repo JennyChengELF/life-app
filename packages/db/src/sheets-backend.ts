@@ -22,6 +22,9 @@ const FILED_KEY = 'life.filed';
 /** 試算表是哪個 APP 的（存在檔案的 appProperties，值是 FileKey）；用來找檔案，改檔名也找得到 */
 const FILE_PROP = 'lifeAppFile';
 const MARKED_KEY = 'life.marked';
+/** 429 重試前等待的毫秒數（每分鐘額度，最多等約 1 分鐘） */
+const RETRY_DELAYS = [2000, 5000, 10000, 20000, 30000];
+const READ_PARAMS = 'valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER';
 
 /** A1 表示法中的工作表名稱（加單引號） */
 const q = (title: string) => `'${title.replace(/'/g, "''")}'`;
@@ -56,15 +59,20 @@ export class SheetsBackend implements Backend {
   constructor(private auth: GoogleAuth) {}
 
   private async api<T = any>(url: string, init: RequestInit = {}): Promise<T> {
-    const token = this.auth.getToken();
     let res: Response;
-    try {
-      res = await fetch(url, {
-        ...init,
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(init.headers ?? {}) },
-      });
-    } catch {
-      throw new Error('連不上 Google，請檢查網路');
+    // 超過每分鐘讀寫次數（429）→ 等一下自動重試（Google 被擋的請求不會執行，重送是安全的）
+    for (let attempt = 0; ; attempt++) {
+      const token = this.auth.getToken();
+      try {
+        res = await fetch(url, {
+          ...init,
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(init.headers ?? {}) },
+        });
+      } catch {
+        throw new Error('連不上 Google，請檢查網路');
+      }
+      if (res.status !== 429 || attempt >= RETRY_DELAYS.length) break;
+      await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt] + Math.random() * 1000));
     }
     if (res.status === 401) {
       this.auth.invalidate();
@@ -312,12 +320,41 @@ export class SheetsBackend implements Backend {
     return h;
   }
 
+  /**
+   * 同一時間（同一輪）要讀的工作表先收集起來，同一份試算表合成一次 batchGet。
+   * 例：記帳開啟時讀 13 張表 → 只發 2 次讀取（記帳、綜合），避免超過每分鐘讀取上限。
+   */
+  private pendingReads = new Map<string, { table: TableName; resolve: (r: TableRow[]) => void; reject: (e: unknown) => void }[]>();
+
   async read(table: TableName): Promise<TableRow[]> {
     const id = this.sid(TABLES[table].file);
-    const res = await this.api(
-      `${SHEETS}/${id}/values/${encodeURIComponent(q(table))}?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER`,
-    );
-    const values: unknown[][] = res.values ?? [];
+    return new Promise((resolve, reject) => {
+      let list = this.pendingReads.get(id);
+      if (!list) {
+        list = [];
+        this.pendingReads.set(id, list);
+        queueMicrotask(() => void this.flushReads(id));
+      }
+      list.push({ table, resolve, reject });
+    });
+  }
+
+  private async flushReads(id: string) {
+    const list = this.pendingReads.get(id) ?? [];
+    this.pendingReads.delete(id);
+    const tables = [...new Set(list.map((x) => x.table))];
+    try {
+      const ranges = tables.map((t) => `ranges=${encodeURIComponent(q(t))}`).join('&');
+      const res = await this.api(`${SHEETS}/${id}/values:batchGet?${ranges}&${READ_PARAMS}`);
+      const byTable = new Map<TableName, unknown[][]>(tables.map((t, i) => [t, res.valueRanges?.[i]?.values ?? []]));
+      // 每次各自解析（呼叫端可能會改資料內容，不共用同一份）
+      for (const x of list) x.resolve(this.parseRows(x.table, byTable.get(x.table)!));
+    } catch (e) {
+      for (const x of list) x.reject(e);
+    }
+  }
+
+  private parseRows(table: TableName, values: unknown[][]): TableRow[] {
     const header = (values[0] ?? []).map((h) => String(h).trim());
     this.headers.set(table, header);
     const cols = TABLES[table].columns as ColumnDef[];
