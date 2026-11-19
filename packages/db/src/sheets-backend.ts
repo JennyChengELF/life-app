@@ -176,6 +176,7 @@ export class SheetsBackend implements Backend {
       try {
         const s = await this.api(`${SHEETS}/${cached}?${fields}`);
         this.ids[file] = cached;
+        await this.safely(() => this.renameFormerFileTitle(cached, file));
         return toMap(s);
       } catch (e) {
         if (!(e instanceof ApiError) || (e.status !== 404 && e.status !== 403)) throw e;
@@ -193,6 +194,10 @@ export class SheetsBackend implements Backend {
     let id = await search(`appProperties has { key='${FILE_PROP}' and value='${file}' }`);
     if (!id) {
       id = await search(`name='${FILES[file].title.replace(/'/g, "\\'")}'`);
+      for (const former of FILES[file].formerTitles ?? []) {
+        if (id) break;
+        id = await search(`name='${former.replace(/'/g, "\\'")}'`);
+      }
       if (id) await this.safely(() => this.markFile(id!, file));
     }
     let titles: Map<string, number>;
@@ -206,7 +211,20 @@ export class SheetsBackend implements Backend {
     }
     this.ids[file] = id;
     localStorage.setItem(ID_KEY(file), id);
+    await this.safely(() => this.renameFormerFileTitle(id!, file));
     return titles;
+  }
+
+  /** APP 改名時只改仍使用舊預設名稱的檔案；使用者自行改過的名稱保持不動。 */
+  private async renameFormerFileTitle(fileId: string, file: FileKey) {
+    const former = FILES[file].formerTitles;
+    if (!former?.length) return;
+    const current = await this.api(`${DRIVE}/${fileId}?fields=name`);
+    if (!former.includes(current.name)) return;
+    await this.api(`${DRIVE}/${fileId}?fields=id`, {
+      method: 'PATCH',
+      body: JSON.stringify({ name: FILES[file].title }),
+    });
   }
 
   /** 在檔案上加標記（appProperties），之後用標記找；失敗沒關係，下次再補 */

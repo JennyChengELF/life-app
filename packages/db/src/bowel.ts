@@ -1,5 +1,5 @@
 /**
- * 排便 APP 的資料存取與規則。資料存在「生活APP-排便」試算表。
+ * 「廁所大事」APP 的資料存取與排便規則。資料存在「生活APP-廁所大事」試算表。
  * 選項沿用舊試算表（2026-11-18 確認）；選項直接存中文，可以複選的用「、」分開。
  */
 import type { Backend, RowUpdate, RowValues, TableRow } from './backend';
@@ -10,7 +10,7 @@ import type { Judge, Level } from './vitals';
 
 // ───────────── 選項 ─────────────
 
-/** 布里斯托型態；未觀察 = 有看但看不出來 */
+/** 布里斯托型態；未觀察 = 有排出但沒看或看不出來 */
 export const BOWEL_TYPES = ['1', '2', '3', '4', '5', '6', '7', '未觀察'] as const;
 export type BowelType = (typeof BOWEL_TYPES)[number];
 export const TYPE_NAMES: Record<BowelType, string> = {
@@ -132,7 +132,7 @@ export interface BowelSnapshot {
   issues: BowelIssue[];
 }
 
-export const emptyInput = (passed = true): BowelInput => ({
+export const emptyInput = (passed = false): BowelInput => ({
   passed,
   types: [],
   amount: null,
@@ -467,12 +467,23 @@ export class BowelStore {
       }
       const date = toDateKey(Number(r.values.time));
       let values = { ...r.values, date };
+      const fill: RowValues = {};
       if (!id) {
-        const fill: RowValues = { id: newId(now), date, createdVia: str(r.values.createdVia) ?? 'sheet', createdAt: now, updatedAt: now };
-        fixes.push({ rowNumber: r.rowNumber, values: fill, expectId: '' });
-        values = { ...values, ...fill };
+        Object.assign(fill, { id: newId(now), date, createdVia: str(r.values.createdVia) ?? 'sheet', createdAt: now, updatedAt: now });
       } else if (r.values.date !== date) {
-        fixes.push({ rowNumber: r.rowNumber, values: { date }, expectId: id });
+        fill.date = date;
+      }
+      const types = splitMulti(r.values.types).map((t) => parseType(t)!);
+      // 舊規則：passed=TRUE（或已由舊版補過 id、passed 留白）但沒型態，仍代表有排出；轉成「未觀察」。
+      if (types.length === 0 && (r.values.passed === true || (r.values.passed == null && id))) {
+        Object.assign(fill, { types: '未觀察', passed: true });
+      } else {
+        const passed = types.length > 0;
+        if (r.values.passed !== passed) fill.passed = passed;
+      }
+      if (Object.keys(fill).length) {
+        fixes.push({ rowNumber: r.rowNumber, values: fill, expectId: id ?? '' });
+        values = { ...values, ...fill };
       }
       logs.push(toLog({ ...r, values }));
     }
@@ -485,7 +496,12 @@ export class BowelStore {
   async addLog(input: Partial<BowelInput> = {}, time = Date.now(), id = newId()): Promise<string> {
     if (time > Date.now() + 5 * 60000) throw new Error('時間不能是未來');
     const now = Date.now();
-    const values = toValues({ ...emptyInput(input.passed ?? true), ...input });
+    // 先驗證呼叫端傳入的選項，再依「沒型態＝沒排出」清除不適用欄位，避免悄悄吞掉錯字。
+    toValues(input);
+    const full = { ...emptyInput(false), ...input };
+    full.passed = full.types.length > 0;
+    if (!full.passed) Object.assign(full, { amount: null, color: null });
+    const values = toValues(full);
     await this.b.append('bowelLogs', [{ ...values, time, date: toDateKey(time), createdVia: this.via, id, createdAt: now, updatedAt: now }]);
     return id;
   }
@@ -493,8 +509,11 @@ export class BowelStore {
   /** 只更新有給的欄位 */
   async updateLog(log: Pick<BowelLog, 'rowNumber' | 'id'>, patch: Partial<BowelInput> & { time?: number }) {
     const { time, ...rest } = patch;
-    // 改成沒排出：型態、量、顏色一起清掉
-    if (rest.passed === false) Object.assign(rest, { types: [], amount: null, color: null });
+    // 是否排出由型態推導；「未觀察」也算有排出。
+    if (rest.types !== undefined) rest.passed = rest.types.length > 0;
+    else if (rest.passed === true) rest.types = ['未觀察'];
+    else if (rest.passed === false) rest.types = [];
+    if (rest.passed === false) Object.assign(rest, { amount: null, color: null });
     const values: RowValues = { ...toValues(rest), updatedAt: Date.now() };
     if (time !== undefined) {
       if (!Number.isFinite(time)) throw new Error('請輸入時間');

@@ -22,7 +22,7 @@ export function IssuesView({ api, snap, onDone }: { api: BowelApi; snap: BowelSn
       </p>
       {url && (
         <a className="btn" href={url} target="_blank" rel="noreferrer">
-          開啟排便試算表 ↗
+          開啟「廁所大事」試算表 ↗
         </a>
       )}
       {snap.issues.map((i) => (

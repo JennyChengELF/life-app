@@ -41,12 +41,12 @@ export function SettingsView({ api, snap }: { api: BowelApi; snap: BowelSnapshot
         ) : (
           <>
             <p className="muted small">
-              資料存在你的 Google 試算表「生活APP-排便」。可以直接在 bowelLogs 最下方新增一列，只要填 time，其他選填（選項照第一列下方的說明填中文）。APP 打開或重新整理時會自動補齊。
+              資料存在你的 Google 試算表「生活APP-廁所大事」。可以直接在 bowelLogs 最下方新增一列，只要填 time，其他選填（選項照第一列下方的說明填中文）。APP 打開或重新整理時會自動補齊。
             </p>
             <p className="muted small">⚠️ 排便資料比較私密，建議確認試算表的共用設定是「限制」（只有你能看）。</p>
             {url && (
               <a className="btn" href={url} target="_blank" rel="noreferrer">
-                開啟排便試算表 ↗
+                開啟「廁所大事」試算表 ↗
               </a>
             )}
             <div>

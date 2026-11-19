@@ -41,13 +41,26 @@ export function LogEditor(props: { api: BowelApi; log: BowelLog; onClose: () => 
   }, [log.rowNumber]);
 
   const commit = (patch: Patch) => {
-    const full: Patch = patch.passed === false ? { ...patch, types: [], amount: null, color: null } : patch;
+    const selected = patch.types;
+    const full: Patch = selected
+      ? selected.length
+        ? { ...patch, passed: true }
+        : { ...patch, passed: false, amount: null, color: null }
+      : patch.passed === false
+        ? { ...patch, types: [], amount: null, color: null }
+        : patch;
     setD((x) => ({ ...x, ...full }));
     if (latest.current.rowNumber < 0) pending.current = { ...pending.current, ...full };
     else write(full);
   };
 
-  const toggleType = (t: BowelType) => commit({ types: d.types.includes(t) ? d.types.filter((x) => x !== t) : [...d.types, t] });
+  const toggleType = (t: BowelType) => {
+    let next: BowelType[];
+    if (d.types.includes(t)) next = d.types.filter((x) => x !== t);
+    else if (t === '未觀察') next = ['未觀察'];
+    else next = [...d.types.filter((x) => x !== '未觀察'), t];
+    commit({ types: next });
+  };
   const toggleSymptom = (s: Symptom) => {
     let next = d.symptoms.includes(s) ? d.symptoms.filter((x) => x !== s) : [...d.symptoms, s];
     // 「無特殊狀況」和其他症狀不會同時成立
@@ -109,23 +122,24 @@ export function LogEditor(props: { api: BowelApi; log: BowelLog; onClose: () => 
     <div className="editor bowel-editor">
       <div className="ed-head">
         <input type="datetime-local" value={time} onChange={(e) => saveTime(e.target.value)} aria-label="時間" />
-        <span className="ed-kind">{d.passed ? '💩 排出' : '有便意沒排出'}</span>
+        <span className="ed-kind">{d.passed ? '💩 有排出' : '尚未選型態（沒排出）'}</span>
         {judge && <span className={`lv ${judge.level}`}>{judge.label}</span>}
       </div>
       {judge?.seeDoctor && <p className="msg warn small">⚠️ {judge.reasons.join('、')}：建議就醫檢查</p>}
 
+      <Field label="型態（可複選；沒選＝沒排出）">
+        <div className="choice types">
+          {BOWEL_TYPES.map((t) => (
+            <button key={t} role="checkbox" aria-checked={d.types.includes(t)} className={d.types.includes(t) ? 'active' : ''} onClick={() => toggleType(t)}>
+              <TypeIcon type={t} />
+              {typeLabel(t)}
+            </button>
+          ))}
+        </div>
+      </Field>
+
       {d.passed && (
         <>
-          <Field label="型態（可複選）">
-            <div className="choice types">
-              {BOWEL_TYPES.map((t) => (
-                <button key={t} role="checkbox" aria-checked={d.types.includes(t)} className={d.types.includes(t) ? 'active' : ''} onClick={() => toggleType(t)}>
-                  <TypeIcon type={t} />
-                  {typeLabel(t)}
-                </button>
-              ))}
-            </div>
-          </Field>
           {single('amount')}
           {single('color')}
           <button className="link more-btn" onClick={() => setMore(!more)} aria-expanded={more}>
@@ -139,9 +153,6 @@ export function LogEditor(props: { api: BowelApi; log: BowelLog; onClose: () => 
           {(d.passed ? MORE_PASSED : MORE_NOT_PASSED).map(single)}
           {symptomsField}
           {noteField}
-          <Field label="結果">
-            <Chips options={['排出', '有便意沒排出'] as const} isOn={(o) => (o === '排出') === d.passed} onTap={(o) => commit({ passed: o === '排出' })} />
-          </Field>
         </>
       )}
 

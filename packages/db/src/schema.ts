@@ -31,13 +31,19 @@ export type FileKey = 'water' | 'health' | 'bowel' | 'hub' | 'money';
 export interface FileDef {
   /** 試算表檔名（不加版本號） */
   title: string;
+  /** APP 改名以前使用的檔名；只用來找回及一次性改名，不影響使用者自行取的名稱 */
+  formerTitles?: string[];
   description: string;
 }
 
 export const FILES: Record<FileKey, FileDef> = {
   water: { title: '生活APP-喝水', description: '喝水 APP 的資料：喝水紀錄、每日目標、常用杯子、設定' },
   health: { title: '生活APP-健康', description: '健康 APP 的資料：身體量測（體重、體脂⋯⋯）、血壓、血糖、體溫、健檢 / 檢驗、偶爾量測（身高、圍度⋯⋯）、設定' },
-  bowel: { title: '生活APP-排便', description: '排便 APP 的資料：排便紀錄、設定' },
+  bowel: {
+    title: '生活APP-廁所大事',
+    formerTitles: ['生活APP-排便'],
+    description: '「廁所大事」APP 的資料：排便紀錄、設定',
+  },
   hub: { title: '生活APP-綜合', description: '綜合 APP（首頁）的資料：設定、人物、機構（銀行、商店⋯⋯）' },
   money: { title: '生活APP-記帳', description: '記帳 APP 的資料：帳戶、分類、交易（一次付款 / 收款 / 轉帳）、明細（支出、收入、他欠我 / 我欠他、還款）、設定' },
 };
@@ -269,11 +275,11 @@ export const TABLES = {
   bowelLogs: {
     file: 'bowel',
     description:
-      '排便紀錄，一次一列。可以直接在最下方新增一列，只要填 time，其他都選填。選項請照欄位說明填中文；可以選好幾個的用「、」分開（例：1、4）。空白 = 沒填。',
+      '如廁紀錄，一次一列。可以直接在最下方新增一列，只要填 time；有排出就填 types，沒填 types 代表沒排出。選項請照欄位說明填中文；可以選好幾個的用「、」分開（例：1、4）。',
     columns: [
       { name: 'time', type: 'datetime', label: '時間（必填）' },
-      { name: 'passed', type: 'bool', label: '有沒有排出（FALSE = 有便意但沒排出，不算次數；空白 = 有排出）' },
-      { name: 'types', type: 'text', label: '型態（布里斯托 1–7、未觀察；可以填好幾個，例：1、4）' },
+      { name: 'passed', type: 'bool', label: 'APP 依 types 自動填：有選型態 = TRUE，沒選 = FALSE（請勿手動修改）' },
+      { name: 'types', type: 'text', label: '型態（布里斯托 1–7、未觀察；可複選；空白 = 沒排出）' },
       { name: 'amount', type: 'text', label: '量（極少、少量、普通、普通偏多、大量）' },
       { name: 'color', type: 'text', label: '顏色（黃色、黃褐色、褐色、深褐色、綠色、黑色、紅色、灰白色、未觀察）' },
       { name: 'afterFeeling', type: 'text', label: '排便後感受（排乾淨、排不乾淨、仍有便意）' },
@@ -285,7 +291,7 @@ export const TABLES = {
       { name: 'symptoms', type: 'text', label: '症狀（可以填好幾個，用「、」分開；選項見 APP）' },
       { name: 'note', type: 'text', label: '備註' },
       { name: 'date', type: 'date', label: '日期（APP 依 time 自動填）' },
-      { name: 'createdVia', type: 'text', label: '在哪裡輸入（bowel = 排便 APP、hub = 綜合首頁、sheet = 直接在試算表）' },
+      { name: 'createdVia', type: 'text', label: '在哪裡輸入（bowel = 廁所大事 APP、hub = 綜合首頁、sheet = 直接在試算表）' },
       ...systemCols,
     ],
   },
@@ -499,7 +505,7 @@ export const TABLES = {
   },
   bowelSettings: {
     file: 'bowel',
-    description: '排便 APP 的設定，請在 APP 裡修改。',
+    description: '「廁所大事」APP 的設定，請在 APP 裡修改。',
     columns: [
       { name: 'key', type: 'text', label: '設定名稱' },
       { name: 'value', type: 'any', label: '設定值' },

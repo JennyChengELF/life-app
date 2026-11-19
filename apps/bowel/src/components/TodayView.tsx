@@ -16,17 +16,17 @@ function timeForDate(date: string) {
   return base.getTime();
 }
 
-/** 一鍵記錄：馬上存（時間自動帶入），並展開詳細欄位（2026-11-18 確認） */
-export async function startLog(api: BowelApi, passed: boolean, date: string, setOpenId: (id: string) => void) {
+/** 一鍵開始：馬上存時間並展開；選了型態才算有排出（2026-11-19 確認） */
+export async function startLog(api: BowelApi, date: string, setOpenId: (id: string) => void) {
   const id = newId();
   const time = timeForDate(date);
-  const temp: BowelLog = { ...emptyInput(passed), rowNumber: -1, id, time, date, createdVia: 'bowel' };
+  const temp: BowelLog = { ...emptyInput(false), rowNumber: -1, id, time, date, createdVia: 'bowel' };
   setOpenId(id);
   const ok = await api.run(
-    (s) => s.addLog({ passed }, time, id),
+    (s) => s.addLog({}, time, id),
     (s) => ({ ...s, logs: [...s.logs, temp] }),
   );
-  if (ok) api.showToast({ kind: 'info', text: `已記錄${passed ? '排便' : '有便意沒排出'} ${toHHmm(time)}` });
+  if (ok) api.showToast({ kind: 'info', text: `已開始記錄 ${toHHmm(time)}` });
 }
 
 function fmtWhen(ms: number) {
@@ -68,7 +68,7 @@ export function TodayView(props: {
   const diar = diarrhea(snap.logs, date);
   const doctor = logs.map((l) => judgeBowel(l)).filter((j) => j?.seeDoctor);
 
-  const add = (passed: boolean) => startLog(api, passed, date, setOpenId);
+  const add = () => startLog(api, date, setOpenId);
 
   return (
     <div className="today">
@@ -92,10 +92,9 @@ export function TodayView(props: {
         <div className="since-value">{last ? elapsedText(now - last.time) : '—'}</div>
         <div className="muted small">{last ? `上次：${fmtWhen(last.time)}` : '還沒有紀錄'}</div>
         <div className="add-row">
-          <button className="primary big" onClick={() => add(true)}>
+          <button className="primary big" onClick={add}>
             <Icon name="plus" size={20} strokeWidth={2.2} /> 記一筆
           </button>
-          <button onClick={() => add(false)}>有便意沒排出</button>
         </div>
         {!isToday && <p className="muted small">在這天補記，時間可以記完再改</p>}
       </section>

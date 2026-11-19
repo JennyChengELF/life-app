@@ -35,7 +35,7 @@ const TILES: Tile[] = [
   { key: 'glucose', app: 'health', hash: '#glucose', icon: 'candy', label: '記血糖' },
   { key: 'temp', app: 'health', hash: '#temp', icon: 'thermometer', label: '記體溫' },
   { key: 'health', app: 'health', hash: '', icon: 'stethoscope', label: '健康' },
-  { key: 'bowel', app: 'bowel', hash: '', icon: 'calendar', label: '排便' },
+  { key: 'bowel', app: 'bowel', hash: '', icon: 'calendar', label: '廁所大事' },
   { key: 'moneyNew', app: 'money', hash: '#new', icon: 'pencil', label: '記一筆' },
   { key: 'money', app: 'money', hash: '', icon: 'wallet', label: '記帳' },
 ];

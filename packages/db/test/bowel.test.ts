@@ -23,7 +23,8 @@ import {
 const at = (s: string) => parseDateTimeText(s)!;
 
 function log(time: string, patch: Partial<BowelLog> = {}): BowelLog {
-  return { ...emptyInput(), rowNumber: 2, id: time, time: at(time), date: time.slice(0, 10), createdVia: 'bowel', ...patch };
+  const types = patch.types ?? (patch.passed === false ? [] : ['未觀察']);
+  return { ...emptyInput(false), rowNumber: 2, id: time, time: at(time), date: time.slice(0, 10), createdVia: 'bowel', ...patch, types, passed: types.length > 0 };
 }
 
 describe('顏色標示', () => {
@@ -101,7 +102,7 @@ describe('規則', () => {
       log('2026-11-13 08:00'),
     ];
     const s = bowelStats(logs, '2026-11-10', '2026-11-16');
-    expect(s).toMatchObject({ count: 3, days: 2, totalDays: 7, notPassed: 1, noType: 1 });
+    expect(s).toMatchObject({ count: 3, days: 2, totalDays: 7, notPassed: 1, noType: 0 });
     expect(s.types.find((t) => t.type === '4')?.count).toBe(2);
     expect(s.types.find((t) => t.type === '1')?.count).toBe(1);
   });
@@ -124,7 +125,7 @@ describe('資料存取', () => {
     const id = await s.addLog({}, at('2026-11-10 08:00'), 'MYID');
     expect(id).toBe('MYID');
     let snap = await s.load();
-    expect(snap.logs[0]).toMatchObject({ id: 'MYID', passed: true, types: [], amount: null, date: '2026-11-10' });
+    expect(snap.logs[0]).toMatchObject({ id: 'MYID', passed: false, types: [], amount: null, date: '2026-11-10' });
     await s.updateLog(snap.logs[0], { types: ['4', '1'], amount: '普通', symptoms: ['腹脹', '腹痛'] });
     snap = await s.load();
     // 依選項順序存
@@ -146,18 +147,27 @@ describe('資料存取', () => {
     await expect(s.addLog({ amount: '超多' as never })).rejects.toThrow('量');
     await expect(s.addLog({}, Date.now() + 3600000)).rejects.toThrow('未來');
   });
-  it('試算表直接輸入：補 id、passed 空白算有排出、看不懂的列入需要補齊', async () => {
+  it('試算表直接輸入：由型態判斷有沒有排出、補 id、看不懂的列入需要補齊', async () => {
     const b = new LocalBackend(memoryStorage());
     await b.append('bowelLogs', [
       { time: at('2026-11-18 08:00'), types: '4 光滑長條、1', amount: '普通' },
+      { time: at('2026-11-18 08:30') },
       { time: at('2026-11-18 09:00'), amount: '很多' },
       { types: '4' },
     ]);
     const snap = await new BowelStore(b).load();
-    expect(snap.logs).toHaveLength(1);
+    expect(snap.logs).toHaveLength(2);
     expect(snap.logs[0]).toMatchObject({ passed: true, types: ['1', '4'], createdVia: 'sheet' });
     expect(snap.logs[0].id).toHaveLength(26);
+    expect(snap.logs[1]).toMatchObject({ passed: false, types: [], createdVia: 'sheet' });
     expect(snap.issues.map((i) => i.problems[0])).toEqual(['量「很多」看不懂（請填：極少、少量、普通、普通偏多、大量）', '沒有填時間']);
+  });
+  it('舊資料 passed=TRUE 但沒型態時保留為有排出，轉成未觀察', async () => {
+    const b = new LocalBackend(memoryStorage());
+    await b.append('bowelLogs', [{ time: at('2026-11-18 08:00'), passed: true, id: 'OLD', createdAt: at('2026-11-18 08:00') }]);
+    const snap = await new BowelStore(b).load();
+    expect(snap.logs[0]).toMatchObject({ passed: true, types: ['未觀察'] });
+    expect((await b.read('bowelLogs'))[0].values).toMatchObject({ passed: true, types: '未觀察' });
   });
   it('設定', async () => {
     const s = new BowelStore(new LocalBackend(memoryStorage()));

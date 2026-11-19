@@ -53,7 +53,7 @@ export function App() {
     setFromHome(true);
     if (pending.kind === 'new') {
       setDate(todayKey());
-      startLog(api, true, todayKey(), setOpenId);
+      startLog(api, todayKey(), setOpenId);
       return;
     }
     const log = api.snap.logs.find((l) => l.id === pending.id);
@@ -68,7 +68,7 @@ export function App() {
         <a className="icon-btn home-link" href={HOME_URL + location.search} title="回首頁" aria-label="回首頁">
           <Icon name="home" />
         </a>
-        <h1>排便</h1>
+        <h1>廁所大事</h1>
         <nav className="tabs-top">
           {TABS.map((t) => (
             <button key={t.key} className={tab === t.key ? 'active' : ''} onClick={() => setTab(t.key)}>
@@ -97,7 +97,7 @@ export function App() {
               連線 Google
             </button>
             {api.error && <p className="error-text">{api.error}</p>}
-            <p className="muted small">APP 只能存取它自己建立的試算表（「生活APP-排便」等）。</p>
+            <p className="muted small">APP 只能存取它自己建立的試算表（「生活APP-廁所大事」等）。</p>
           </div>
         ) : api.status === 'error' ? (
           <div className="center">
