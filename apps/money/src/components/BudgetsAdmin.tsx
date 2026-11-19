@@ -116,7 +116,7 @@ export function BudgetsAdmin({ api, snap, onBack }: { api: MoneyApi; snap: Money
           </button>
         </div>
       )}
-      <p className="hint">分類的預設預算在「🏷️ 分類」每個分類的 ⋯ 裡設定；記帳時選了分類會自動帶入。</p>
+      <p className="hint">分類的預設預算在「更多 → 分類」每個分類的 ⋯ 裡設定；記帳時選了分類會自動帶入。</p>
     </section>
   );
 }

@@ -1,15 +1,11 @@
 @import '@life/ui/base.css';
 
-/* 排便 APP 的主題色 */
+/* 主題色用共用的藍色（2026-11-19）；--poo 是圖示本身的顏色 */
 :root {
-  --accent: #85643f;
-  --accent-soft: #f3ebe1;
   --poo: #8b5a2b;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --accent: #cfa171;
-    --accent-soft: #3a2d1f;
     --poo: #c08a55;
   }
 }

@@ -14,20 +14,24 @@ import { BudgetsAdmin } from './components/BudgetsAdmin';
 import { AccountDetail } from './components/AccountDetail';
 import { ReconcileView } from './components/ReconcileView';
 import { StocktakeView } from './components/Stocktake';
+import { Icon, type IconName } from '@life/ui/icon';
 
 /** 綜合首頁：上線時在上一層路徑；開發時是另一個 port */
 const HOME_URL = import.meta.env.DEV ? `http://${location.hostname}:5172/` : '../';
 
-export type Tab = 'ledger' | 'stats' | 'budgets' | 'accounts' | 'settings' | 'categories' | 'budgetsAdmin' | 'issues';
+export type Tab = 'ledger' | 'stats' | 'budgets' | 'accounts' | 'more' | 'settings' | 'categories' | 'budgetsAdmin' | 'issues';
 
-const TABS: { key: Tab; icon: string; label: string }[] = [
-  { key: 'ledger', icon: '📒', label: '記帳' },
-  { key: 'stats', icon: '📊', label: '統計' },
-  { key: 'budgets', icon: '💼', label: '預算' },
-  { key: 'accounts', icon: '🏦', label: '帳戶' },
-  { key: 'categories', icon: '🏷️', label: '分類' },
-  { key: 'settings', icon: '⚙️', label: '設定' },
+/** 2026-11-19 使用者決定：「分類」「設定」合成「更多」，下方分頁剩 5 個 */
+const TABS: { key: Tab; icon: IconName; label: string }[] = [
+  { key: 'ledger', icon: 'book', label: '記帳' },
+  { key: 'stats', icon: 'chart', label: '統計' },
+  { key: 'budgets', icon: 'wallet', label: '預算' },
+  { key: 'accounts', icon: 'bank', label: '帳戶' },
+  { key: 'more', icon: 'more', label: '更多' },
 ];
+
+/** 分頁按鈕亮哪一個（子頁面算在它的分頁底下） */
+const tabOf = (t: Tab): Tab => (t === 'budgetsAdmin' ? 'budgets' : t === 'categories' || t === 'settings' ? 'more' : t);
 
 /** 正在編輯：新的一筆（form）或修改既有的（txn） */
 export interface Editing {
@@ -101,20 +105,22 @@ export function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <a className="icon-btn home-link" href={HOME_URL + location.search} title="回首頁">
-          🏠
+        <a className="icon-btn home-link" href={HOME_URL + location.search} title="回首頁" aria-label="回首頁">
+          <Icon name="home" />
         </a>
-        <h1>💰 記帳</h1>
+        <h1>記帳</h1>
         <nav className="tabs-top">
           {TABS.map((t) => (
-            <button key={t.key} className={tab === t.key || (tab === 'budgetsAdmin' && t.key === 'budgets') ? 'active' : ''} onClick={() => setTab(t.key)}>
-              {t.icon} {t.label}
+            <button key={t.key} className={tabOf(tab) === t.key ? 'active' : ''} onClick={() => setTab(t.key)}>
+              <Icon name={t.icon} size={20} /> {t.label}
             </button>
           ))}
         </nav>
         {api.status === 'ready' && (
-          <button className="icon-btn" onClick={api.refresh} disabled={api.busy} title="重新整理（讀取試算表最新資料）">
-            <span className={api.busy ? 'spin' : ''}>⟳</span>
+          <button className="icon-btn" onClick={api.refresh} disabled={api.busy} title="重新整理（讀取試算表最新資料）" aria-label="重新整理">
+            <span className={api.busy ? 'spin' : ''}>
+              <Icon name="refresh" />
+            </span>
           </button>
         )}
       </header>
@@ -180,6 +186,16 @@ export function App() {
               <SettingsView api={api} snap={api.snap} openBudgets={() => setTab('budgetsAdmin')} />
             )}
             {tab === 'categories' && <CategoriesView api={api} snap={api.snap} />}
+            {tab === 'more' && (
+              <section className="card more-list">
+                <button onClick={() => setTab('categories')}>
+                  <Icon name="tag" /> <span className="grow">分類</span> <Icon name="right" size={18} />
+                </button>
+                <button onClick={() => setTab('settings')}>
+                  <Icon name="settings" /> <span className="grow">設定</span> <Icon name="right" size={18} />
+                </button>
+              </section>
+            )}
             {tab === 'issues' && (
               <IssuesView
                 api={api}
@@ -194,8 +210,10 @@ export function App() {
 
       <nav className="tabs-bottom">
         {TABS.map((t) => (
-          <button key={t.key} className={tab === t.key || (tab === 'budgetsAdmin' && t.key === 'budgets') ? 'active' : ''} onClick={() => setTab(t.key)}>
-            <span className="tab-icon">{t.icon}</span>
+          <button key={t.key} className={tabOf(tab) === t.key ? 'active' : ''} onClick={() => setTab(t.key)}>
+            <span className="tab-icon">
+              <Icon name={t.icon} />
+            </span>
             {t.label}
           </button>
         ))}

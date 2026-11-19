@@ -1,17 +1,13 @@
 @import '@life/ui/base.css';
 
-/* 健康 APP 的主題色 */
+/* 主題色用共用的藍色（2026-11-19） */
 :root {
-  --accent: #1f8a7a;
-  --accent-soft: #e0f3ef;
   /* 多條線的圖（已用 dataviz 檢查色盲可分辨） */
   --s1: #008f7c;
   --s2: #c8692a;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --accent: #4cc3ae;
-    --accent-soft: #163a35;
     --s1: #1f9e89;
     --s2: #c97c3a;
   }

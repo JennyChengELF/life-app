@@ -1,16 +1,12 @@
 @import '@life/ui/base.css';
 
-/* 記帳 APP 的主題色 */
+/* 主題色用共用的藍色（2026-11-19）；支出橘、收入綠 */
 :root {
-  --accent: #2f7d5b;
-  --accent-soft: #e2f1ea;
-  --out: #c2410c;
-  --in: #2f7d5b;
+  --out: #b03a0a;
+  --in: #2a7a52;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --accent: #5cc392;
-    --accent-soft: #183a2b;
     --out: #f0905a;
     --in: #5cc392;
   }
@@ -228,3 +224,77 @@ button.bt-row:hover, .bt-row.open { background: var(--bg); }
 .line-note { margin-top: 6px; }
 .line-note input { width: 100%; box-sizing: border-box; }
 .line-note .chips { margin-top: 6px; }
+
+/* ── 2026-11-19 改版：藍色系、線條圖示 ── */
+.topbar h1 { font-size: 1.25rem; font-weight: 700; }
+.ledger-head-wrap { margin-bottom: 10px; }
+.ledger-head .seg { border: 0; background: var(--line); border-radius: 999px; padding: 3px; }
+.ledger-head .seg button { border-radius: 999px; padding: 5px 16px; background: none; color: var(--muted); }
+.ledger-head .seg button.active { background: var(--card); color: var(--text); font-weight: 700; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08); }
+
+/* 總計卡 */
+.sum-card { display: flex; align-items: flex-end; gap: 16px; background: var(--accent); color: #fff; border-radius: 20px; padding: 16px 20px; margin-bottom: 14px; }
+.sum-card .grow { flex: 1; }
+.sum-card .sum-label { color: #fff; opacity: 0.88; font-size: 0.82rem; }
+.sum-big { font-size: 2rem; font-weight: 700; line-height: 1.2; }
+.sum-side { text-align: right; font-size: 1.05rem; font-weight: 600; }
+@media (prefers-color-scheme: dark) { .sum-card { background: #1d4f96; } }
+
+/* 交易列表 */
+.tx-card { padding: 4px 12px; }
+.tx-card .tx-row { padding: 11px 2px; gap: 12px; }
+.tx-card .tx-row:last-child { border-bottom: 0; }
+.tx-card .day-head { width: 100%; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: none; padding: 12px 2px 4px; }
+.tx-title { font-weight: 500; }
+.tx-icon { width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex: none; }
+.tx-icon.gray { background: #eceff3; color: #4a5866; }
+.tx-icon.orange { background: #fdeedd; color: #a4480b; }
+.tx-icon.pink { background: #fce7f0; color: #a3285f; }
+.tx-icon.purple { background: #ece8fb; color: #5338a8; }
+.tx-icon.teal { background: #ddf2f0; color: #13706a; }
+.tx-icon.indigo { background: #e4e7fb; color: #3a46a8; }
+.tx-icon.rose { background: #fde6e6; color: #a8323a; }
+.tx-icon.green { background: #e2f3e9; color: #2a6b4c; }
+@media (prefers-color-scheme: dark) {
+  .tx-icon { filter: saturate(0.9); }
+  .tx-icon.gray { background: #26313d; color: #b6c2cf; }
+  .tx-icon.orange { background: #3d2a1a; color: #f2a66b; }
+  .tx-icon.pink { background: #3c2130; color: #f08fb8; }
+  .tx-icon.purple { background: #2c2648; color: #b6a6f2; }
+  .tx-icon.teal { background: #17332f; color: #6fd1c6; }
+  .tx-icon.indigo { background: #252a48; color: #a6b0f2; }
+  .tx-icon.rose { background: #3d2224; color: #f2999f; }
+  .tx-icon.green { background: #18352a; color: #73cf9d; }
+}
+.badge { display: inline-block; font-size: 0.72rem; font-weight: 500; border-radius: 999px; padding: 0 7px; line-height: 1.6; vertical-align: 1px; margin-left: 2px; }
+.badge.person { background: #ece8fb; color: #5338a8; }
+.badge.warn { background: var(--warn-soft); color: var(--warn); }
+@media (prefers-color-scheme: dark) { .badge.person { background: #2c2648; color: #b6a6f2; } }
+
+/* 右下角「＋」記一筆 */
+.fab {
+  position: fixed; right: max(18px, calc(50% - 380px + 18px)); bottom: calc(86px + env(safe-area-inset-bottom)); width: 60px; height: 60px;
+  border-radius: 20px; border: 0; background: var(--accent); color: #fff; box-shadow: 0 6px 18px rgba(31, 111, 209, 0.35); z-index: 9; padding: 0;
+}
+@media (min-width: 760px) { .fab { bottom: 28px; } }
+
+/* 更多 */
+.more-list { padding: 4px 0; }
+.more-list button { width: 100%; border: 0; border-radius: 0; background: none; justify-content: flex-start; gap: 12px; padding: 14px 16px; font-size: 1rem; }
+.more-list button + button { border-top: 1px solid var(--line); }
+.more-list .grow { flex: 1; text-align: left; }
+.more-list .icon:last-child { color: var(--muted); }
+
+/* 記一筆 */
+.editor { border: 1px solid var(--line); box-shadow: var(--shadow); padding: 14px 16px; }
+.seg.modes { border: 0; background: var(--line); border-radius: 999px; padding: 3px; }
+.seg.modes button { border-radius: 999px; background: none; color: var(--muted); }
+.seg.modes button.active { background: var(--card); color: var(--accent-strong); font-weight: 700; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08); }
+.total-head { text-align: center; padding: 4px 0 14px; }
+.total-head .sum-label { font-size: 0.85rem; color: var(--muted); }
+.total-big { font-size: 2.3rem; font-weight: 700; line-height: 1.15; color: var(--out); }
+.total-big.in { color: var(--in); }
+.chip-add { border: 1px dashed var(--accent); color: var(--accent); background: none; border-radius: 999px; padding: 6px 14px; font-size: 0.9rem; margin-top: 6px; }
+.editor-actions { position: sticky; bottom: calc(60px + env(safe-area-inset-bottom)); background: var(--card); padding: 10px 0 4px; z-index: 4; }
+.editor-actions .primary { flex: 1; max-width: 320px; padding: 12px; font-size: 1.05rem; border-radius: 14px; }
+@media (min-width: 760px) { .editor-actions { bottom: 0; } }
