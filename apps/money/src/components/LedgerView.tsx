@@ -1,6 +1,7 @@
 import type { MoneySnapshot, Txn } from '@life/db';
-import { emptyForm, fmtMoney, monthStats, startOfDay, todayKey, toHHmm, txnCurrency, txnMyNet, txnTitle } from '@life/db';
+import { emptyForm, fmtMoney, monthStats, startOfDay, todayKey, toHHmm, topCategory, txnCurrency, txnMyNet, txnTitle } from '@life/db';
 import { DateNav } from '@life/ui/timeline';
+import { Icon, type IconName } from '@life/ui/icon';
 import type { Editing } from '../App';
 import { MonthNav } from './common';
 
@@ -29,20 +30,72 @@ export function TxAmount({ t, snap }: { t: Txn; snap: MoneySnapshot }) {
   return <div className="tx-amt">{fmtMoney(total, cur)}</div>;
 }
 
-export function subText(t: Txn) {
+/** 第一層分類的圖示和顏色（2026-11-19 改版）；沒對到的用標籤圖示 */
+const TOP_ICON: Record<string, [IconName, string]> = {
+  食: ['utensils', 'orange'],
+  衣: ['shirt', 'pink'],
+  住: ['home', 'purple'],
+  行: ['bus', 'teal'],
+  育: ['bookOpen', 'indigo'],
+  樂: ['music', 'rose'],
+  投資: ['trend', 'green'],
+};
+
+/** 列表左邊的圓角圖示：依第一個明細決定 */
+export function TxIcon({ t, snap }: { t: Txn; snap: MoneySnapshot }) {
+  let icon: IconName = 'tag';
+  let tone = 'gray';
+  const first = t.lines.find((l) => l.kind === '支出' || l.kind === '收入');
+  if (t.direction === '轉帳') icon = 'transfer';
+  else if (first?.category) {
+    const top = topCategory(first.category);
+    const hit = TOP_ICON[top];
+    if (first.kind === '收入') [icon, tone] = ['cash', 'green'];
+    else if (hit) [icon, tone] = hit;
+    else if (snap.categories.find((c) => c.path === first.category)?.isInvest) [icon, tone] = ['trend', 'green'];
+  } else if (t.lines.some((l) => l.person)) [icon, tone] = ['user', 'purple'];
+  else if (t.lines.some((l) => l.kind === '調整')) icon = 'scale';
+  return (
+    <span className={`tx-icon ${tone}`}>
+      <Icon name={icon} size={20} strokeWidth={1.9} />
+    </span>
+  );
+}
+
+/** 標題後面的小標籤：人物的份、沒有預算 */
+function TxBadges({ t }: { t: Txn }) {
+  const cur = t.lines.some((l) => l.kind === '支出');
+  const people = cur ? t.lines.filter((l) => l.kind === '他欠我' && l.person) : [];
+  const noBudget = t.lines.some((l) => l.kind === '支出' && !l.budget);
+  return (
+    <>
+      {people.map((l) => (
+        <span key={l.id} className="badge person">
+          {l.person} {fmtMoney(l.amount, 'TWD', false)}
+        </span>
+      ))}
+      {noBudget && <span className="badge warn">沒有預算</span>}
+    </>
+  );
+}
+
+export function subText(t: Txn, withBadges = true) {
   const parts: string[] = [];
   if (t.direction === '轉帳') parts.push(`${t.account} → ${t.toAccount}`);
   else if (t.account) parts.push(t.account);
   if (t.paidBy) parts.push(`${t.paidBy} 先付`);
-  const shared = t.lines.filter((l) => l.kind === '他欠我' && l.debtType !== '借款').map((l) => l.person);
-  if (shared.length) parts.push(`和 ${shared.join('、')} 分帳`);
+  // 有分類又有人物 → 註明人物（只有人物時標題已經寫了；列表用小標籤顯示）
+  if (withBadges && t.lines.some((l) => l.kind === '支出')) {
+    const shared = t.lines.filter((l) => l.kind === '他欠我').map((l) => l.person);
+    if (shared.length) parts.push(`含 ${shared.join('、')} 的份`);
+  }
   if (t.store) parts.push(t.branch ? `${t.store}（${t.branch}）` : t.store);
   if (t.note) parts.push(t.note);
   // 明細的備註（拆成多個分類時每一行可以有自己的備註）
   const lineNotes = t.lines.map((l) => l.note).filter((x): x is string => !!x && x !== t.note);
   if (lineNotes.length) parts.push(lineNotes.join('／'));
   if (t.tags.length) parts.push(t.tags.map((x) => `#${x}`).join(' '));
-  if (t.lines.some((l) => l.kind === '支出' && !l.budget)) parts.unshift('⚠️ 沒有預算');
+  if (withBadges && t.lines.some((l) => l.kind === '支出' && !l.budget)) parts.unshift('⚠️ 沒有預算');
   return parts.join('・');
 }
 
@@ -51,10 +104,12 @@ function TxList({ list, snap, onEdit }: { list: Txn[]; snap: MoneySnapshot; onEd
     <ul className="tx-list">
       {list.map((t) => (
         <li key={t.id} className="tx-row" onClick={() => onEdit({ form: emptyForm(), txn: t })}>
-          <span className="muted small num">{toHHmm(t.time)}</span>
+          <TxIcon t={t} snap={snap} />
           <div className="tx-main">
-            <div className="tx-title">{txnTitle(t)}</div>
-            <div className="tx-sub">{subText(t)}</div>
+            <div className="tx-title">
+              {txnTitle(t)} <TxBadges t={t} />
+            </div>
+            <div className="tx-sub">{[toHHmm(t.time), subText(t, false)].filter(Boolean).join('・')}</div>
           </div>
           <TxAmount t={t} snap={snap} />
         </li>
@@ -63,29 +118,35 @@ function TxList({ list, snap, onEdit }: { list: Txn[]; snap: MoneySnapshot; onEd
   );
 }
 
-/** 支出 / 收入（新台幣）；外幣另外一行 */
-function Sums({ snap, prefix, small }: { snap: MoneySnapshot; prefix: string; small?: string }) {
-  const stats = monthStats(snap.txns, snap.categories, snap.accounts, prefix);
-  const twd = stats.find((s) => s.currency === 'TWD');
-  const foreign = stats.filter((s) => s.currency !== 'TWD');
-  if (small) {
-    return (
-      <p className="hint center-text">
-        {small} 支出 {fmtMoney(twd?.expense ?? 0)} ・ 收入 {fmtMoney(twd?.income ?? 0)}
-      </p>
-    );
-  }
+/**
+ * 上方的總計卡（2026-11-19 改版）：一天 → 這天支出（大字）、收入、本月支出；整月 → 本月支出、收入。
+ * 只算新台幣；外幣另外一行。
+ */
+function SummaryCard({ snap, date, view }: { snap: MoneySnapshot; date: string; view: 'day' | 'month' }) {
+  const twdOf = (prefix: string) => monthStats(snap.txns, snap.categories, snap.accounts, prefix).find((s) => s.currency === 'TWD');
+  const month = date.slice(0, 7);
+  const m = twdOf(month);
+  const main = view === 'day' ? twdOf(date) : m;
+  const [, mm, dd] = date.split('-').map(Number);
+  const label = view === 'month' ? `${mm} 月支出` : date === todayKey() ? '今天支出' : `${mm}/${dd} 支出`;
+  const foreign = monthStats(snap.txns, snap.categories, snap.accounts, view === 'day' ? date : month).filter((s) => s.currency !== 'TWD');
   return (
     <>
-      <div className="sum-row">
-        <div>
-          <div className="sum-label">支出</div>
-          <div className="sum-value amt-out">{fmtMoney(twd?.expense ?? 0)}</div>
+      <div className="sum-card">
+        <div className="grow">
+          <div className="sum-label">{label}</div>
+          <div className="sum-big num">{fmtMoney(main?.expense ?? 0)}</div>
         </div>
-        <div>
+        <div className="sum-side">
           <div className="sum-label">收入</div>
-          <div className="sum-value amt-in">{fmtMoney(twd?.income ?? 0)}</div>
+          <div className="num">{fmtMoney(main?.income ?? 0)}</div>
         </div>
+        {view === 'day' && (
+          <div className="sum-side">
+            <div className="sum-label">本月支出</div>
+            <div className="num">{fmtMoney(m?.expense ?? 0)}</div>
+          </div>
+        )}
       </div>
       {foreign.map((s) => (
         <p key={s.currency} className="hint">
@@ -126,18 +187,15 @@ export function LedgerView({
 
   return (
     <>
+      {/* 2026-11-19 改版：右下角「＋」記一筆，進去再選支出 / 收入 / 轉帳 / 還款 */}
       {!editing && (
-        <div className="add-bar">
-          <button className="primary big" onClick={() => newEntry('支出')}>
-            ＋ 記一筆支出
-          </button>
-          <button onClick={() => newEntry('收入')}>收入</button>
-          <button onClick={() => newEntry('轉帳')}>轉帳</button>
-        </div>
+        <button className="fab" onClick={() => newEntry('支出')} aria-label="記一筆" title="記一筆">
+          <Icon name="plus" size={28} strokeWidth={2.2} />
+        </button>
       )}
-      {!snap.accounts.length && <p className="hint warn">還沒有帳戶：請先到「🏦 帳戶」新增帳戶（例：台幣現金、信用卡）。</p>}
+      {!snap.accounts.length && <p className="hint warn">還沒有帳戶：請先到「帳戶」新增帳戶（例：台幣現金、信用卡）。</p>}
 
-      <section className="card">
+      <section className="ledger-head-wrap">
         <div className="ledger-head">
           {view === 'day' ? <DateNav date={date} setDate={setDate} /> : <MonthNav month={month} setMonth={(m) => setDate(`${m}-01`)} />}
           <div className="seg">
@@ -150,21 +208,17 @@ export function LedgerView({
           </div>
         </div>
 
+      </section>
+      <SummaryCard snap={snap} date={date} view={view} />
+      <section className="card tx-card">
         {view === 'day' ? (
-          <>
-            <Sums snap={snap} prefix={date} />
-            {snap.txns.some((t) => t.date === date) ? (
-              <TxList list={snap.txns.filter((t) => t.date === date)} snap={snap} onEdit={onEdit} />
-            ) : (
-              <p className="muted center-text">這天沒有紀錄</p>
-            )}
-            <Sums snap={snap} prefix={month} small={`${Number(month.slice(5))} 月`} />
-          </>
+          snap.txns.some((t) => t.date === date) ? (
+            <TxList list={snap.txns.filter((t) => t.date === date)} snap={snap} onEdit={onEdit} />
+          ) : (
+            <p className="muted center-text">這天沒有紀錄</p>
+          )
         ) : (
-          <>
-            <Sums snap={snap} prefix={month} />
-            <MonthList snap={snap} month={month} onEdit={onEdit} onDay={(d) => (setDate(d), setView('day'))} />
-          </>
+          <MonthList snap={snap} month={month} onEdit={onEdit} onDay={(d) => (setDate(d), setView('day'))} />
         )}
       </section>
     </>

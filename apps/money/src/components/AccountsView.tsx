@@ -144,12 +144,6 @@ export function AccountsView({
                     我欠 <b>{b.person}</b> <span className="num amt-out">{fmtMoney(-b.net, b.currency)}</span>
                   </>
                 )}
-                {b.loan !== 0 && b.split !== 0 && (
-                  <span className="muted small">
-                    {' '}
-                    （分帳 {fmtMoney(b.split, b.currency, false)}、借款 {fmtMoney(b.loan, b.currency, false)}，還款另計）
-                  </span>
-                )}
               </span>
               <button
                 onClick={() =>
@@ -177,7 +171,9 @@ export function AccountsView({
           ))
         )}
         <div className="add-bar">
-          <button onClick={() => onEdit({ form: emptyForm('借款') })}>記借款</button>
+          {/* 2026-11-19：借錢改用支出 / 收入的人物明細記 */}
+          <button onClick={() => onEdit({ form: { ...emptyForm('支出'), cats: [], shares: [{ person: null, amount: null, note: '借款' }] } })}>借給別人</button>
+          <button onClick={() => onEdit({ form: { ...emptyForm('收入'), cats: [], shares: [{ person: null, amount: null, note: '借款' }] } })}>向別人借</button>
           <button onClick={() => onEdit({ form: emptyForm('還款') })}>記還款</button>
         </div>
       </section>

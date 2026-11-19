@@ -18,8 +18,6 @@ export const DIRECTIONS = ['出', '入', '轉帳'] as const;
 export type Direction = (typeof DIRECTIONS)[number];
 export const LINE_KINDS = ['支出', '收入', '他欠我', '我欠他', '他還我', '我還他', '調整'] as const;
 export type LineKind = (typeof LINE_KINDS)[number];
-export const DEBT_TYPES = ['分帳', '借款'] as const;
-export type DebtType = (typeof DEBT_TYPES)[number];
 export const CATEGORY_KINDS = ['支出', '收入'] as const;
 export type CategoryKind = (typeof CATEGORY_KINDS)[number];
 /** 和人物有關的明細 */
@@ -105,7 +103,6 @@ export interface LineInput {
   amount: number;
   category?: string | null;
   person?: string | null;
-  debtType?: DebtType | null;
   budget?: string | null;
   note?: string | null;
 }
@@ -617,7 +614,6 @@ function toLine(r: TableRow): Line {
     amount: num(v.amount)!,
     category: cat ? normPath(cat) : null,
     person: str(v.person),
-    debtType: (str(v.debtType) as DebtType | null) ?? null,
     budget: str(v.budget),
     note: str(v.note),
     sort: num(v.sort),
@@ -741,7 +737,6 @@ export function checkTxn(t: Omit<TxnInput, 'tags'> & { tags?: string[] }, refs: 
       if (!l.person) p.push(`${at}請選人物`);
       else if (!refs.people.some((x) => x.name === l.person)) p.push(`${at}人物「${l.person}」不在人物清單裡`);
     }
-    if ((l.kind === '他欠我' || l.kind === '我欠他') && l.debtType && !has(DEBT_TYPES, l.debtType)) p.push(`${at}請填分帳或借款`);
     if (l.kind === '調整' && !t.direction) p.push(`${at}調整一定要有帳戶`);
   });
   if (p.length) return p;
@@ -793,13 +788,10 @@ export interface PersonBalance {
   currency: string;
   /** 正 = 他欠我；負 = 我欠他 */
   net: number;
-  /** 分帳代墊、借款各自的部分（還款依序先抵借款以外的不分；只是方便看） */
-  split: number;
-  loan: number;
 }
 
 /**
- * 每個人的淨額（2026-11-18 確認：分帳和借款合在一起，依幣別分開）。
+ * 每個人的淨額（依幣別分開；2026-11-19 起借款和代墊不分）。
  * 淨額＝他欠我＋我還他 − 我欠他 − 他還我
  */
 export function personBalances(txns: Txn[], accounts: Pick<Account, 'name' | 'currency'>[]): PersonBalance[] {
@@ -809,17 +801,13 @@ export function personBalances(txns: Txn[], accounts: Pick<Account, 'name' | 'cu
     for (const l of t.lines) {
       if (!l.person || !PERSON_KINDS.includes(l.kind)) continue;
       const key = `${l.person}\u0000${cur}`;
-      const b = map.get(key) ?? { person: l.person, currency: cur, net: 0, split: 0, loan: 0 };
+      const b = map.get(key) ?? { person: l.person, currency: cur, net: 0 };
       const sign = l.kind === '他欠我' || l.kind === '我還他' ? 1 : -1;
       b.net += sign * l.amount;
-      if (l.kind === '他欠我' || l.kind === '我欠他') {
-        if (l.debtType === '借款') b.loan += sign * l.amount;
-        else b.split += sign * l.amount;
-      }
       map.set(key, b);
     }
   }
-  return [...map.values()].map((b) => ({ ...b, net: roundMoney(b.net, b.currency), split: roundMoney(b.split, b.currency), loan: roundMoney(b.loan, b.currency) }));
+  return [...map.values()].map((b) => ({ ...b, net: roundMoney(b.net, b.currency) }));
 }
 
 export interface MonthStats {
@@ -918,13 +906,14 @@ export function monthStats(txns: Txn[], categories: Pick<Category, 'path' | 'isI
 // ───────────── 畫面的表單 ↔ 交易 ─────────────
 
 /** 記帳畫面的種類 */
-export const ENTRY_MODES = ['支出', '收入', '轉帳', '借款', '還款'] as const;
+/** 2026-11-19 拿掉「借款」：借錢改用支出 / 收入的人物明細記 */
+export const ENTRY_MODES = ['支出', '收入', '轉帳', '還款'] as const;
 export type EntryMode = (typeof ENTRY_MODES)[number] | '不用還了' | '調整' | '其他';
 
 export interface EntryForm {
   mode: EntryMode;
   time: number;
-  /** 支出 / 收入 / 借款 / 還款的帳戶；轉帳的轉出帳戶 */
+  /** 支出 / 收入 / 還款的帳戶；轉帳的轉出帳戶 */
   account: string | null;
   /** 支出：朋友先幫我付（有值時沒有帳戶） */
   paidBy: string | null;
@@ -932,13 +921,16 @@ export interface EntryForm {
   currency: string | null;
   /** 我的部分：分類＋金額（支出 / 收入可拆成好幾筆） */
   cats: { category: string | null; amount: number | null; note?: string | null; budget?: string | null }[];
-  /** 分帳：別人的份額（我付錢時 = 他欠我） */
-  shares: { person: string | null; amount: number | null }[];
-  /** 借款、還款、不用還了的對象 */
+  /**
+   * 選人物的明細（2026-11-19）：支出 = 他欠我（代墊、借給他）；收入 = 我欠他（向他借）。
+   * 不算收支、不扣預算、不選分類，可以填備註。
+   */
+  shares: { person: string | null; amount: number | null; note?: string | null }[];
+  /** 還款、不用還了的對象 */
   person: string | null;
-  /** 借款：借出（他欠我）/ 借入（我欠他）；還款：他還我 / 我還他；不用還了：他欠我的不收了 / 我欠他的不用還了 */
-  sub: '借出' | '借入' | '他還我' | '我還他' | null;
-  /** 借款、還款、轉帳的金額 */
+  /** 還款：他還我 / 我還他；不用還了：他欠我的不收了 / 我欠他的不用還了 */
+  sub: '他還我' | '我還他' | null;
+  /** 還款、轉帳的金額 */
   amount: number | null;
   toAccount: string | null;
   toAmount: number | null;
@@ -960,7 +952,7 @@ export const emptyForm = (mode: EntryForm['mode'] = '支出', time = Date.now())
   cats: [{ category: null, amount: null }],
   shares: [],
   person: null,
-  sub: mode === '借款' ? '借出' : mode === '還款' ? '他還我' : null,
+  sub: mode === '還款' ? '他還我' : null,
   amount: null,
   toAccount: null,
   toAmount: null,
@@ -973,7 +965,7 @@ export const emptyForm = (mode: EntryForm['mode'] = '支出', time = Date.now())
 
 const sum = (xs: (number | null)[]) => xs.reduce<number>((a, b) => a + (b ?? 0), 0);
 
-/** 支出畫面的總額＝我的部分＋別人的份額 */
+/** 支出 / 收入畫面的總額＝分類的部分＋人物的部分（朋友先付時只有我的部分） */
 export const formTotal = (f: EntryForm) => sum(f.cats.map((c) => c.amount)) + (f.paidBy ? 0 : sum(f.shares.map((s) => s.amount)));
 
 /** 表單 → 要存的交易（不檢查；存之前用 checkTxn 檢查） */
@@ -981,6 +973,8 @@ export function formToTxn(f: EntryForm): TxnInput {
   const base = { time: f.time, store: f.store?.trim() || null, branch: f.store?.trim() ? f.branch?.trim() || null : null, statementText: f.statementText?.trim() || null, note: f.note?.trim() || null, tags: f.tags, toAccount: null, toAmount: null, paidBy: null, currency: null };
   const cats = (kind: '支出' | '收入'): LineInput[] =>
     f.cats.filter((c) => c.category || c.amount).map((c) => ({ kind, amount: c.amount ?? 0, category: c.category, note: c.note ?? null, budget: c.budget ?? null }));
+  const shareLines = (kind: '他欠我' | '我欠他'): LineInput[] =>
+    f.shares.filter((s) => s.person || s.amount).map((s) => ({ kind, amount: s.amount ?? 0, person: s.person, note: s.note?.trim() || null }));
   switch (f.mode) {
     case '支出': {
       if (f.paidBy) {
@@ -993,31 +987,19 @@ export function formToTxn(f: EntryForm): TxnInput {
           paidBy: f.paidBy,
           currency: f.currency,
           // 朋友先付的退款（我的部分是負的）→ 變成他欠我
-          lines: [...mine, { kind: sum(mine.map((l) => l.amount)) < 0 ? '他欠我' : '我欠他', amount: Math.abs(sum(mine.map((l) => l.amount))), person: f.paidBy, debtType: '分帳' }],
+          lines: [...mine, { kind: sum(mine.map((l) => l.amount)) < 0 ? '他欠我' : '我欠他', amount: Math.abs(sum(mine.map((l) => l.amount))), person: f.paidBy }],
         };
       }
-      const shares: LineInput[] = f.shares.filter((s) => s.person || s.amount).map((s) => ({ kind: '他欠我', amount: s.amount ?? 0, person: s.person, debtType: '分帳' }));
       // 加總是負的（退款）→ 錢回到帳戶
       const total = formTotal(f);
-      return { ...base, direction: total < 0 ? '入' : '出', account: f.account, amount: Math.abs(total), lines: [...cats('支出'), ...shares] };
+      return { ...base, direction: total < 0 ? '入' : '出', account: f.account, amount: Math.abs(total), lines: [...cats('支出'), ...shareLines('他欠我')] };
     }
-    case '收入':
-    {
-      const total = sum(f.cats.map((c) => c.amount));
-      return { ...base, direction: total < 0 ? '出' : '入', account: f.account, amount: Math.abs(total), lines: cats('收入') };
+    case '收入': {
+      const total = formTotal(f);
+      return { ...base, direction: total < 0 ? '出' : '入', account: f.account, amount: Math.abs(total), lines: [...cats('收入'), ...shareLines('我欠他')] };
     }
     case '轉帳':
       return { ...base, direction: '轉帳', account: f.account, amount: f.amount, toAccount: f.toAccount, toAmount: f.toAmount, statement: f.statement ?? null, lines: [] };
-    case '借款': {
-      const out = f.sub !== '借入';
-      return {
-        ...base,
-        direction: out ? '出' : '入',
-        account: f.account,
-        amount: f.amount,
-        lines: [{ kind: out ? '他欠我' : '我欠他', amount: f.amount ?? 0, person: f.person, debtType: '借款' }],
-      };
-    }
     case '還款': {
       const toMe = f.sub !== '我還他';
       return {
@@ -1140,22 +1122,21 @@ export function txnToForm(t: Txn): EntryForm {
   const only = (...kinds: LineKind[]) => L.length > 0 && L.every((l) => kinds.includes(l.kind));
   const catsOf = (kind: LineKind) => L.filter((l) => l.kind === kind).map((l) => ({ category: l.category, amount: l.amount, note: l.note, budget: l.budget }));
   if (t.direction === '轉帳') return { ...f, mode: '轉帳', amount: t.amount, toAccount: t.toAccount, toAmount: t.toAmount, statement: t.statement };
-  if (t.direction === '出' && only('支出', '他欠我') && L.some((l) => l.kind === '支出') && L.every((l) => l.kind !== '他欠我' || l.debtType !== '借款')) {
-    return { ...f, mode: '支出', cats: catsOf('支出'), shares: L.filter((l) => l.kind === '他欠我').map((l) => ({ person: l.person, amount: l.amount })) };
-  }
+  const sharesOf = (kind: LineKind) => L.filter((l) => l.kind === kind).map((l) => ({ person: l.person, amount: l.amount, note: l.note }));
+  // 支出＋選人物的明細（代墊、借給別人；只有人物也可以）
+  if (t.direction === '出' && only('支出', '他欠我')) return { ...f, mode: '支出', cats: catsOf('支出'), shares: sharesOf('他欠我') };
+  // 收入＋選人物的明細（向別人借）
+  if (t.direction === '入' && only('收入', '我欠他')) return { ...f, mode: '收入', cats: catsOf('收入'), shares: sharesOf('我欠他') };
   if (!t.direction && t.paidBy && only('支出', '我欠他') && L.filter((l) => l.kind === '我欠他').length === 1) {
     const debt = L.find((l) => l.kind === '我欠他')!;
     const mine = catsOf('支出');
     if (debt.person === t.paidBy && same(debt.amount, sum(mine.map((c) => c.amount)))) return { ...f, mode: '支出', paidBy: t.paidBy, cats: mine };
   }
-  if (t.direction === '入' && only('收入')) return { ...f, mode: '收入', cats: catsOf('收入') };
   // 退款（負的支出）、負的收入
   if (t.direction === '入' && only('支出')) return { ...f, mode: '支出', cats: catsOf('支出') };
   if (t.direction === '出' && only('收入')) return { ...f, mode: '收入', cats: catsOf('收入') };
   if (L.length === 1) {
     const l = L[0];
-    if (t.direction === '出' && l.kind === '他欠我' && l.debtType === '借款') return { ...f, mode: '借款', sub: '借出', person: l.person, amount: l.amount };
-    if (t.direction === '入' && l.kind === '我欠他' && l.debtType === '借款') return { ...f, mode: '借款', sub: '借入', person: l.person, amount: l.amount };
     if (t.direction === '入' && l.kind === '他還我') return { ...f, mode: '還款', sub: '他還我', person: l.person, amount: l.amount };
     if (t.direction === '出' && l.kind === '我還他') return { ...f, mode: '還款', sub: '我還他', person: l.person, amount: l.amount };
   }
@@ -1177,13 +1158,16 @@ export function txnTitle(t: Txn): string {
   switch (f.mode) {
     case '支出':
     case '收入': {
+      // 只有人物（借給別人 / 向別人借）
+      if (!f.cats.length && f.shares.length) {
+        const names = [...new Set(f.shares.map((s) => s.person ?? ''))].join('、');
+        return f.mode === '支出' ? `${names} 欠我` : `我欠 ${names}`;
+      }
       const cats = [...new Set(f.cats.map((c) => c.category ?? ''))];
       return cats.length > 1 ? `${cats[0]} 等 ${cats.length} 類` : cats[0] || f.mode;
     }
     case '轉帳':
       return `轉帳 → ${t.toAccount ?? ''}`;
-    case '借款':
-      return f.sub === '借入' ? `向 ${f.person} 借` : `借給 ${f.person}`;
     case '還款':
       return f.sub === '我還他' ? `還給 ${f.person}` : `${f.person} 還我`;
     case '不用還了':
@@ -1615,7 +1599,6 @@ export class MoneyStore {
       amount: roundMoney(l.amount, cur),
       category: l.category ? normPath(l.category) : null,
       person: l.person ?? null,
-      debtType: l.kind === '他欠我' || l.kind === '我欠他' ? (l.debtType ?? '分帳') : null,
       budget: l.budget ?? null,
       note: l.note ?? null,
       sort: i + 1,

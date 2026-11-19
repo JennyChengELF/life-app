@@ -27,6 +27,7 @@ import type { MoneyApi } from '../useMoney';
 import { AccountSelect, amountText, parseAmount, PersonSelect } from './common';
 import { CategoryPicker } from './CategoryPicker';
 import { StorePicker } from './StorePicker';
+import { Icon } from '@life/ui/icon';
 import { BudgetSelect } from './BudgetSelect';
 
 /** 金額輸入：自己記住打到一半的文字（例：「12.」） */
@@ -104,7 +105,7 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
   const currencies = useMemo(() => [...new Set(['TWD', ...snap.accounts.map((a) => a.currency)])], [snap.accounts]);
 
   const switchMode = (mode: EntryForm['mode']) =>
-    set({ mode, sub: mode === '借款' ? '借出' : mode === '還款' ? '他還我' : null, cats: [{ category: null, amount: null }], shares: [], paidBy: null });
+    set({ mode, sub: mode === '還款' ? '他還我' : null, cats: [{ category: null, amount: null }], shares: [], paidBy: null });
 
   const save = async () => {
     let tx;
@@ -213,8 +214,46 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
           </div>
         ))}
       </div>
-      <button className="link small" onClick={() => set({ cats: [...f.cats, { category: null, amount: null }] })}>
-        ＋ 拆成多個分類
+      <button className="chip-add" onClick={() => set({ cats: [...f.cats, { category: null, amount: null }] })}>
+        ＋ 分類
+      </button>
+    </div>
+  );
+
+  /**
+   * 選人物的明細（2026-11-19）：支出 = 他欠我（代墊、借給他）；收入 = 我欠他（向他借）。
+   * 不選分類、不算收支；可以填備註（例：借款、幫忙買票）。
+   */
+  const shareRows = (kind: '支出' | '收入') => (
+    <div className="field">
+      {f.shares.length > 0 && (kind === '支出' ? '人物（他欠我：代墊、借給他；不算我的支出）' : '人物（我欠他：向他借；不算我的收入）')}
+      <div className="split-rows">
+        {f.shares.map((s, i) => (
+          <div className="cat-line" key={i}>
+            <div className="row">
+              <PersonSelect
+                people={snap.people}
+                value={s.person}
+                onChange={(v) => set({ shares: f.shares.map((x, j) => (j === i ? { ...x, person: v } : x)) })}
+                onAdd={addPerson}
+              />
+              <AmountInput value={s.amount} onChange={(n) => set({ shares: f.shares.map((x, j) => (j === i ? { ...x, amount: n } : x)) })} />
+              <button className="x-btn" onClick={() => set({ shares: f.shares.filter((_, j) => j !== i) })} aria-label="移除">
+                ✕
+              </button>
+            </div>
+            <div className="line-note">
+              <input
+                value={s.note ?? ''}
+                placeholder="這一行的備註（例：借款）"
+                onChange={(e) => set({ shares: f.shares.map((x, j) => (j === i ? { ...x, note: e.target.value || null } : x)) })}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+      <button className="chip-add" onClick={() => set({ shares: [...f.shares, { person: null, amount: null }] })}>
+        {kind === '支出' ? '＋ 人物（他欠我）' : '＋ 人物（我欠他）'}
       </button>
     </div>
   );
@@ -300,7 +339,7 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
       <h2>
         <span>{txn ? '修改' : '記一筆'}{MODE_TITLE[f.mode] ? `：${MODE_TITLE[f.mode]}` : ''}</span>
         <button className="link" onClick={onClose} aria-label="關閉">
-          ✕
+          <Icon name="x" />
         </button>
       </h2>
 
@@ -311,6 +350,14 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
               {m}
             </button>
           ))}
+        </div>
+      )}
+
+      {/* 2026-11-19 改版：最上面用大字顯示總額 */}
+      {(f.mode === '支出' || f.mode === '收入') && (
+        <div className="total-head">
+          <div className="sum-label">{f.mode === '收入' ? '收到' : paidByMode ? `${f.paidBy ?? '朋友'} 幫我付（我的部分）` : '我付了'}</div>
+          <div className={`total-big num${f.mode === '收入' ? ' in' : ''}`}>{fmtMoney(formTotal(f), currency)}</div>
         </div>
       )}
 
@@ -377,30 +424,7 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
               {storePicker('支出')}
               {catRows('支出')}
 
-              {!paidByMode && (
-                <div className="field">
-                  {f.shares.length > 0 && '分帳：別人的份額（他欠我）'}
-                  <div className="split-rows">
-                    {f.shares.map((s, i) => (
-                      <div className="row" key={i}>
-                        <PersonSelect
-                          people={snap.people}
-                          value={s.person}
-                          onChange={(v) => set({ shares: f.shares.map((x, j) => (j === i ? { ...x, person: v } : x)) })}
-                          onAdd={addPerson}
-                        />
-                        <AmountInput value={s.amount} onChange={(n) => set({ shares: f.shares.map((x, j) => (j === i ? { ...x, amount: n } : x)) })} />
-                        <button className="x-btn" onClick={() => set({ shares: f.shares.filter((_, j) => j !== i) })} aria-label="移除">
-                          ✕
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                  <button className="link small" onClick={() => set({ shares: [...f.shares, { person: null, amount: null }] })}>
-                    ＋ 和別人分帳（我先付）
-                  </button>
-                </div>
-              )}
+              {!paidByMode && shareRows('支出')}
 
               {(f.shares.length > 0 || paidByMode) && (
                 <div className="subbox">
@@ -423,11 +447,6 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
                   </div>
                   <p className="hint">除不盡的零頭由付錢的人負擔；平分後每個人的金額還可以再改。</p>
                 </div>
-              )}
-              {!paidByMode && f.shares.length > 0 && (
-                <p className="hint">
-                  我付了 {fmtMoney(formTotal(f), currency)}（我的部分＋別人的份額）
-                </p>
               )}
               {canInstall && (
                 <div className="subbox">
@@ -493,6 +512,7 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
               </label>
               {storePicker('收入')}
               {catRows('收入')}
+              {shareRows('收入')}
             </>
           )}
 
@@ -528,12 +548,12 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
             </>
           )}
 
-          {(f.mode === '借款' || f.mode === '還款' || f.mode === '不用還了') && (
+          {(f.mode === '還款' || f.mode === '不用還了') && (
             <>
               <div className="seg modes">
-                {(f.mode === '借款' ? (['借出', '借入'] as const) : (['他還我', '我還他'] as const)).map((s) => (
+                {(['他還我', '我還他'] as const).map((s) => (
                   <button key={s} className={f.sub === s ? 'active' : ''} onClick={() => set({ sub: s })}>
-                    {f.mode === '不用還了' ? (s === '他還我' ? '他欠我的不收了' : '我欠他的不用還了') : f.mode === '借款' ? (s === '借出' ? '借給別人' : '向別人借') : s}
+                    {f.mode === '不用還了' ? (s === '他還我' ? '他欠我的不收了' : '我欠他的不用還了') : s}
                   </button>
                 ))}
               </div>
@@ -541,10 +561,10 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
                 誰
                 <PersonSelect people={snap.people} value={f.person} onChange={(v) => set({ person: v })} onAdd={addPerson} />
               </label>
-              {f.mode !== '借款' && balanceHint()}
+              {balanceHint()}
               {f.mode !== '不用還了' ? (
                 <label className="field">
-                  {(f.mode === '借款' && f.sub === '借出') || (f.mode === '還款' && f.sub === '我還他') ? '從哪個帳戶出' : '存入哪個帳戶'}
+                  {f.sub === '我還他' ? '從哪個帳戶出' : '存入哪個帳戶'}
                   <AccountSelect snap={snap} value={f.account} onChange={(v) => set({ account: v })} />
                 </label>
               ) : (
@@ -573,7 +593,6 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
                 金額
                 <AmountInput value={f.amount} onChange={(n) => set({ amount: n })} />
               </label>
-              {f.mode === '借款' && <p className="hint">借錢只是錢進出帳戶，不算收支、不扣預算。</p>}
             </>
           )}
 

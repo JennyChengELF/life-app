@@ -78,7 +78,6 @@ function roundTrip(f: EntryForm) {
       sort: i + 1,
       category: l.category ?? null,
       person: l.person ?? null,
-      debtType: l.debtType ?? null,
       budget: null,
       note: l.note ?? null,
       kind: l.kind,
@@ -120,7 +119,7 @@ describe('表單 ↔ 交易', () => {
       form({ account: '台幣現金', cats: [{ category: '食 / 三餐', amount: 500 }], shares: [{ person: '小明', amount: 500 }] }),
     );
     expect(t.amount).toBe(1000);
-    expect(t.lines[1]).toMatchObject({ kind: '他欠我', person: '小明', debtType: '分帳', amount: 500 });
+    expect(t.lines[1]).toMatchObject({ kind: '他欠我', person: '小明', amount: 500 });
     expect(back).toMatchObject({ mode: '支出', shares: [{ person: '小明', amount: 500 }] });
   });
   it('小明先幫我付：沒帳戶，支出＋我欠他', () => {
@@ -129,16 +128,20 @@ describe('表單 ↔ 交易', () => {
     expect(t.lines[1]).toMatchObject({ kind: '我欠他', person: '小明', amount: 500 });
     expect(back).toMatchObject({ mode: '支出', paidBy: '小明' });
   });
-  it('收入、轉帳、借款、還款、不用還了', () => {
+  it('收入、轉帳、借錢、還款、不用還了', () => {
     expect(roundTrip(form({ mode: '收入', account: '台幣現金', cats: [{ category: '薪資', amount: 60000 }] })).back.mode).toBe('收入');
     const tr = roundTrip(form({ mode: '轉帳', account: '台幣現金', toAccount: '日圓現金', amount: 10500, toAmount: 50000 }));
     expect(tr.t).toMatchObject({ direction: '轉帳', toAmount: 50000, lines: [] });
     expect(tr.back).toMatchObject({ mode: '轉帳', toAccount: '日圓現金' });
-    const lend = roundTrip(form({ mode: '借款', sub: '借出', account: '台幣現金', person: '小明', amount: 5000 }));
-    expect(lend.t).toMatchObject({ direction: '出', lines: [{ kind: '他欠我', debtType: '借款' }] });
-    expect(lend.back).toMatchObject({ mode: '借款', sub: '借出', person: '小明', amount: 5000 });
-    const borrow = roundTrip(form({ mode: '借款', sub: '借入', account: '台幣現金', person: '小明', amount: 300 }));
-    expect(borrow.back).toMatchObject({ mode: '借款', sub: '借入' });
+    // 2026-11-19：借錢＝支出 / 收入只選人物（不分借款 / 代墊，備註可寫）
+    const lend = roundTrip(form({ account: '台幣現金', cats: [], shares: [{ person: '小明', amount: 5000, note: '借款' }] }));
+    expect(lend.t).toMatchObject({ direction: '出', amount: 5000, lines: [{ kind: '他欠我', person: '小明', note: '借款' }] });
+    expect(lend.back).toMatchObject({ mode: '支出', cats: [], shares: [{ person: '小明', amount: 5000, note: '借款' }] });
+    expect(txnTitle(lend.txn)).toBe('小明 欠我');
+    const borrow = roundTrip(form({ mode: '收入', account: '台幣現金', cats: [], shares: [{ person: '小明', amount: 300 }] }));
+    expect(borrow.t).toMatchObject({ direction: '入', amount: 300, lines: [{ kind: '我欠他', person: '小明' }] });
+    expect(borrow.back).toMatchObject({ mode: '收入', shares: [{ person: '小明', amount: 300 }] });
+    expect(txnTitle(borrow.txn)).toBe('我欠 小明');
     const repay = roundTrip(form({ mode: '還款', sub: '他還我', account: '台幣現金', person: '小明', amount: 500 }));
     expect(repay.t).toMatchObject({ direction: '入', lines: [{ kind: '他還我' }] });
     expect(txnTitle(repay.txn)).toBe('小明 還我');
@@ -194,7 +197,6 @@ describe('計算', () => {
     amount,
     category: null,
     person: null,
-    debtType: null,
     budget: null,
     note: null,
     sort: 1,
@@ -230,17 +232,17 @@ describe('計算', () => {
     expect(accountBalance({ ...card, openingDate: null, openingBalance: null }, txns)).toBeNull();
   });
 
-  it('每個人的淨額：分帳＋借款合在一起，還款扣掉；外幣分開', () => {
+  it('每個人的淨額：代墊＋借錢合在一起，還款扣掉；外幣分開', () => {
     const accts = [{ name: '大戶信用卡', currency: 'TWD' }, { name: '日圓現金', currency: 'JPY' }];
     const txns = [
-      txn({ lines: [line('支出', 500), line('他欠我', 500, { person: '小明', debtType: '分帳' })] }),
-      txn({ lines: [line('他欠我', 5000, { person: '小明', debtType: '借款' })] }),
-      txn({ direction: null, account: null, paidBy: '小明', lines: [line('支出', 200), line('我欠他', 200, { person: '小明', debtType: '分帳' })] }),
+      txn({ lines: [line('支出', 500), line('他欠我', 500, { person: '小明' })] }),
+      txn({ lines: [line('他欠我', 5000, { person: '小明' })] }),
+      txn({ direction: null, account: null, paidBy: '小明', lines: [line('支出', 200), line('我欠他', 200, { person: '小明' })] }),
       txn({ direction: '入', lines: [line('他還我', 1000, { person: '小明' })] }),
-      txn({ account: '日圓現金', lines: [line('他欠我', 4500, { person: '小明', debtType: '分帳' })] }),
+      txn({ account: '日圓現金', lines: [line('他欠我', 4500, { person: '小明' })] }),
     ];
     const b = personBalances(txns, accts);
-    expect(b.find((x) => x.currency === 'TWD')).toMatchObject({ person: '小明', net: 4300, split: 300, loan: 5000 });
+    expect(b.find((x) => x.currency === 'TWD')).toMatchObject({ person: '小明', net: 4300 });
     expect(b.find((x) => x.currency === 'JPY')).toMatchObject({ net: 4500 });
   });
 

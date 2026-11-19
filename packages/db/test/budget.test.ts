@@ -134,7 +134,7 @@ describe('預算', () => {
 
   it('借出未還、超過天數提醒（還一部分不重算天數，還清就不提醒）', async () => {
     await store.addPerson('筑');
-    await store.saveTxn(formToTxn({ ...emptyForm('借款', at('2026-08-23 00:30')), account: '錢包', person: '筑', amount: 7380 }));
+    await store.saveTxn(formToTxn({ ...emptyForm('支出', at('2026-08-23 00:30')), account: '錢包', cats: [], shares: [{ person: '筑', amount: 7380 }] }));
     await store.saveTxn(formToTxn({ ...emptyForm('還款', at('2026-09-16 06:36')), account: '錢包', person: '筑', amount: 2500 }));
     snap = await store.load();
     expect(loansOutstanding(snap)).toEqual({ total: 4880, people: 1 });

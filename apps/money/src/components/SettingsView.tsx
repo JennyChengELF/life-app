@@ -176,7 +176,7 @@ export function SettingsView({ api, snap, openBudgets }: { api: MoneyApi; snap: 
   const url = api.fileUrl();
   return (
     <div className="settings">
-      <p className="hint">帳戶在「🏦 帳戶」、分類在「🏷️ 分類」分頁直接修改。</p>
+      <p className="hint">帳戶在「帳戶」、分類在「更多 → 分類」直接修改。</p>
       <section className="card">
         <h2>預算</h2>
         <p className="muted small">{snap.budgets.length} 個預算</p>
@@ -189,7 +189,7 @@ export function SettingsView({ api, snap, openBudgets }: { api: MoneyApi; snap: 
 
       <section className="card">
         <h2>人物</h2>
-        <p className="hint">分帳、借款的對象。存在「生活APP-綜合」，之後其他 APP 也會用到。</p>
+        <p className="hint">代墊、借錢的對象。存在「生活APP-綜合」，之後其他 APP 也會用到。</p>
         {snap.people
           .filter((p) => !p.isSelf)
           .map((p) => (

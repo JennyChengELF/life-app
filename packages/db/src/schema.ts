@@ -39,7 +39,7 @@ export const FILES: Record<FileKey, FileDef> = {
   health: { title: '生活APP-健康', description: '健康 APP 的資料：身體量測（體重、體脂⋯⋯）、血壓、血糖、體溫、健檢 / 檢驗、偶爾量測（身高、圍度⋯⋯）、設定' },
   bowel: { title: '生活APP-排便', description: '排便 APP 的資料：排便紀錄、設定' },
   hub: { title: '生活APP-綜合', description: '綜合 APP（首頁）的資料：設定、人物、機構（銀行、商店⋯⋯）' },
-  money: { title: '生活APP-記帳', description: '記帳 APP 的資料：帳戶、分類、交易（一次付款 / 收款 / 轉帳）、明細（支出、收入、分帳、借款、還款）、設定' },
+  money: { title: '生活APP-記帳', description: '記帳 APP 的資料：帳戶、分類、交易（一次付款 / 收款 / 轉帳）、明細（支出、收入、他欠我 / 我欠他、還款）、設定' },
 };
 
 export interface TableDef {
@@ -387,7 +387,6 @@ export const TABLES = {
       { name: 'amount', type: 'number', label: '金額（一律正數，必填）' },
       { name: 'category', type: 'text', label: '分類（支出、收入必填；填分類的 path）' },
       { name: 'person', type: 'text', label: '人物名稱（他欠我、我欠他、他還我、我還他必填）' },
-      { name: 'debtType', type: 'text', label: '他欠我 / 我欠他時：分帳 或 借款' },
       { name: 'budget', type: 'text', label: '扣 / 放進哪個預算（預算功能之後做）' },
       { name: 'note', type: 'text', label: '備註' },
       { name: 'sort', type: 'number', label: '同一筆交易內的順序' },
