@@ -593,3 +593,73 @@ describe('帳戶後幾碼', () => {
     await expect(store.saveAccount({ ...acc, name: 'X', last4: '50a9' })).rejects.toThrow('數字');
   });
 });
+
+describe('整批補齊（2026-11-19）', () => {
+  const acc = { type: '信用卡' as const, currency: 'TWD', org: null, openingDate: null, openingBalance: null, closingDay: null, dueDay: null, fxFeeRate: null, expiryDate: null, monthlyCheck: true, archived: false, note: null };
+  async function setup() {
+    const backend = new LocalBackend(memoryStorage());
+    const store = new MoneyStore(backend);
+    await store.load();
+    await addTestCategories(store);
+    await store.saveAccount({ ...acc, name: 'cube信用卡' });
+    await store.addPerson('小明');
+    return { backend, store };
+  }
+
+  it('沒有交易的明細：勾選後合成一筆交易，支出 / 金額由明細算', async () => {
+    const { backend, store } = await setup();
+    await backend.appendRaw('moneyLines', { kind: '支出', amount: 120, category: '食 / 三餐' });
+    await backend.appendRaw('moneyLines', { kind: '支出', amount: 50, category: '食 / 三餐', note: '飲料' });
+    await backend.appendRaw('moneyLines', { transaction: 'x1', kind: '他欠我', amount: 80, person: '小明' });
+    let snap = await store.load();
+    const orphans = snap.issues.filter((i) => i.orphan);
+    expect(orphans).toHaveLength(3);
+    expect(orphans.map((i) => i.orphan!.group)).toEqual([null, null, 'x1']);
+    await store.attachLines(orphans, { time: at('2026-11-18 12:30'), account: 'cube信用卡', paidBy: null, store: '7-11', note: null });
+    snap = await store.load();
+    expect(snap.issues).toEqual([]);
+    expect(snap.txns).toHaveLength(1);
+    expect(snap.txns[0]).toMatchObject({ direction: '出', account: 'cube信用卡', amount: 250, store: '7-11' });
+    expect(snap.txns[0].lines.map((l) => l.amount)).toEqual([120, 50, 80]);
+  });
+
+  it('朋友幫我付：沒有帳戶，補一行我欠他', async () => {
+    const { backend, store } = await setup();
+    await backend.appendRaw('moneyLines', { kind: '支出', amount: 300, category: '食 / 三餐' });
+    let snap = await store.load();
+    await store.attachLines(snap.issues, { time: at('2026-11-18 19:00'), account: null, paidBy: '小明', store: null, note: null });
+    snap = await store.load();
+    expect(snap.issues).toEqual([]);
+    expect(snap.txns[0]).toMatchObject({ direction: null, account: null, paidBy: '小明' });
+    expect(snap.txns[0].lines.map((l) => [l.kind, l.amount])).toEqual([['支出', 300], ['我欠他', 300]]);
+  });
+
+  it('明細有問題（分類不在清單）時不存，說明原因', async () => {
+    const { backend, store } = await setup();
+    await backend.appendRaw('moneyLines', { kind: '支出', amount: 100, category: '不存在' });
+    const snap = await store.load();
+    await expect(store.attachLines(snap.issues, { time: at('2026-11-18 12:30'), account: 'cube信用卡', paidBy: null, store: null, note: null })).rejects.toThrow('不在分類清單');
+    expect((await store.load()).txns).toHaveLength(0);
+  });
+
+  it('只缺分類的交易：勾多筆、用同一個分類補完；其他問題的不能整批補', async () => {
+    const { backend, store } = await setup();
+    await backend.appendRaw('moneyTransactions', { time: at('2026-11-17 10:00'), direction: '出', account: 'cube信用卡', amount: 100 });
+    await backend.appendRaw('moneyTransactions', { time: at('2026-11-17 11:00'), direction: '出', account: 'cube信用卡', amount: -40 });
+    await backend.appendRaw('moneyTransactions', { time: at('2026-11-17 12:00'), direction: '出', account: '不存在', amount: 70 });
+    let snap = await store.load();
+    const need = snap.issues.filter((i) => i.needsCategory);
+    expect(need).toHaveLength(2);
+    expect(need.every((i) => i.needsCategory === '支出')).toBe(true);
+    const failed = await store.fillCategories(need, '食 / 三餐', null);
+    expect(failed).toEqual([]);
+    snap = await store.load();
+    expect(snap.issues).toHaveLength(1);
+    expect(snap.txns.map((t) => [t.direction, t.amount, t.lines[0].amount])).toEqual(
+      expect.arrayContaining([
+        ['出', 100, 100],
+        ['入', 40, -40],
+      ]),
+    );
+  });
+});

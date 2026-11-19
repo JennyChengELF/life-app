@@ -152,6 +152,49 @@ export interface MoneyIssue {
   problems: string[];
   /** 交易沒有明細時：「在 APP 裡補完」用的表單（金額、帳戶、店家都帶好） */
   draft?: EntryForm;
+  /**
+   * 整批補齊（2026-11-19 使用者決定）：沒有交易的明細（金額看得懂才有）。
+   * group = 明細上填的交易代號（找不到那筆交易）；null = 沒填
+   */
+  orphan?: { group: string | null; line: LineInput };
+  /** 整批補齊：只缺分類的交易（勾多筆、選同一個分類一次補完） */
+  needsCategory?: '支出' | '收入';
+}
+
+/** 整批補齊時填的交易資料 */
+export interface OrphanHead {
+  time: number;
+  /** 帳戶；朋友幫我付時是 null */
+  account: string | null;
+  paidBy: string | null;
+  store: string | null;
+  branch?: string | null;
+  note: string | null;
+}
+
+/**
+ * 勾選的明細合成一筆交易（2026-11-19 使用者決定：合成一筆）。
+ * 支出或收入、金額都由明細算；朋友幫我付時補一行和他之間的欠款，讓明細平衡。
+ */
+export function orphanTxn(lines: LineInput[], head: OrphanHead): TxnInput {
+  const base = {
+    time: head.time,
+    store: head.store?.trim() || null,
+    branch: head.store?.trim() ? head.branch?.trim() || null : null,
+    statementText: null,
+    note: head.note?.trim() || null,
+    tags: [],
+    toAccount: null,
+    toAmount: null,
+    currency: null,
+  };
+  const { out, adjust } = lineBalance(lines);
+  if (head.paidBy) {
+    const extra: LineInput[] = same(out, 0) ? [] : [{ kind: out > 0 ? '我欠他' : '他欠我', amount: Math.abs(out), person: head.paidBy }];
+    return { ...base, direction: null, account: null, amount: null, paidBy: head.paidBy, lines: [...lines, ...extra] };
+  }
+  const dir: Direction = out + adjust >= 0 ? '出' : '入';
+  return { ...base, direction: dir, account: head.account, amount: dir === '出' ? out + adjust : -out + adjust, paidBy: null, lines };
 }
 
 export interface Budget extends RowRef {
@@ -1301,12 +1344,13 @@ export class MoneyStore {
     for (const r of lineRows) {
       if (!isLive(r)) continue;
       const tx = str(r.values.transaction);
-      if (!tx) {
-        issue('moneyLines', r, ['沒有填 transaction（屬於哪筆交易）']);
+      if (r.errors.includes('amount')) {
+        issue('moneyLines', r, [...(tx ? [] : ['沒有填 transaction（屬於哪筆交易）']), '金額格式看不懂']);
         continue;
       }
-      if (r.errors.includes('amount')) {
-        issue('moneyLines', r, ['金額格式看不懂']);
+      if (!tx) {
+        issue('moneyLines', r, ['沒有填 transaction（屬於哪筆交易）']);
+        issues[issues.length - 1].orphan = { group: null, line: toLine(r) };
         continue;
       }
       ensureId('moneyLines', r);
@@ -1384,6 +1428,8 @@ export class MoneyStore {
           };
         }
         issue('moneyTransactions', r, p, draft);
+        // 只缺分類（沒有其他問題）→ 可以整批補分類
+        if (draft && p.every((m) => m.startsWith('沒有分類') || m.startsWith('分類「'))) issues[issues.length - 1].needsCategory = draft.mode === '收入' ? '收入' : '支出';
         continue;
       }
       txns.push(t);
@@ -1391,7 +1437,10 @@ export class MoneyStore {
     // 找不到交易的明細
     for (const [tx, ls] of linesByTx) {
       if (usedTx.has(tx)) continue;
-      for (const { row } of ls) issue('moneyLines', row, [`找不到交易「${tx}」`]);
+      for (const { row, line } of ls) {
+        issue('moneyLines', row, [`找不到交易「${tx}」`]);
+        issues[issues.length - 1].orphan = { group: tx, line };
+      }
     }
 
     for (const [t, us] of fixes) await this.b.update(t, us);
@@ -2275,6 +2324,82 @@ export class MoneyStore {
     await this.b.update('moneyAccounts', [
       { rowNumber: acc.rowNumber, values: { openingDate: date, openingBalance: roundMoney(actual, acc.currency), updatedAt: Date.now() }, expectId: acc.id },
     ]);
+  }
+
+  /** 整批補齊：勾選的明細合成一筆交易，明細接到這筆交易底下（不重建明細） */
+  async attachLines(issues: MoneyIssue[], head: OrphanHead): Promise<string> {
+    const items = issues.filter((i) => i.orphan);
+    if (!items.length) throw new Error('請勾選明細');
+    const snap = await this.fresh();
+    const input = orphanTxn(
+      items.map((i) => i.orphan!.line),
+      head,
+    );
+    const p = checkTxn(input, snap);
+    if (p.length) throw new Error(p.join('；'));
+    if (input.store && !snap.orgs.some((o) => o.name === input.store)) await this.addOrg(input.store);
+    const now = Date.now();
+    const id = newId(now);
+    await this.b.append('moneyTransactions', [
+      {
+        id,
+        time: input.time,
+        date: toDateKey(input.time),
+        direction: input.direction,
+        account: input.account,
+        amount: input.amount == null ? null : roundMoney(input.amount, txnCurrency(input, snap.accounts)),
+        paidBy: input.paidBy,
+        store: input.store,
+        branch: input.branch,
+        note: input.note,
+        createdVia: this.via,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]);
+    await this.b.update(
+      'moneyLines',
+      items.map((i, k) => ({ rowNumber: i.rowNumber, values: { transaction: id, sort: k + 1, updatedAt: now, ...(i.id ? {} : { id: newId(now), createdAt: now }) }, expectId: i.id ?? '' })),
+    );
+    // 朋友幫我付：補上和他之間的欠款
+    const extra = input.lines.slice(items.length);
+    if (extra.length) {
+      await this.b.append(
+        'moneyLines',
+        extra.map((l, k) => ({ transaction: id, kind: l.kind, amount: l.amount, person: l.person ?? null, sort: items.length + k + 1, id: newId(now), createdAt: now, updatedAt: now })),
+      );
+    }
+    return id;
+  }
+
+  /**
+   * 整批補分類：只缺分類的交易，用同一個分類（和預算）建立明細。
+   * 回傳補不了的（其他問題），其餘照常存。
+   */
+  async fillCategories(issues: MoneyIssue[], category: string, budget: string | null): Promise<{ issue: MoneyIssue; problems: string[] }[]> {
+    const snap = await this.fresh();
+    const now = Date.now();
+    const txUp: RowUpdate[] = [];
+    const lineAdds: RowValues[] = [];
+    const failed: { issue: MoneyIssue; problems: string[] }[] = [];
+    for (const i of issues) {
+      if (!i.draft || !i.id) continue;
+      const f: EntryForm = { ...i.draft, cats: [{ ...i.draft.cats[0], category, budget }] };
+      const t = formToTxn(f);
+      const p = checkTxn(t, snap);
+      if (p.length) {
+        failed.push({ issue: i, problems: p });
+        continue;
+      }
+      const cur = txnCurrency(t, snap.accounts);
+      txUp.push({ rowNumber: i.rowNumber, values: { direction: t.direction, amount: t.amount == null ? null : roundMoney(t.amount, cur), category: null, budget: null, updatedAt: now }, expectId: i.id });
+      t.lines.forEach((l, k) =>
+        lineAdds.push({ transaction: i.id, kind: l.kind, amount: roundMoney(l.amount, cur), category: l.category ? normPath(l.category) : null, budget: l.budget ?? null, sort: k + 1, id: newId(now), createdAt: now, updatedAt: now }),
+      );
+    }
+    if (txUp.length) await this.b.update('moneyTransactions', txUp);
+    if (lineAdds.length) await this.b.append('moneyLines', lineAdds);
+    return failed;
   }
 
   async discardIssue(issue: MoneyIssue) {

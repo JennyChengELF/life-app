@@ -298,3 +298,16 @@ button.bt-row:hover, .bt-row.open { background: var(--bg); }
 .editor-actions { position: sticky; bottom: calc(60px + env(safe-area-inset-bottom)); background: var(--card); padding: 10px 0 4px; z-index: 4; }
 .editor-actions .primary { flex: 1; max-width: 320px; padding: 12px; font-size: 1.05rem; border-radius: 14px; }
 @media (min-width: 760px) { .editor-actions { bottom: 0; } }
+
+/* 需要補齊的資料：整批補齊（2026-11-19） */
+.batch h3 { font-size: 1rem; margin: 0 0 8px; }
+.batch-group { margin-bottom: 10px; }
+.batch-head { font-weight: 600; margin-bottom: 4px; }
+.batch-list { list-style: none; margin: 0 0 8px; padding: 0; }
+.batch-list li { border-bottom: 1px solid var(--line); padding: 6px 0 4px 26px; }
+.batch-list .check { margin: 0 0 0 -26px; }
+.batch-list .num { white-space: nowrap; }
+.batch-row { margin-top: 2px; }
+.batch-form { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 12px; }
+.batch-preview { font-weight: 600; color: var(--accent-strong); }
+.batch-list .grow { flex: 1; }
