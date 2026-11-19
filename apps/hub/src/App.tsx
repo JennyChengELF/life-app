@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Icon, type IconName } from '@life/ui/icon';
 import type { TimelineEntry } from '@life/db';
 import { bowelEntries, bowelHomeMessage, editHash, fmtMoney, depositsDue, healthEntries, loanReminders, moneyDayTotals, moneyEntries, resolvePinned, stocktakeStatus, sortEntries, todayKey, waterEntries, waterSummary } from '@life/db';
 import { DateNav, Timeline } from '@life/ui/timeline';
@@ -20,23 +21,23 @@ interface Tile {
   key: string;
   app: AppKey;
   hash: string;
-  icon: string;
+  icon: IconName;
   label: string;
 }
 
 /** 所有按鈕（key 存在設定裡，不要改） */
 const TILES: Tile[] = [
-  { key: 'water', app: 'water', hash: '', icon: '💧', label: '喝水' },
+  { key: 'water', app: 'water', hash: '', icon: 'droplet', label: '喝水' },
   // 一鍵記錄：打開排便 APP 就記一筆、展開詳細欄位，填完回首頁（2026-11-18 確認）
-  { key: 'bowelNew', app: 'bowel', hash: '#new', icon: '💩', label: '記排便' },
-  { key: 'body', app: 'health', hash: '#new', icon: '⚖️', label: '記體重' },
-  { key: 'bp', app: 'health', hash: '#bp', icon: '🩸', label: '記血壓' },
-  { key: 'glucose', app: 'health', hash: '#glucose', icon: '🍬', label: '記血糖' },
-  { key: 'temp', app: 'health', hash: '#temp', icon: '🌡️', label: '記體溫' },
-  { key: 'health', app: 'health', hash: '', icon: '🩺', label: '健康' },
-  { key: 'bowel', app: 'bowel', hash: '', icon: '🚽', label: '排便' },
-  { key: 'moneyNew', app: 'money', hash: '#new', icon: '✏️', label: '記一筆' },
-  { key: 'money', app: 'money', hash: '', icon: '💰', label: '記帳' },
+  { key: 'bowelNew', app: 'bowel', hash: '#new', icon: 'toilet', label: '記排便' },
+  { key: 'body', app: 'health', hash: '#new', icon: 'weight', label: '記體重' },
+  { key: 'bp', app: 'health', hash: '#bp', icon: 'heartPulse', label: '記血壓' },
+  { key: 'glucose', app: 'health', hash: '#glucose', icon: 'candy', label: '記血糖' },
+  { key: 'temp', app: 'health', hash: '#temp', icon: 'thermometer', label: '記體溫' },
+  { key: 'health', app: 'health', hash: '', icon: 'stethoscope', label: '健康' },
+  { key: 'bowel', app: 'bowel', hash: '', icon: 'calendar', label: '排便' },
+  { key: 'moneyNew', app: 'money', hash: '#new', icon: 'pencil', label: '記一筆' },
+  { key: 'money', app: 'money', hash: '', icon: 'wallet', label: '記帳' },
 ];
 const tileOf = (k: string) => TILES.find((t) => t.key === k)!;
 
@@ -44,9 +45,9 @@ const tileOf = (k: string) => TILES.find((t) => t.key === k)!;
  * 類別（2026-11-18 確認：首頁上面是自己勾的「常用」，下面是類別資料夾，所有功能都找得到）。
  * 💡 目前有健康、記帳；子彈筆記等做好再加
  */
-const GROUPS: { key: string; icon: string; label: string; tiles: string[] }[] = [
-  { key: 'health', icon: '🩺', label: '健康', tiles: ['water', 'bowelNew', 'body', 'bp', 'glucose', 'temp', 'health', 'bowel'] },
-  { key: 'money', icon: '💰', label: '記帳', tiles: ['moneyNew', 'money'] },
+const GROUPS: { key: string; icon: IconName; label: string; tiles: string[] }[] = [
+  { key: 'health', icon: 'stethoscope', label: '健康', tiles: ['water', 'bowelNew', 'body', 'bp', 'glucose', 'temp', 'health', 'bowel'] },
+  { key: 'money', icon: 'wallet', label: '記帳', tiles: ['moneyNew', 'money'] },
 ];
 
 /** 💡 還沒設定過時的常用（和原本首頁一樣） */
@@ -55,7 +56,9 @@ const DEFAULT_PINNED = ['water', 'bowelNew', 'body', 'bp', 'glucose'];
 function TileLink({ t }: { t: Tile }) {
   return (
     <a className="tile" href={appUrl(t.app, t.hash)}>
-      <span className="tile-icon">{t.icon}</span>
+      <span className="tile-icon">
+        <Icon name={t.icon} size={26} />
+      </span>
       {t.label}
     </a>
   );
@@ -81,7 +84,7 @@ function Launcher({ hub }: { hub: ReturnType<typeof useHub> }) {
         <span className="muted small">常用</span>
         {canEdit && (
           <button className="link small" onClick={() => setEditing(pinned)}>
-            ✏️ 編輯
+            <Icon name="pencil" size={16} /> 編輯
           </button>
         )}
       </div>
@@ -97,7 +100,7 @@ function Launcher({ hub }: { hub: ReturnType<typeof useHub> }) {
       <nav className="groups">
         {GROUPS.map((g) => (
           <button key={g.key} className={open === g.key ? 'active' : ''} aria-expanded={open === g.key} onClick={() => setOpen(open === g.key ? null : g.key)}>
-            {g.icon} {g.label} {open === g.key ? '▴' : '▾'}
+            <Icon name={g.icon} size={18} /> {g.label} {open === g.key ? '▴' : '▾'}
           </button>
         ))}
       </nav>
@@ -138,7 +141,7 @@ function PinEditor({ initial, hub, onClose }: { initial: string[]; hub: ReturnTy
             <li key={t.key} className={on ? '' : 'off'}>
               <label className="check">
                 <input type="checkbox" checked={on} onChange={() => toggle(t.key)} />
-                {t.icon} {t.label}
+                <Icon name={t.icon} size={18} /> {t.label}
               </label>
               {on && (
                 <>
@@ -181,10 +184,12 @@ export function App() {
   return (
     <div className="app hub">
       <header className="topbar">
-        <h1>🏠 生活</h1>
+        <h1>生活</h1>
         {hub.status === 'ready' && (
-          <button className="icon-btn" onClick={hub.refresh} disabled={hub.busy} title="重新整理（讀取試算表最新資料）">
-            <span className={hub.busy ? 'spin' : ''}>⟳</span>
+          <button className="icon-btn" onClick={hub.refresh} disabled={hub.busy} title="重新整理（讀取試算表最新資料）" aria-label="重新整理">
+            <span className={hub.busy ? 'spin' : ''}>
+              <Icon name="refresh" />
+            </span>
           </button>
         )}
       </header>

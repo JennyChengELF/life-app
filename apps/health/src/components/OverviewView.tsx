@@ -1,4 +1,5 @@
 import type { HealthSnapshot, TimelineEntry } from '@life/db';
+import { Icon } from '@life/ui/icon';
 import { healthEntries, mismatchFields, sortEntries, todayKey } from '@life/db';
 import { DateNav, Timeline } from '@life/ui/timeline';
 import type { HealthApi } from '../useHealth';
@@ -33,16 +34,16 @@ export function OverviewView(props: { api: HealthApi; snap: HealthSnapshot; nav:
       {/* 快速記錄：記的是現在，記完回到今天 */}
       <div className="quick" onClickCapture={() => setDate(todayKey())}>
         <button onClick={() => nav.newBody('overview')}>
-          <span className="q-icon">⚖️</span>記身體
+          <Icon name="weight" className="q-icon" />記身體
         </button>
         <button onClick={() => nav.vital('bp', undefined, 'overview')}>
-          <span className="q-icon">🩸</span>記血壓
+          <Icon name="heartPulse" className="q-icon" />記血壓
         </button>
         <button onClick={() => nav.vital('glucose', undefined, 'overview')}>
-          <span className="q-icon">🍬</span>記血糖
+          <Icon name="candy" className="q-icon" />記血糖
         </button>
         <button onClick={() => nav.vital('temp', { rec: null, tempKind: lastTemp?.kind ?? '一般' }, 'overview')}>
-          <span className="q-icon">🌡️</span>記體溫
+          <Icon name="thermometer" className="q-icon" />記體溫
         </button>
       </div>
 

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Icon } from '@life/ui/icon';
 import type { WaterLog, WaterSnapshot } from '@life/db';
 import { addDays, computeGoal, drinkOf, goalWeight, startOfDay, todayKey, toHHmm } from '@life/db';
 import type { WaterApi } from '../useWater';
@@ -217,7 +218,7 @@ export function TodayView(props: {
             <div className="cups">
               {snap.cups.map((c) => (
                 <button key={c.id} className="cup-btn" onClick={() => add(c.ml)}>
-                  🥤 {c.name}
+                  <Icon name="cup" size={20} /> {c.name}
                   <small>{c.ml}ml</small>
                 </button>
               ))}

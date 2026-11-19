@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Icon, type IconName } from '@life/ui/icon';
 import { parseEditHash, todayKey } from '@life/db';
 import type { BloodGlucose, BloodPressure, BodyMeasurement, Temperature, TempKind } from '@life/db';
 import { useHealth } from './useHealth';
@@ -25,12 +26,12 @@ export type RecordKind = 'body' | 'bp' | 'glucose' | 'temp' | 'occ' | 'lab';
 type VitalRecord = BloodPressure | BloodGlucose | Temperature;
 
 /** 下方分頁列（2026-11-17 確認）；體溫、偶爾量測、設定放在「更多」 */
-const TABS: { key: Tab; icon: string; label: string }[] = [
-  { key: 'overview', icon: '🩺', label: '總覽' },
-  { key: 'body', icon: '⚖️', label: '身體' },
-  { key: 'bp', icon: '🩸', label: '血壓' },
-  { key: 'glucose', icon: '🍬', label: '血糖' },
-  { key: 'more', icon: '☰', label: '更多' },
+const TABS: { key: Tab; icon: IconName; label: string }[] = [
+  { key: 'overview', icon: 'stethoscope', label: '總覽' },
+  { key: 'body', icon: 'weight', label: '身體' },
+  { key: 'bp', icon: 'heartPulse', label: '血壓' },
+  { key: 'glucose', icon: 'candy', label: '血糖' },
+  { key: 'more', icon: 'more', label: '更多' },
 ];
 const UNDER: Partial<Record<Tab, Tab>> = { bodyForm: 'body', temp: 'more', lab: 'more', occ: 'more', settings: 'more' };
 
@@ -172,20 +173,22 @@ export function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <a className="icon-btn home-link" href={HOME_URL} title="回首頁">
-          🏠
+        <a className="icon-btn home-link" href={HOME_URL} title="回首頁" aria-label="回首頁">
+          <Icon name="home" />
         </a>
-        <h1>🩺 健康</h1>
+        <h1>健康</h1>
         <nav className="tabs-top">
           {TABS.map((t) => (
             <button key={t.key} className={active === t.key ? 'active' : ''} onClick={() => setTab(t.key)}>
-              {t.icon} {t.label}
+              <Icon name={t.icon} size={20} /> {t.label}
             </button>
           ))}
         </nav>
         {api.status === 'ready' && (
-          <button className="icon-btn" onClick={api.refresh} disabled={api.busy} title="重新整理（讀取試算表最新資料）">
-            <span className={api.busy ? 'spin' : ''}>⟳</span>
+          <button className="icon-btn" onClick={api.refresh} disabled={api.busy} title="重新整理（讀取試算表最新資料）" aria-label="重新整理">
+            <span className={api.busy ? 'spin' : ''}>
+              <Icon name="refresh" />
+            </span>
           </button>
         )}
       </header>
@@ -231,7 +234,9 @@ export function App() {
       <nav className="tabs-bottom">
         {TABS.map((t) => (
           <button key={t.key} className={active === t.key ? 'active' : ''} onClick={() => setTab(t.key)}>
-            <span className="tab-icon">{t.icon}</span>
+            <span className="tab-icon">
+              <Icon name={t.icon} />
+            </span>
             {t.label}
           </button>
         ))}

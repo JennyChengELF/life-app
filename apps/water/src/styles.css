@@ -84,3 +84,5 @@
 .share-num { font-size: 0.9rem; font-variant-numeric: tabular-nums; }
 .share-num small { color: var(--muted); }
 .home-link { text-decoration: none; padding: 2px 4px; }
+.cup-btn .icon, .cup-name .icon { color: var(--accent); }
+.cup-name { display: inline-flex; align-items: center; gap: 6px; }

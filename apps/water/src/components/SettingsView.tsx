@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Icon } from '@life/ui/icon';
 import type { Cup, WaterSnapshot } from '@life/db';
 import { computeGoal, FACTOR_MAX, FACTOR_MIN, goalWeight, latestWeight, toDateKey, todayKey, toHHmm } from '@life/db';
 import type { WaterApi } from '../useWater';
@@ -228,7 +229,9 @@ function CupsCard({ api, snap }: { api: WaterApi; snap: WaterSnapshot }) {
             />
           ) : (
             <li key={c.id} className="log-row">
-              <span>🥤 {c.name}</span>
+              <span className="cup-name">
+                <Icon name="cup" size={18} /> {c.name}
+              </span>
               <span className="log-ml">{c.ml} ml</span>
               <button className="link" onClick={() => setEditing(c.id)}>
                 修改

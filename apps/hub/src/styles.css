@@ -24,7 +24,8 @@
 }
 .tile:active { transform: scale(0.97); }
 .tile:hover { border-color: var(--accent); }
-.tile-icon { font-size: 1.8rem; line-height: 1; }
+.tile-icon { width: 46px; height: 46px; border-radius: 14px; background: var(--accent-soft); color: var(--accent); display: flex; align-items: center; justify-content: center; }
+.groups button .icon, .launch-head .icon, .order-list .icon { vertical-align: -3px; }
 
 /* 喝水總量 */
 .water-sum { display: flex; align-items: center; gap: 10px; padding: 8px 4px 10px; border-bottom: 1px solid var(--line); text-decoration: none; color: var(--text); }

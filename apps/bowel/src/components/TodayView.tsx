@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { BowelLog, BowelSnapshot } from '@life/db';
 import { bowelSummary, constipation, diarrhea, elapsedText, emptyInput, judgeBowel, lastPassed, newId, startOfDay, toDateKey, todayKey, toHHmm } from '@life/db';
 import { DateNav } from '@life/ui/timeline';
+import { Icon } from '@life/ui/icon';
 import type { BowelApi } from '../useBowel';
 import type { Tab } from '../App';
 import { LogEditor } from './LogEditor';
@@ -92,7 +93,7 @@ export function TodayView(props: {
         <div className="muted small">{last ? `上次：${fmtWhen(last.time)}` : '還沒有紀錄'}</div>
         <div className="add-row">
           <button className="primary big" onClick={() => add(true)}>
-            💩 記一筆
+            <Icon name="plus" size={20} strokeWidth={2.2} /> 記一筆
           </button>
           <button onClick={() => add(false)}>有便意沒排出</button>
         </div>

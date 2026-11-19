@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Icon, type IconName } from '@life/ui/icon';
 import { parseEditHash, todayKey } from '@life/db';
 import { useWater } from './useWater';
 import { TodayView } from './components/TodayView';
@@ -11,10 +12,10 @@ const HOME_URL = import.meta.env.DEV ? `http://${location.hostname}:5172/` : "..
 
 export type Tab = 'today' | 'stats' | 'settings' | 'issues';
 
-const TABS: { key: Tab; icon: string; label: string }[] = [
-  { key: 'today', icon: '💧', label: '今天' },
-  { key: 'stats', icon: '📊', label: '統計' },
-  { key: 'settings', icon: '⚙️', label: '設定' },
+const TABS: { key: Tab; icon: IconName; label: string }[] = [
+  { key: 'today', icon: 'droplet', label: '今天' },
+  { key: 'stats', icon: 'chart', label: '統計' },
+  { key: 'settings', icon: 'settings', label: '設定' },
 ];
 
 export function App() {
@@ -39,20 +40,22 @@ export function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <a className="icon-btn home-link" href={HOME_URL} title="回首頁">
-          🏠
+        <a className="icon-btn home-link" href={HOME_URL} title="回首頁" aria-label="回首頁">
+          <Icon name="home" />
         </a>
-        <h1>💧 喝水</h1>
+        <h1>喝水</h1>
         <nav className="tabs-top">
           {TABS.map((t) => (
             <button key={t.key} className={tab === t.key ? 'active' : ''} onClick={() => setTab(t.key)}>
-              {t.icon} {t.label}
+              <Icon name={t.icon} size={20} /> {t.label}
             </button>
           ))}
         </nav>
         {api.status === 'ready' && (
-          <button className="icon-btn" onClick={api.refresh} disabled={api.busy} title="重新整理（讀取試算表最新資料）">
-            <span className={api.busy ? 'spin' : ''}>⟳</span>
+          <button className="icon-btn" onClick={api.refresh} disabled={api.busy} title="重新整理（讀取試算表最新資料）" aria-label="重新整理">
+            <span className={api.busy ? 'spin' : ''}>
+              <Icon name="refresh" />
+            </span>
           </button>
         )}
       </header>
@@ -109,7 +112,9 @@ export function App() {
       <nav className="tabs-bottom">
         {TABS.map((t) => (
           <button key={t.key} className={tab === t.key ? 'active' : ''} onClick={() => setTab(t.key)}>
-            <span className="tab-icon">{t.icon}</span>
+            <span className="tab-icon">
+              <Icon name={t.icon} />
+            </span>
             {t.label}
           </button>
         ))}
