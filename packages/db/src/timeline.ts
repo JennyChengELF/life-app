@@ -24,10 +24,13 @@ export type EntryRef =
   | { app: 'bowel'; kind: 'bowel'; id: string }
   | { app: 'money'; kind: 'money'; id: string };
 
+/** 時間軸的線條圖示名稱（2026-11-19；要是 @life/ui/icon 有的圖示） */
+export type TimelineIcon = 'weight' | 'heartPulse' | 'candy' | 'thermometer' | 'ruler' | 'testTube' | 'droplet' | 'toilet' | 'wallet';
+
 export interface TimelineEntry {
   key: string;
   time: number;
-  icon: string;
+  icon: TimelineIcon;
   name: string;
   value: string;
   /** 第二行小字 */
@@ -59,7 +62,7 @@ export function healthEntries(snap: HealthSnapshot, date: string): TimelineEntry
     out.push({
       key: m.id,
       time: m.time,
-      icon: '⚖️',
+      icon: 'weight',
       name: '體重',
       value: `${m.kg.toFixed(1)} kg`,
       extra: extra.join('、') || undefined,
@@ -73,7 +76,7 @@ export function healthEntries(snap: HealthSnapshot, date: string): TimelineEntry
     out.push({
       key: x.id,
       time: x.time,
-      icon: '🩸',
+      icon: 'heartPulse',
       name: '血壓',
       value: `${x.systolic}/${x.diastolic}${x.pulse != null ? ` · 脈搏 ${x.pulse}` : ''}`,
       judge: judgeBp(x.systolic, x.diastolic),
@@ -86,7 +89,7 @@ export function healthEntries(snap: HealthSnapshot, date: string): TimelineEntry
     out.push({
       key: x.id,
       time: x.time,
-      icon: '🍬',
+      icon: 'candy',
       name: `血糖 ${x.timing}`,
       value: `${x.mgdl} mg/dL`,
       judge: judgeGlucose(x.timing, x.mgdl),
@@ -99,7 +102,7 @@ export function healthEntries(snap: HealthSnapshot, date: string): TimelineEntry
     out.push({
       key: x.id,
       time: x.time,
-      icon: '🌡️',
+      icon: 'thermometer',
       name: x.kind === '基礎' ? '基礎體溫' : `體溫${x.site ? ` ${x.site}` : ''}`,
       value: `${x.celsius.toFixed(decimalsOfTemp(x.kind))} °C`,
       judge: judgeTemp(x.kind, x.celsius),
@@ -116,7 +119,7 @@ export function healthEntries(snap: HealthSnapshot, date: string): TimelineEntry
     out.push({
       key: `occ-${time}`,
       time,
-      icon: '📏',
+      icon: 'ruler',
       name: one ? list[0].item : '偶爾量測',
       value: list.map((o) => `${one ? '' : `${o.item} `}${o.value}${unit(o.item) ? ` ${unit(o.item)}` : ''}`).join('、'),
       note: list.find((o) => o.note)?.note,
@@ -133,7 +136,7 @@ export function healthEntries(snap: HealthSnapshot, date: string): TimelineEntry
       key: rep.id,
       time: startOfDay(date),
       allDay: true,
-      icon: '🧪',
+      icon: 'testTube',
       name: rep.kind + (rep.place ? ` ${rep.place}` : ''),
       value: `${results.length} 項`,
       judge: bad ? { level: judges.some((j) => j?.level === 'bad') ? 'bad' : 'warn', label: `${bad} 項異常` } : results.length ? { level: 'ok', label: '都正常' } : null,
@@ -150,7 +153,7 @@ export function waterEntries(snap: WaterSnapshot, date: string): TimelineEntry[]
     .map((l) => ({
       key: l.id,
       time: l.time,
-      icon: '💧',
+      icon: 'droplet',
       name: `喝水 ${drinkOf(l, snap.drinks)}`,
       value: `${l.ml} ml`,
       note: l.note,
@@ -166,7 +169,7 @@ export function bowelEntries(snap: BowelSnapshot, date: string): TimelineEntry[]
       return {
         key: l.id,
         time: l.time,
-        icon: '💩',
+        icon: 'toilet',
         name: '排便',
         value: bowelSummary(l) || '（沒填細節）',
         extra: extra || undefined,
@@ -190,7 +193,7 @@ export function moneyEntries(snap: MoneySnapshot, date: string): TimelineEntry[]
       return {
         key: t.id,
         time: t.time,
-        icon: '💰',
+        icon: 'wallet',
         name: txnTitle(t),
         value,
         extra: extra || undefined,

@@ -1,6 +1,7 @@
 /** 一天的時間軸、日期切換（健康總覽、綜合首頁共用）；樣式在 base.css */
 import type { TimelineEntry } from '@life/db';
 import { addDays, startOfDay, todayKey, toHHmm } from '@life/db';
+import { Icon } from './Icon';
 
 const WEEK = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -40,10 +41,12 @@ export function Timeline({ entries, onPick }: { entries: TimelineEntry[]; onPick
       {entries.map((e) => (
         <li key={e.key} onClick={() => onPick(e)} title="點一下修改">
           <span className="tl-time">{e.allDay ? '' : toHHmm(e.time)}</span>
-          <span className="tl-icon">{e.icon}</span>
+          <span className="tl-icon">
+            <Icon name={e.icon} size={18} />
+          </span>
           <span className="tl-main">
             <span className="tl-name">{e.name}</span> <span className="tl-value">{e.value}</span>
-            {e.warn && ' ⚠️'}
+            {e.warn && <Icon name="alert" size={16} className="tl-warn" />}
             {e.extra && <div className="tl-extra">{e.extra}</div>}
             {e.note && <div className="tl-extra">📝 {e.note}</div>}
           </span>

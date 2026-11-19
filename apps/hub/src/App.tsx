@@ -288,7 +288,9 @@ function Day({ hub, date, setDate }: { hub: ReturnType<typeof useHub>; date: str
       <section className="card">
         <DateNav date={date} setDate={setDate} />
         <a className="water-sum" href={appUrl('water')}>
-          <span>💧</span>
+          <span className="sum-icon">
+            <Icon name="droplet" size={18} />
+          </span>
           <span className="water-bar" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label="喝水進度">
             <i style={{ width: `${pct}%` }} />
           </span>
@@ -299,7 +301,10 @@ function Day({ hub, date, setDate }: { hub: ReturnType<typeof useHub>; date: str
         </a>
         {(money.expense !== 0 || money.income !== 0) && (
           <a className="money-sum" href={appUrl('money')}>
-            💰 支出 <b>{fmtMoney(money.expense)}</b>
+            <span className="sum-icon">
+              <Icon name="wallet" size={18} />
+            </span>
+            支出 <b>{fmtMoney(money.expense)}</b>
             {money.income !== 0 && (
               <>
                 {' '}・ 收入 <b>{fmtMoney(money.income)}</b>

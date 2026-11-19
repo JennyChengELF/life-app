@@ -169,7 +169,7 @@ describe('資料存取', () => {
   });
   it('時間軸、從首頁打開', () => {
     const e = bowelEntries({ loadedAt: 0, logs: [log('2026-11-18 08:00', { types: ['7'], symptoms: ['腹痛'] })], settings: DEFAULT_BOWEL_SETTINGS, issues: [] }, '2026-11-18');
-    expect(e[0]).toMatchObject({ icon: '💩', value: '7 水狀', extra: '腹痛', ref: { app: 'bowel', kind: 'bowel' } });
+    expect(e[0]).toMatchObject({ icon: 'toilet', value: '7 水狀', extra: '腹痛', ref: { app: 'bowel', kind: 'bowel' } });
     expect(e[0].judge?.level).toBe('bad');
     expect(parseEditHash('#edit/bowel/ABC')).toEqual({ kind: 'bowel', id: 'ABC' });
   });

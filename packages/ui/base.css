@@ -167,7 +167,8 @@ button.link { border: 0; background: none; color: var(--accent); padding: 4px 6p
 .timeline li:last-child { border-bottom: 0; }
 .timeline li:hover { background: var(--bg); }
 .tl-time { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 3em; }
-.tl-icon { width: 1.4em; text-align: center; }
+.tl-icon { width: 30px; height: 30px; flex: none; border-radius: 9px; background: var(--accent-soft); color: var(--accent); display: flex; align-items: center; justify-content: center; margin-top: -4px; }
+.tl-warn { color: var(--warn); vertical-align: -3px; margin-left: 2px; }
 .tl-main { flex: 1; min-width: 0; }
 .tl-name { color: var(--muted); font-size: 0.9rem; }
 .tl-value { font-weight: 600; font-variant-numeric: tabular-nums; }
