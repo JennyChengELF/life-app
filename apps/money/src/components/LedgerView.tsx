@@ -1,5 +1,5 @@
 import type { MoneySnapshot, Txn } from '@life/db';
-import { emptyForm, fmtMoney, monthStats, startOfDay, todayKey, toHHmm, topCategory, txnCurrency, txnMyNet, txnTitle } from '@life/db';
+import { emptyForm, fmtMoney, monthStats, startOfDay, todayKey, toHHmm, topCategory, txnCurrency, txnMissingCategory, txnMyNet, txnTitle } from '@life/db';
 import { DateNav } from '@life/ui/timeline';
 import { Icon, type IconName } from '@life/ui/icon';
 import type { Editing } from '../App';
@@ -74,6 +74,7 @@ function TxBadges({ t }: { t: Txn }) {
           {l.person} {fmtMoney(l.amount, 'TWD', false)}
         </span>
       ))}
+      {txnMissingCategory(t) && <span className="badge warn">沒有分類</span>}
       {noBudget && <span className="badge warn">沒有預算</span>}
     </>
   );
@@ -96,6 +97,7 @@ export function subText(t: Txn, withBadges = true) {
   if (lineNotes.length) parts.push(lineNotes.join('／'));
   if (t.tags.length) parts.push(t.tags.map((x) => `#${x}`).join(' '));
   if (withBadges && t.lines.some((l) => l.kind === '支出' && !l.budget)) parts.unshift('⚠️ 沒有預算');
+  if (withBadges && txnMissingCategory(t)) parts.unshift('⚠️ 沒有分類');
   return parts.join('・');
 }
 

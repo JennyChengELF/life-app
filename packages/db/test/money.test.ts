@@ -32,6 +32,7 @@ import {
   parseDateTimeText,
   personBalances,
   splitEven,
+  txnMissingCategory,
   txnTitle,
   txnToForm,
 } from '../src';
@@ -487,7 +488,7 @@ describe('統計：佔比、年統計、首頁時間軸', () => {
     expect(year).toHaveLength(12);
     expect(year[2]).toMatchObject({ month: '2026-03', expense: 86 });
     const [e] = moneyEntries(snap, '2026-03-05');
-    expect(e).toMatchObject({ icon: '💰', name: '食 / 三餐', value: '−NT$ 86', extra: '八方雲集・錢包', ref: { app: 'money', kind: 'money' } });
+    expect(e).toMatchObject({ icon: 'wallet', name: '食 / 三餐', value: '−NT$ 86', extra: '八方雲集・錢包', ref: { app: 'money', kind: 'money' } });
     expect(moneyDayTotals(snap, '2026-03-05')).toEqual({ expense: 86, income: 0 });
     expect(parseEditHash(`#edit/money/${e.ref.id}`)).toEqual({ kind: 'money', id: e.ref.id });
   });
@@ -632,6 +633,18 @@ describe('整批補齊（2026-11-19）', () => {
     expect(snap.issues).toEqual([]);
     expect(snap.txns[0]).toMatchObject({ direction: null, account: null, paidBy: '小明' });
     expect(snap.txns[0].lines.map((l) => [l.kind, l.amount])).toEqual([['支出', 300], ['我欠他', 300]]);
+  });
+
+  it('明細沒選分類：先讓我過，記帳列表再補（在 APP 裡修改時還是要選）', async () => {
+    const { backend, store } = await setup();
+    await backend.appendRaw('moneyLines', { kind: '支出', amount: 90 });
+    let snap = await store.load();
+    await store.attachLines(snap.issues, { time: at('2026-11-18 12:30'), account: 'cube信用卡', paidBy: null, store: null, note: null });
+    snap = await store.load();
+    expect(snap.issues).toEqual([]);
+    expect(snap.txns).toHaveLength(1);
+    expect(txnMissingCategory(snap.txns[0])).toBe(true);
+    await expect(store.saveTxn(formToTxn(txnToForm(snap.txns[0])), snap.txns[0])).rejects.toThrow('請選分類');
   });
 
   it('明細有問題（分類不在清單）時不存，說明原因', async () => {

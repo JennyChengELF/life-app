@@ -721,8 +721,12 @@ export function lineBalance(lines: Pick<LineInput, 'kind' | 'amount'>[]) {
   return { out, adjust };
 }
 
-/** 檢查一筆交易（含明細）；回傳問題（中文），空陣列 = 沒問題 */
-export function checkTxn(t: Omit<TxnInput, 'tags'> & { tags?: string[] }, refs: MoneyRefs): string[] {
+/**
+ * 檢查一筆交易（含明細）；回傳問題（中文），空陣列 = 沒問題。
+ * allowNoCategory：明細沒選分類也可以（2026-11-19 使用者要求：整批補齊時先讓我過，回到記帳再補；
+ * 試算表讀進來的也一樣）。在 APP 裡記一筆、修改時還是要選。
+ */
+export function checkTxn(t: Omit<TxnInput, 'tags'> & { tags?: string[] }, refs: MoneyRefs, opts: { allowNoCategory?: boolean } = {}): string[] {
   const p: string[] = [];
   if (!Number.isFinite(t.time)) p.push('沒有填時間');
   const accName = (n: string | null) => n != null && refs.accounts.some((a) => a.name === n);
@@ -772,7 +776,9 @@ export function checkTxn(t: Omit<TxnInput, 'tags'> & { tags?: string[] }, refs: 
     else if (!intOk(l.amount)) p.push(`${at}${cur} 金額請填整數`);
     if (l.kind === '支出' || l.kind === '收入') {
       const c = l.category ? refs.categories.find((x) => x.path === normPath(l.category!)) : null;
-      if (!l.category) p.push(`${at}請選分類`);
+      if (!l.category) {
+        if (!opts.allowNoCategory) p.push(`${at}請選分類`);
+      }
       else if (!c) p.push(`${at}分類「${l.category}」不在分類清單裡`);
       else if (c.kind !== l.kind) p.push(`${at}分類「${l.category}」是${c.kind}分類`);
     }
@@ -1196,6 +1202,9 @@ export function txnToForm(t: Txn): EntryForm {
 }
 
 /** 一筆交易的標題（例：食 / 三餐、轉帳 → 悠遊卡、借給 小明） */
+/** 明細有沒選分類的（支出 / 收入）：記帳列表提醒補 */
+export const txnMissingCategory = (t: Pick<Txn, 'lines'>) => t.lines.some((l) => (l.kind === '支出' || l.kind === '收入') && !l.category);
+
 export function txnTitle(t: Txn): string {
   const f = txnToForm(t);
   switch (f.mode) {
@@ -1409,7 +1418,7 @@ export class MoneyStore {
           continue;
         }
       }
-      const p = dir && !has(DIRECTIONS, dir) ? [`direction「${dir}」看不懂（請填：出、入、轉帳）`] : checkTxn(t, refs);
+      const p = dir && !has(DIRECTIONS, dir) ? [`direction「${dir}」看不懂（請填：出、入、轉帳）`] : checkTxn(t, refs, { allowNoCategory: true });
       if (quickCat && !categories.some((x) => x.path === quickCat)) p.unshift(`分類「${quickCat}」不在分類清單裡（請在「🏷️ 分類」新增，或改成清單裡的名稱）`);
       if (p.length) {
         // 沒有明細：準備「在 APP 裡補完」的表單（試算表填的負數照原樣 = 退款）
@@ -2335,7 +2344,7 @@ export class MoneyStore {
       items.map((i) => i.orphan!.line),
       head,
     );
-    const p = checkTxn(input, snap);
+    const p = checkTxn(input, snap, { allowNoCategory: true });
     if (p.length) throw new Error(p.join('；'));
     if (input.store && !snap.orgs.some((o) => o.name === input.store)) await this.addOrg(input.store);
     const now = Date.now();

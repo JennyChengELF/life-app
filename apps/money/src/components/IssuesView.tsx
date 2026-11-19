@@ -188,6 +188,9 @@ function OrphanBatch({ api, snap, list }: { api: MoneyApi; snap: MoneySnapshot; 
             備註（可不填）
             <input value={head.note ?? ''} onChange={(e) => set({ note: e.target.value || null })} />
           </label>
+          {picked.some((i) => (i.orphan!.line.kind === '支出' || i.orphan!.line.kind === '收入') && !i.orphan!.line.category) && (
+            <p className="hint">有明細還沒選分類，可以先存，之後在記帳列表（標「沒有分類」）補。</p>
+          )}
           {preview && (
             <p className="batch-preview">
               {preview.paidBy

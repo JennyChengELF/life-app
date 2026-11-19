@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { EntryForm, Txn } from '@life/db';
-import { emptyForm, parseEditHash, stocktakeStatus, todayKey } from '@life/db';
+import { emptyForm, parseEditHash, stocktakeStatus, todayKey, txnMissingCategory } from '@life/db';
 import { useMoney } from './useMoney';
 import { LedgerView } from './components/LedgerView';
 import { EntryEditor } from './components/EntryEditor';
@@ -155,6 +155,14 @@ export function App() {
                 </button>
               </div>
             ) : null}
+            {/* 2026-11-19：整批補齊、試算表輸入時可以先不選分類 → 提醒回來補，點一下打開最早的那一筆 */}
+            {tab === 'ledger' && !editing && api.snap.txns.some(txnMissingCategory) && (
+              <div className="messages">
+                <button className="msg warn" onClick={() => edit({ form: emptyForm(), txn: api.snap!.txns.filter(txnMissingCategory).sort((a, b) => a.time - b.time)[0] })}>
+                  ⚠️ 有 {api.snap.txns.filter(txnMissingCategory).length} 筆還沒選分類，點這裡補
+                </button>
+              </div>
+            )}
             {api.snap.issues.length > 0 && tab !== 'issues' && (
               <div className="messages">
                 <button className="msg warn" onClick={() => setTab('issues')}>
