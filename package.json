@@ -9,6 +9,7 @@
     "dev:bowel": "pnpm --filter bowel dev",
     "dev:money": "pnpm --filter money dev",
     "dev:calendar": "pnpm --filter calendar dev",
+    "dev:period": "pnpm --filter period dev",
     "build": "pnpm -r --filter ./apps/* build",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck"

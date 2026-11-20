@@ -15,8 +15,9 @@
  * 10：新增定存單；帳戶加卡號 / 帳號後幾碼（2026-11-18）
  * 11：新增帳單、帳單明細、盤點；交易加入帳日、繳哪一期（2026-11-18）
  * 12：新增行事曆 APP（群組、行程、設定）（2026-11-20）
+ * 13：新增生理期 APP、健康共用身體狀況（2026-11-20）
  */
-export const SCHEMA_VERSION = 12;
+export const SCHEMA_VERSION = 13;
 
 export type ColType = 'datetime' | 'date' | 'number' | 'text' | 'bool' | 'any';
 
@@ -27,7 +28,7 @@ export interface ColumnDef {
   label: string;
 }
 
-export type FileKey = 'water' | 'health' | 'bowel' | 'hub' | 'money' | 'calendar';
+export type FileKey = 'water' | 'health' | 'bowel' | 'hub' | 'money' | 'calendar' | 'period';
 
 export interface FileDef {
   /** 試算表檔名（不加版本號） */
@@ -48,6 +49,7 @@ export const FILES: Record<FileKey, FileDef> = {
   hub: { title: '生活APP-綜合', description: '綜合 APP（首頁）的資料：設定、人物、機構（銀行、商店⋯⋯）' },
   money: { title: '生活APP-記帳', description: '記帳 APP 的資料：帳戶、分類、交易（一次付款 / 收款 / 轉帳）、明細（支出、收入、他欠我 / 我欠他、還款）、設定' },
   calendar: { title: '生活APP-行事曆', description: '行事曆 APP 的資料：群組、行程（含旅遊主行程與細項）、設定' },
+  period: { title: '生活APP-生理期', description: '生理期 APP 的資料：經期起訖、每日出血、預測與提醒設定' },
 };
 
 export interface TableDef {
@@ -269,6 +271,64 @@ export const TABLES = {
   healthSettings: {
     file: 'health',
     description: '健康 APP 的設定，請在 APP 裡修改。',
+    columns: [
+      { name: 'key', type: 'text', label: '設定名稱' },
+      { name: 'value', type: 'any', label: '設定值' },
+    ],
+  },
+  healthConditionItems: {
+    file: 'health',
+    description: '共用身體狀況清單。生理期 APP 第一版可管理 showInPeriod；同名項目只保留一筆。',
+    columns: [
+      { name: 'name', type: 'text', label: '症狀名稱（必填、不可重複）' },
+      { name: 'showInHealth', type: 'bool', label: '是否顯示於健康 APP' },
+      { name: 'showInPeriod', type: 'bool', label: '是否顯示於生理期 APP' },
+      { name: 'showInBowel', type: 'bool', label: '是否顯示於廁所大事 APP' },
+      { name: 'sort', type: 'number', label: '排序' },
+      { name: 'archived', type: 'bool', label: '停用（TRUE；歷史紀錄仍保留）' },
+      ...systemCols,
+    ],
+  },
+  healthConditionLogs: {
+    file: 'health',
+    description: '共用身體狀況，一個症狀一列。直接補資料時填 date、symptom，其他可留白。',
+    columns: [
+      { name: 'time', type: 'datetime', label: '發生時間（選填）' },
+      { name: 'date', type: 'date', label: '日期（必填）' },
+      { name: 'symptom', type: 'text', label: '症狀名稱（必填，需存在 healthConditionItems）' },
+      { name: 'severity', type: 'text', label: '程度（輕微、中等、嚴重；選填）' },
+      { name: 'note', type: 'text', label: '備註' },
+      { name: 'personId', type: 'text', label: '是誰的資料（第一版空白 = 我自己）' },
+      { name: 'createdVia', type: 'text', label: '在哪裡輸入（period、health、sheet）' },
+      ...systemCols,
+    ],
+  },
+  periodCycles: {
+    file: 'period',
+    description: '一次經期一列。補已結束的舊資料只需填 startDate、endDate；一列代表一次經期。',
+    columns: [
+      { name: 'startDate', type: 'date', label: '開始日（必填，YYYY-MM-DD）' },
+      { name: 'endDate', type: 'date', label: '最後一天（進行中的最新一次可留白）' },
+      { name: 'excludeFromPrediction', type: 'bool', label: '不納入預測（TRUE；空白 = FALSE）' },
+      { name: 'note', type: 'text', label: '整次經期備註' },
+      ...systemCols,
+    ],
+  },
+  periodDays: {
+    file: 'period',
+    description: '每日出血，有資料才存；正式經期外也可記錄，不會自動改變經期起訖。每個日期最多一列。',
+    columns: [
+      { name: 'date', type: 'date', label: '日期（必填，YYYY-MM-DD）' },
+      { name: 'flow', type: 'text', label: '量（點狀、極少、少量、普通、偏多、大量）' },
+      { name: 'colors', type: 'text', label: '血色（可複選：粉紅、鮮紅、暗紅、褐色、深褐／近黑、其他；用「、」分隔）' },
+      { name: 'clotSize', type: 'text', label: '最大血塊（無、小於1 cm、1～2.4 cm、2.5 cm以上、未觀察）' },
+      { name: 'note', type: 'text', label: '當日備註' },
+      ...systemCols,
+    ],
+  },
+  periodSettings: {
+    file: 'period',
+    description: '生理期 APP 的預測與提醒設定，請在 APP 裡修改。',
     columns: [
       { name: 'key', type: 'text', label: '設定名稱' },
       { name: 'value', type: 'any', label: '設定值' },

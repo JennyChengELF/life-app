@@ -106,9 +106,45 @@ export class SheetsBackend implements Backend {
     for (const file of Object.keys(FILES) as FileKey[]) {
       const sheetTitles = await this.ensureFile(file);
       await this.ensureTables(file, sheetTitles);
+      await this.safely(() => this.ensureDateFormats(file));
       if (folder) await this.safely(() => this.fileIntoFolder(this.sid(file), folder));
       await this.safely(() => this.ensureMarked(file));
     }
+  }
+
+  /** 新增版本的日期欄套用一致格式；每個 schema 版本每份檔案只做一次。 */
+  private async ensureDateFormats(file: FileKey) {
+    const id = this.sid(file);
+    const done = `life.dateFormats.${id}.${SCHEMA_VERSION}`;
+    if (localStorage.getItem(done)) return;
+    // 只處理本輪新增的表，不覆蓋使用者在既有 APP 試算表自行選的日期顯示格式。
+    const formatTables: TableName[] = file === 'period' ? tablesOfFile(file) : file === 'health' ? ['healthConditionLogs'] : [];
+    if (!formatTables.length) {
+      localStorage.setItem(done, '1');
+      return;
+    }
+    const meta = await this.api(`${SHEETS}/${id}?fields=sheets.properties(title,sheetId)`);
+    const sheetIds = new Map<string, number>((meta.sheets ?? []).map((s: any) => [s.properties.title, s.properties.sheetId]));
+    const requests: object[] = [];
+    for (const table of formatTables) {
+      const sheetId = sheetIds.get(table);
+      if (sheetId == null) continue;
+      const header = this.header(table);
+      for (const col of TABLES[table].columns as ColumnDef[]) {
+        if (col.type !== 'date' && col.type !== 'datetime') continue;
+        const index = header.indexOf(col.name);
+        if (index < 0) continue;
+        requests.push({
+          repeatCell: {
+            range: { sheetId, startRowIndex: 1, startColumnIndex: index, endColumnIndex: index + 1 },
+            cell: { userEnteredFormat: { numberFormat: { type: col.type === 'date' ? 'DATE' : 'DATE_TIME', pattern: col.type === 'date' ? 'yyyy-mm-dd' : 'yyyy-mm-dd hh:mm' } } },
+            fields: 'userEnteredFormat.numberFormat',
+          },
+        });
+      }
+    }
+    if (requests.length) await this.api(`${SHEETS}/${id}:batchUpdate`, { method: 'POST', body: JSON.stringify({ requests }) });
+    localStorage.setItem(done, '1');
   }
 
   /** 整理資料夾失敗不影響使用（檔案留在原處，下次再試）；登入過期照常往外丟 */
