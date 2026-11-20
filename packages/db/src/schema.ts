@@ -14,8 +14,9 @@
  * 9：新增預算、預算分配；交易加快速輸入的分類、預算（2026-11-18）
  * 10：新增定存單；帳戶加卡號 / 帳號後幾碼（2026-11-18）
  * 11：新增帳單、帳單明細、盤點；交易加入帳日、繳哪一期（2026-11-18）
+ * 12：新增行事曆 APP（群組、行程、設定）（2026-11-20）
  */
-export const SCHEMA_VERSION = 11;
+export const SCHEMA_VERSION = 12;
 
 export type ColType = 'datetime' | 'date' | 'number' | 'text' | 'bool' | 'any';
 
@@ -26,7 +27,7 @@ export interface ColumnDef {
   label: string;
 }
 
-export type FileKey = 'water' | 'health' | 'bowel' | 'hub' | 'money';
+export type FileKey = 'water' | 'health' | 'bowel' | 'hub' | 'money' | 'calendar';
 
 export interface FileDef {
   /** 試算表檔名（不加版本號） */
@@ -46,6 +47,7 @@ export const FILES: Record<FileKey, FileDef> = {
   },
   hub: { title: '生活APP-綜合', description: '綜合 APP（首頁）的資料：設定、人物、機構（銀行、商店⋯⋯）' },
   money: { title: '生活APP-記帳', description: '記帳 APP 的資料：帳戶、分類、交易（一次付款 / 收款 / 轉帳）、明細（支出、收入、他欠我 / 我欠他、還款）、設定' },
+  calendar: { title: '生活APP-行事曆', description: '行事曆 APP 的資料：群組、行程（含旅遊主行程與細項）、設定' },
 };
 
 export interface TableDef {
@@ -318,6 +320,60 @@ export const TABLES = {
       { name: 'archived', type: 'bool', label: '停用（TRUE）' },
       { name: 'note', type: 'text', label: '備註' },
       ...systemCols,
+    ],
+  },
+  calendarGroups: {
+    file: 'calendar',
+    description: '行事曆群組。第一次使用會建立「一般」；已有行程的群組只停用，不永久刪除。',
+    columns: [
+      { name: 'name', type: 'text', label: '群組名稱（必填）' },
+      { name: 'color', type: 'text', label: '顏色（CSS 色碼，例 #1f6fd1）' },
+      { name: 'kind', type: 'text', label: 'user = 自訂群組；system = 其他 APP 的系統群組' },
+      { name: 'sourceType', type: 'text', label: '系統群組來源；自訂群組空白' },
+      { name: 'sort', type: 'number', label: '排序' },
+      { name: 'hidden', type: 'bool', label: '暫時隱藏（TRUE）' },
+      { name: 'archived', type: 'bool', label: '停用（TRUE；舊行程保留）' },
+      ...systemCols,
+    ],
+  },
+  calendarEvents: {
+    file: 'calendar',
+    description: '行程；待辦不放這裡。title 可空白，APP 畫面會顯示「未命名行程」並提醒補上。日期請填 YYYY-MM-DD，時間請填 HH:mm。',
+    columns: [
+      { name: 'title', type: 'text', label: '標題（可先空白；APP 顯示「未命名行程」並提醒補上）' },
+      { name: 'groupId', type: 'text', label: '主要群組 id（APP 自動帶入預設群組）' },
+      { name: 'parentEventId', type: 'text', label: '所屬主行程 id；一般行程 / 主行程空白' },
+      { name: 'timeType', type: 'text', label: 'range（時段）/ point（時間點）/ allDay（全天）' },
+      { name: 'startDate', type: 'date', label: '開始日期（必填）' },
+      { name: 'startTime', type: 'text', label: '開始時間 HH:mm；全天空白' },
+      { name: 'startTimeZone', type: 'text', label: '開始時區（IANA，例 Asia/Taipei）' },
+      { name: 'endDate', type: 'date', label: '結束日期；全天包含這一天' },
+      { name: 'endTime', type: 'text', label: '結束時間 HH:mm；時間點 / 全天空白' },
+      { name: 'endTimeZone', type: 'text', label: '結束時區（IANA）' },
+      { name: 'timeMode', type: 'text', label: 'fixedZone（固定時區）/ floatingLocal（跟著所在地）' },
+      { name: 'peopleIds', type: 'text', label: '相關人物 id（第二輪；多個用逗號）' },
+      { name: 'tagIds', type: 'text', label: '共用標籤 id（第二輪；多個用逗號）' },
+      { name: 'locationType', type: 'text', label: 'place（地點）/ route（起訖）/ online（線上）' },
+      { name: 'startPlace', type: 'text', label: '地點或起點' },
+      { name: 'endPlace', type: 'text', label: '終點（交通行程）' },
+      { name: 'url', type: 'text', label: '線上會議或相關網址' },
+      { name: 'note', type: 'text', label: '備註' },
+      { name: 'status', type: 'text', label: 'scheduled（正常）/ cancelled（已取消）' },
+      { name: 'recurrence', type: 'text', label: '重複規則（第二輪）' },
+      { name: 'recurrenceParentId', type: 'text', label: '重複事件的原行程 id（第二輪）' },
+      { name: 'recurrenceInstanceKey', type: 'text', label: '重複事件原發生日期 / 實例鍵（第二輪）' },
+      { name: 'exceptions', type: 'text', label: '略過的發生日期（第二輪）' },
+      { name: 'reminders', type: 'text', label: '提醒設定 JSON（第二輪）' },
+      { name: 'createdVia', type: 'text', label: '在哪裡輸入（calendar、sheet）' },
+      ...systemCols,
+    ],
+  },
+  calendarSettings: {
+    file: 'calendar',
+    description: '行事曆 APP 的設定，請在 APP 裡修改。',
+    columns: [
+      { name: 'key', type: 'text', label: '設定名稱' },
+      { name: 'value', type: 'any', label: '設定值' },
     ],
   },
   moneyAccounts: {

@@ -5,13 +5,13 @@ import { bowelEntries, bowelHomeMessage, editHash, fmtMoney, depositsDue, health
 import { DateNav, Timeline } from '@life/ui/timeline';
 import { useHub } from './useHub';
 
-type AppKey = 'water' | 'health' | 'bowel' | 'money';
+type AppKey = 'water' | 'health' | 'bowel' | 'money' | 'calendar';
 
 /**
  * 各 APP 的網址：上線時在同一個網站的子路徑（water/、health/、bowel/）；
  * 開發時每個 APP 是不同的 port。網址有 ?local（本機測試模式）時一起帶過去。
  */
-const DEV_PORTS: Record<AppKey, number> = { water: 5173, health: 5174, bowel: 5175, money: 5176 };
+const DEV_PORTS: Record<AppKey, number> = { water: 5173, health: 5174, bowel: 5175, money: 5176, calendar: 5177 };
 function appUrl(app: AppKey, hash = '') {
   const q = new URLSearchParams(location.search).has('local') ? '?local' : '';
   return import.meta.env.DEV ? `http://${location.hostname}:${DEV_PORTS[app]}/${q}${hash}` : `${app}/${q}${hash}`;
@@ -38,6 +38,7 @@ const TILES: Tile[] = [
   { key: 'bowel', app: 'bowel', hash: '', icon: 'calendar', label: '廁所大事' },
   { key: 'moneyNew', app: 'money', hash: '#new', icon: 'pencil', label: '記一筆' },
   { key: 'money', app: 'money', hash: '', icon: 'wallet', label: '記帳' },
+  { key: 'calendar', app: 'calendar', hash: '', icon: 'calendar', label: '行事曆' },
 ];
 const tileOf = (k: string) => TILES.find((t) => t.key === k)!;
 
@@ -48,6 +49,7 @@ const tileOf = (k: string) => TILES.find((t) => t.key === k)!;
 const GROUPS: { key: string; icon: IconName; label: string; tiles: string[] }[] = [
   { key: 'health', icon: 'stethoscope', label: '健康', tiles: ['water', 'bowelNew', 'body', 'bp', 'glucose', 'temp', 'health', 'bowel'] },
   { key: 'money', icon: 'wallet', label: '記帳', tiles: ['moneyNew', 'money'] },
+  { key: 'calendar', icon: 'calendar', label: '行程', tiles: ['calendar'] },
 ];
 
 /** 💡 還沒設定過時的常用（和原本首頁一樣） */
