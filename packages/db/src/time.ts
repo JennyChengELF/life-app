@@ -34,7 +34,7 @@ export function toSheetDateTime(ms: number): string {
   return `${toDateKey(ms)} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-/** 毫秒 → 'HH:mm' */
+/** 毫秒 → 24 小時制 'HH:mm'（2026-11-21 使用者決定：APP 顯示不使用上午／下午，也不顯示秒數） */
 export function toHHmm(ms: number): string {
   const d = new Date(ms);
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;

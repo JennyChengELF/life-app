@@ -13,6 +13,7 @@ import {
   predictPeriod,
   projectPeriods,
   todayKey,
+  toHHmm,
 } from '@life/db';
 import { Icon } from '@life/ui/icon';
 import type { PeriodApi } from '../usePeriod';
@@ -186,7 +187,7 @@ function DailyDetails({ api, conditions, date, cycle, predictionLabel, day, onDi
       </dl>
     </section>
     <section className="card"><h2>備註</h2><p className={day?.note ? '' : 'muted'}>{day?.note ?? '沒有紀錄'}</p></section>
-    <section className="card"><h2>身體狀況</h2>{currentLogs.length ? <ul className="condition-summary-list">{currentLogs.map((log) => <li key={log.id}><strong>{log.symptom}</strong>{log.severity && <span>程度：{log.severity}</span>}{log.time != null && <span>時間：{formatTime(log.time)}</span>}{log.note && <span>備註：{log.note}</span>}</li>)}</ul> : <p className="muted">沒有紀錄</p>}</section>
+    <section className="card"><h2>身體狀況</h2>{currentLogs.length ? <ul className="condition-summary-list">{currentLogs.map((log) => <li key={log.id}><strong>{log.symptom}</strong>{log.severity && <span>程度：{log.severity}</span>}{log.time != null && <span>時間：{toHHmm(log.time)}</span>}{log.note && <span>備註：{log.note}</span>}</li>)}</ul> : <p className="muted">沒有紀錄</p>}</section>
     <button className="day-edit-fab" aria-label="編輯這天的紀錄" title="編輯這天的紀錄" onClick={() => setEditing(true)}><Icon name="pencil" size={22} /><span>編輯</span></button>
   </>;
 
@@ -230,12 +231,12 @@ function DailyDetails({ api, conditions, date, cycle, predictionLabel, day, onDi
 }
 
 function ConditionDraftRow({ date, draft, update, remove }: { date: string; draft: DraftCondition; update: (patch: Partial<DraftCondition>) => void; remove: () => void }) {
-  const localTime = draft.time == null ? '' : formatTime(draft.time);
+  const localTime = draft.time == null ? '' : toHHmm(draft.time);
   const setTime = (value: string) => update({ time: value ? new Date(`${date}T${value}`).getTime() : null });
   const hasMore = draft.time != null || !!draft.note?.trim();
   return <div className="condition-draft">
     <div className="condition-main-row"><strong>{draft.symptom}</strong><div className="choice condition-severity">{CONDITION_SEVERITIES.map((x) => <button key={x} className={draft.severity === x ? 'active' : ''} onClick={() => update({ severity: draft.severity === x ? null : x as ConditionSeverity })}>{x}</button>)}</div><button className="link more-toggle" onClick={() => update({ expanded: !draft.expanded })}>{draft.expanded ? '收合' : `更多${hasMore ? '・已填' : ''}`}</button><button className="link danger-text" onClick={remove}>移除</button></div>
-    {draft.expanded && <div className="condition-more"><label className="field">時間（選填）<span className="time-row"><input type="time" value={localTime} onChange={(e) => setTime(e.target.value)} />{date === todayKey() && <button onClick={() => setTime(`${String(new Date().getHours()).padStart(2, '0')}:${String(new Date().getMinutes()).padStart(2, '0')}`)}>現在</button>}</span></label><label className="field">備註（選填）<input value={draft.note ?? ''} onChange={(e) => update({ note: e.target.value })} /></label></div>}
+    {draft.expanded && <div className="condition-more"><label className="field">時間（選填）<span className="time-row"><input type="time" value={localTime} onChange={(e) => setTime(e.target.value)} />{date === todayKey() && <button onClick={() => setTime(toHHmm(Date.now()))}>現在</button>}</span></label><label className="field">備註（選填）<input value={draft.note ?? ''} onChange={(e) => update({ note: e.target.value })} /></label></div>}
   </div>;
 }
 
@@ -248,4 +249,3 @@ const formatLongDate = (date: string) => {
   const [year, month, day] = date.split('-').map(Number);
   return `${year} 年 ${month} 月 ${day} 日`;
 };
-const formatTime = (time: number) => `${String(new Date(time).getHours()).padStart(2, '0')}:${String(new Date(time).getMinutes()).padStart(2, '0')}`;
