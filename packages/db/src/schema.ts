@@ -482,7 +482,7 @@ export const TABLES = {
       { name: 'time', type: 'datetime', label: '消費 / 發生時間（必填）' },
       { name: 'direction', type: 'text', label: '出（錢從帳戶出去）、入（錢進帳戶）、轉帳；沒帳戶（朋友先幫我付、不用還了）時空白' },
       { name: 'account', type: 'text', label: '帳戶名稱（轉帳時是轉出的帳戶）' },
-      { name: 'amount', type: 'number', label: '金額（帳戶幣別，一律正數）' },
+      { name: 'amount', type: 'number', label: '金額（帳戶幣別；一般支出／收入可填 0，轉帳／借還款須大於 0）' },
       { name: 'paidBy', type: 'text', label: '朋友先幫我付時，填人物名稱' },
       { name: 'currency', type: 'text', label: '幣別：只有沒帳戶時才填（有帳戶時看帳戶的幣別）；空白 = TWD' },
       { name: 'toAccount', type: 'text', label: '轉帳：轉入的帳戶' },
@@ -508,7 +508,7 @@ export const TABLES = {
     columns: [
       { name: 'transaction', type: 'text', label: '屬於哪筆交易（moneyTransactions 的 id，必填）' },
       { name: 'kind', type: 'text', label: '支出、收入、他欠我、我欠他、他還我、我還他、調整（必填）' },
-      { name: 'amount', type: 'number', label: '金額（一律正數，必填）' },
+      { name: 'amount', type: 'number', label: '金額（支出／收入可填 0；人物、借還款須大於 0；必填）' },
       { name: 'category', type: 'text', label: '分類（支出、收入必填；填分類的 path）' },
       { name: 'person', type: 'text', label: '人物名稱（他欠我、我欠他、他還我、我還他必填）' },
       { name: 'budget', type: 'text', label: '扣 / 放進哪個預算（預算功能之後做）' },

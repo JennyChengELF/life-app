@@ -282,6 +282,7 @@ button.bt-row:hover, .bt-row.open { background: var(--bg); }
 .badge { display: inline-block; font-size: 0.72rem; font-weight: 500; border-radius: 999px; padding: 0 7px; line-height: 1.6; vertical-align: 1px; margin-left: 2px; }
 .badge.person { background: #ece8fb; color: #5338a8; }
 .badge.warn { background: var(--warn-soft); color: var(--warn); }
+.badge.info { background: var(--accent-soft); color: var(--accent-strong); }
 @media (prefers-color-scheme: dark) { .badge.person { background: #2c2648; color: #b6a6f2; } }
 
 /* 右下角「＋」記一筆 */

@@ -99,6 +99,16 @@ describe('預算', () => {
     expect(budgetMonth(snap, '2026-11')).toMatchObject({ incomeMonth: '2026-11', unallocated: -9000 });
   });
 
+  it('0 元純記錄不扣預算，也不列入缺少預算', async () => {
+    await spend('2026-11-03 12:00', 0, '日常雜支');
+    await spend('2026-11-04 12:00', 0, null);
+    snap = await store.load();
+    const nov = budgetMonth(snap, '2026-11');
+    expect(nov.rows[0]).toMatchObject({ used: 0, income: 0 });
+    expect(nov.rows[0].lines).toEqual([]);
+    expect(nov.missing).toEqual([]);
+  });
+
   it('年終補差額：理想 − 已放；預設預算：分類預設 → 上次用的', async () => {
     await store.allocate('2026-01', '每月', [{ budget: '日常雜支', amount: 9000 }]);
     await store.allocate('2026-02', '每月', [{ budget: '日常雜支', amount: 9000 }]);

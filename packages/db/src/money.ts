@@ -744,11 +744,20 @@ export function checkTxn(t: Omit<TxnInput, 'tags'> & { tags?: string[] }, refs: 
   const cur = txnCurrency(t, refs.accounts);
   const intOk = (n: number) => currencyDigits(cur) > 0 || Number.isInteger(n);
 
+  // 2026-11-21 使用者決定：一般支出／收入可以明確記 0；淨額為 0 時帳戶可留空。
+  // 空白金額會在 formToTxn 轉成 NaN，因此仍和「輸入 0」分得出來。
+  const zeroRecord =
+    t.amount === 0 &&
+    (t.direction === '出' || t.direction === '入') &&
+    t.lines.length > 0 &&
+    t.lines.every((l) => l.kind === '支出' || l.kind === '收入');
+
   if (t.direction) {
-    if (!t.account) p.push('沒有填帳戶');
-    else if (!accName(t.account)) p.push(`帳戶「${t.account}」不在帳戶清單裡`);
+    if (!t.account) {
+      if (!zeroRecord) p.push('沒有填帳戶');
+    } else if (!accName(t.account)) p.push(`帳戶「${t.account}」不在帳戶清單裡`);
     // 退款用負數記（2026-11-18）：支出 / 收入的交易金額已經轉成正數，這裡只會是沒填、0、或借還款轉帳填了負數
-    if (t.amount == null || Number.isNaN(t.amount) || t.amount === 0) p.push('請填金額');
+    if (t.amount == null || Number.isNaN(t.amount) || (t.amount === 0 && !zeroRecord)) p.push('請填金額');
     else if (t.amount < 0) p.push('轉帳、借款、還款的金額請填正數');
     else if (!intOk(t.amount)) p.push(`${cur} 金額請填整數`);
     if (t.paidBy) p.push('朋友先幫我付（paidBy）時不能有帳戶和出 / 入');
@@ -783,7 +792,7 @@ export function checkTxn(t: Omit<TxnInput, 'tags'> & { tags?: string[] }, refs: 
     }
     // 支出、收入可以是負數（退款、折扣，2026-11-18 使用者決定）；其他明細一律正數
     const signed = l.kind === '支出' || l.kind === '收入';
-    if (!Number.isFinite(l.amount) || (signed ? l.amount === 0 : !(l.amount > 0))) p.push(`${at}${signed ? '請填金額（負數 = 退款、折扣）' : '分帳、借款、還款的金額請填正數'}`);
+    if (!Number.isFinite(l.amount) || (!signed && !(l.amount > 0))) p.push(`${at}${signed ? '請填金額（負數 = 退款、折扣）' : '分帳、借款、還款的金額請填正數'}`);
     else if (!intOk(l.amount)) p.push(`${at}${cur} 金額請填整數`);
     if (l.kind === '支出' || l.kind === '收入') {
       const c = l.category ? refs.categories.find((x) => x.path === normPath(l.category!)) : null;
@@ -936,7 +945,7 @@ export function monthStats(txns: Txn[], categories: Pick<Category, 'path' | 'isI
   const invest = new Set(categories.filter((c) => c.isInvest).map((c) => c.path));
   const by = new Map<string, MonthStats & { _e: Map<string, number>; _i: Map<string, number> }>();
   for (const t of txns) {
-    if (!t.date.startsWith(month)) continue;
+    if (!t.date.startsWith(month) || isRecordOnlyTxn(t)) continue;
     const cur = txnCurrency(t, accounts);
     for (const l of t.lines) {
       if (l.kind !== '支出' && l.kind !== '收入') continue;
@@ -1039,7 +1048,9 @@ export const formTotal = (f: EntryForm) =>
 export function formToTxn(f: EntryForm): TxnInput {
   const base = { time: f.time, store: f.store?.trim() || null, branch: f.store?.trim() ? f.branch?.trim() || null : null, statementText: f.statementText?.trim() || null, note: f.note?.trim() || null, tags: f.tags, toAccount: null, toAmount: null, paidBy: null, currency: null };
   const cats = (items: EntryForm['cats'], kind: '支出' | '收入'): LineInput[] =>
-    items.filter((c) => c.category || c.amount).map((c) => ({ kind, amount: c.amount ?? 0, category: c.category, note: c.note ?? null, budget: c.budget ?? null }));
+    items
+      .filter((c) => c.category || c.amount != null)
+      .map((c) => ({ kind, amount: c.amount ?? Number.NaN, category: c.category, note: c.note ?? null, budget: c.budget ?? null }));
   const shareLines = (kind: '他欠我' | '我欠他'): LineInput[] =>
     f.shares.filter((s) => s.person || s.amount).map((s) => ({ kind, amount: s.amount ?? 0, person: s.person, note: s.note?.trim() || null }));
   switch (f.mode) {
@@ -1295,8 +1306,14 @@ export function txnTitle(t: Txn): string {
   }
 }
 
+/** 純記錄用的 0 元交易；包含收入／支出互抵為 0，不能含人物、借還款或轉帳。 */
+export function isRecordOnlyTxn(t: Pick<Txn, 'amount' | 'lines'>): boolean {
+  return t.amount === 0 && t.lines.length > 0 && t.lines.every((l) => l.kind === '支出' || l.kind === '收入');
+}
+
 /** 這筆交易「我」的收支（列表顯示用）：支出 − 收入（正 = 花錢） */
 export function txnMyNet(t: Txn): { expense: number; income: number } {
+  if (isRecordOnlyTxn(t)) return { expense: 0, income: 0 };
   let expense = 0;
   let income = 0;
   for (const l of t.lines) {

@@ -1,5 +1,5 @@
 import type { MoneySnapshot, Txn } from '@life/db';
-import { emptyForm, fmtMoney, monthStats, startOfDay, todayKey, toHHmm, topCategory, txnCurrency, txnMissingCategory, txnMyNet, txnTitle } from '@life/db';
+import { emptyForm, fmtMoney, isRecordOnlyTxn, monthStats, startOfDay, todayKey, toHHmm, topCategory, txnCurrency, txnMissingCategory, txnMyNet, txnTitle } from '@life/db';
 import { MonthCalendar } from '@life/ui/month-calendar';
 import { Icon, type IconName } from '@life/ui/icon';
 import type { Editing } from '../App';
@@ -65,7 +65,7 @@ export function TxIcon({ t, snap }: { t: Txn; snap: MoneySnapshot }) {
 function TxBadges({ t }: { t: Txn }) {
   const cur = t.lines.some((l) => l.kind === '支出');
   const people = cur ? t.lines.filter((l) => l.kind === '他欠我' && l.person) : [];
-  const noBudget = t.lines.some((l) => l.kind === '支出' && !l.budget);
+  const noBudget = !isRecordOnlyTxn(t) && t.lines.some((l) => l.kind === '支出' && !l.budget);
   return (
     <>
       {people.map((l) => (
@@ -75,6 +75,7 @@ function TxBadges({ t }: { t: Txn }) {
       ))}
       {txnMissingCategory(t) && <span className="badge warn">沒有分類</span>}
       {noBudget && <span className="badge warn">沒有預算</span>}
+      {isRecordOnlyTxn(t) && <span className="badge info">僅記錄</span>}
     </>
   );
 }
@@ -95,7 +96,7 @@ export function subText(t: Txn, withBadges = true) {
   const lineNotes = t.lines.map((l) => l.note).filter((x): x is string => !!x && x !== t.note);
   if (lineNotes.length) parts.push(lineNotes.join('／'));
   if (t.tags.length) parts.push(t.tags.map((x) => `#${x}`).join(' '));
-  if (withBadges && t.lines.some((l) => l.kind === '支出' && !l.budget)) parts.unshift('⚠️ 沒有預算');
+  if (withBadges && !isRecordOnlyTxn(t) && t.lines.some((l) => l.kind === '支出' && !l.budget)) parts.unshift('⚠️ 沒有預算');
   if (withBadges && txnMissingCategory(t)) parts.unshift('⚠️ 沒有分類');
   return parts.join('・');
 }

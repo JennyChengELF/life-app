@@ -22,6 +22,7 @@ import {
   feeTxnFrom,
   findFeeTxn,
   isFeeTxn,
+  isRecordOnlyTxn,
   fmtMoney,
   formToTxn,
   installmentTxns,
@@ -35,6 +36,7 @@ import {
   personBalances,
   splitEven,
   txnMissingCategory,
+  txnMyNet,
   txnTitle,
   txnToForm,
 } from '../src';
@@ -166,6 +168,31 @@ describe('表單 ↔ 交易', () => {
       ['支出', 2000],
     ]);
     expect(back).toMatchObject({ mode: '收入', counterCats: [{ category: '住 / 日用品', amount: 2000, note: '勞保／健保' }] });
+  });
+  it('明確輸入 0 可當純記錄；空白仍提示，轉帳與人物明細仍須大於 0', () => {
+    const zero = roundTrip(form({ account: null, store: '備忘店家', cats: [{ category: '食 / 三餐', amount: 0, note: '只記這次去過' }] }));
+    expect(zero.t).toMatchObject({ direction: '出', account: null, amount: 0 });
+    expect(zero.t.lines).toMatchObject([{ kind: '支出', amount: 0 }]);
+    expect(isRecordOnlyTxn(zero.txn)).toBe(true);
+    expect(txnMyNet(zero.txn)).toEqual({ expense: 0, income: 0 });
+    expect(zero.back).toMatchObject({ mode: '支出', cats: [{ amount: 0 }] });
+
+    const blank = checkTxn(formToTxn(form({ account: null, cats: [{ category: '食 / 三餐', amount: null }] })), refs).join('；');
+    expect(blank).toContain('請填金額');
+    expect(checkTxn(formToTxn(form({ mode: '轉帳', account: '台幣現金', toAccount: '日圓現金', amount: 0 })), refs).join()).toContain('請填金額');
+    expect(checkTxn(formToTxn(form({ account: '台幣現金', cats: [], shares: [{ person: '小明', amount: 0 }] })), refs).join()).toContain('正數');
+  });
+  it('收入與支出互抵為 0 可不選帳戶，且不列入收支統計', () => {
+    const mixed = roundTrip(
+      form({
+        account: null,
+        cats: [{ category: '住 / 日用品', amount: 100 }],
+        counterCats: [{ category: '薪資', amount: 100 }],
+      }),
+    );
+    expect(mixed.t).toMatchObject({ direction: '出', account: null, amount: 0 });
+    expect(isRecordOnlyTxn(mixed.txn)).toBe(true);
+    expect(monthStats([mixed.txn], [], refs.accounts, '2026-11')).toEqual([]);
   });
   it('收入、轉帳、借錢、還款、不用還了', () => {
     expect(roundTrip(form({ mode: '收入', account: '台幣現金', cats: [{ category: '薪資', amount: 60000 }] })).back.mode).toBe('收入');
@@ -528,7 +555,7 @@ describe('退款（負數）、國外交易手續費', () => {
     expect(discount.t).toMatchObject({ direction: '出', amount: 900 });
     const [s] = monthStats([refund.txn, discount.txn], [], refs.accounts, '2026-11');
     expect(s.expense).toBe(883);
-    expect(checkTxn(formToTxn(form({ account: '大戶信用卡', cats: [{ category: '食 / 三餐', amount: 0 }] })), refs).join()).toContain('請填金額');
+    expect(checkTxn(formToTxn(form({ account: '大戶信用卡', cats: [{ category: '食 / 三餐', amount: 0 }] })), refs)).toEqual([]);
   });
   it('手續費另記一筆：分類跟著消費（依比例分）、店家記發卡銀行、標籤跟著', () => {
     const buy = formToTxn(
@@ -590,19 +617,22 @@ describe('統計：佔比、年統計、首頁時間軸', () => {
     const acc = { type: '現金' as const, currency: 'TWD', org: null, openingDate: null, openingBalance: null, closingDay: null, dueDay: null, fxFeeRate: null, expiryDate: null, monthlyCheck: true, archived: false, note: null };
     await store.saveAccount({ ...acc, name: '錢包' });
     await store.saveTxn(formToTxn({ ...form({ account: '錢包', store: '八方雲集', cats: [{ category: '食 / 三餐', amount: 86 }] }), time: at('2026-03-05 12:30') }));
+    await store.saveTxn(formToTxn({ ...form({ account: null, store: '市集', cats: [{ category: '住 / 日用品', amount: 0 }] }), time: at('2026-03-05 15:00') }));
     const snap = await store.load();
     const year = monthlyTotals(snap.txns, snap.categories, snap.accounts, '2026');
     expect(year).toHaveLength(12);
     expect(year[2]).toMatchObject({ month: '2026-03', expense: 86 });
-    const [e] = moneyEntries(snap, '2026-03-05');
+    const entries = moneyEntries(snap, '2026-03-05');
+    const e = entries.find((x) => x.name === '食 / 三餐')!;
     expect(e).toMatchObject({ icon: 'wallet', name: '食 / 三餐', value: '−NT$ 86', extra: '八方雲集・錢包', ref: { app: 'money', kind: 'money' } });
+    expect(entries.find((x) => x.name === '住 / 日用品')).toMatchObject({ value: 'NT$ 0', extra: '僅記錄・市集' });
     expect(moneyDayTotals(snap, '2026-03-05')).toEqual({ expense: 86, income: 0 });
     expect(parseEditHash(`#edit/money/${e.ref.id}`)).toEqual({ kind: 'money', id: e.ref.id });
   });
 });
 
 describe('退款不出現「大於 0」', () => {
-  it('朋友先付後退款：變成他欠我；空白、0 只說請填金額', () => {
+  it('朋友先付後退款：變成他欠我；空白只說請填金額', () => {
     const t = formToTxn(form({ paidBy: '小明', cats: [{ category: '食 / 三餐', amount: -200 }] }));
     expect(t.lines[1]).toMatchObject({ kind: '他欠我', amount: 200 });
     expect(checkTxn(t, refs)).toEqual([]);

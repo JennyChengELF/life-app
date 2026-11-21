@@ -13,7 +13,7 @@ import { bowelSummary, judgeBowel } from './bowel';
 import type { WaterSnapshot } from './water';
 import { computeGoal, drinkOf, goalWeight } from './water';
 import type { MoneySnapshot } from './money';
-import { fmtMoney, txnCurrency, txnMyNet, txnTitle } from './money';
+import { fmtMoney, isRecordOnlyTxn, txnCurrency, txnMyNet, txnTitle } from './money';
 
 /** 點一列要修改的是哪一筆 */
 export type EntryRef =
@@ -189,7 +189,13 @@ export function moneyEntries(snap: MoneySnapshot, date: string): TimelineEntry[]
       const { expense, income } = txnMyNet(t);
       const net = income - expense;
       const value = expense || income ? `${net < 0 ? '−' : '+'}${fmtMoney(Math.abs(net), cur)}` : fmtMoney(t.amount ?? 0, cur);
-      const extra = [t.store, t.direction === '轉帳' ? `${t.account} → ${t.toAccount}` : (t.account ?? (t.paidBy ? `${t.paidBy} 先付` : null))].filter(Boolean).join('・');
+      const extra = [
+        isRecordOnlyTxn(t) ? '僅記錄' : null,
+        t.store,
+        t.direction === '轉帳' ? `${t.account} → ${t.toAccount}` : (t.account ?? (t.paidBy ? `${t.paidBy} 先付` : null)),
+      ]
+        .filter(Boolean)
+        .join('・');
       return {
         key: t.id,
         time: t.time,
