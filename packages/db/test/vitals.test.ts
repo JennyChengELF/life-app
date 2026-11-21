@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { BloodPressure } from '../src';
 import {
+  bpAttentionReasons,
   bpPeriodOf,
   compute722,
   guessTiming,
+  glucoseAttentionReasons,
   HealthStore,
   judgeBp,
+  judgeBpReading,
   judgeGlucose,
   judgeTemp,
   LocalBackend,
@@ -31,6 +34,17 @@ describe('顏色標示', () => {
     expect(judgeBp(88, 58).label).toBe('偏低');
   });
 
+  it('血壓列出全部需注意原因，包含安靜休息時脈搏範圍', () => {
+    expect(bpAttentionReasons(145, 55, 110)).toEqual([
+      { level: 'bad', text: '收縮壓過高：145 mmHg（140 以上）' },
+      { level: 'warn', text: '舒張壓偏低：55 mmHg（低於 60）' },
+      { level: 'warn', text: '心跳過快：110 次／分（高於 100）' },
+    ]);
+    expect(bpAttentionReasons(118, 76, 59)[0].text).toContain('心跳偏慢');
+    expect(judgeBpReading(118, 76, 70)).toEqual({ level: 'ok', label: '一般範圍' });
+    expect(judgeBpReading(145, 55, 110)).toEqual({ level: 'bad', label: '需注意' });
+  });
+
   it('血糖依測量時機', () => {
     expect(judgeGlucose('空腹', 99).level).toBe('ok');
     expect(judgeGlucose('空腹', 100).level).toBe('warn');
@@ -41,6 +55,15 @@ describe('顏色標示', () => {
     expect(judgeGlucose('睡前', 200).level).toBe('bad');
     expect(judgeGlucose('飯後2小時', 65)).toEqual({ level: 'warn', label: '偏低' });
     expect(judgeGlucose('空腹', 50)).toEqual({ level: 'bad', label: '低血糖' });
+  });
+
+  it('血糖原因包含測量時機、數值與對應門檻', () => {
+    expect(glucoseAttentionReasons('空腹', 126)).toEqual([
+      { level: 'bad', text: '空腹血糖過高：126 mg/dL（126 以上）' },
+    ]);
+    expect(glucoseAttentionReasons('飯後2小時', 150)[0].text).toBe('飯後 2 小時血糖偏高：150 mg/dL（140–199）');
+    expect(glucoseAttentionReasons('睡前', 65)[0].text).toBe('睡前血糖偏低：65 mg/dL（低於 70）');
+    expect(glucoseAttentionReasons('隨機', 180)).toEqual([]);
   });
 
   it('體溫：一般 37.5 微燒、38 發燒；基礎體溫不標', () => {

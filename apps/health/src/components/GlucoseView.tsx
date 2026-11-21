@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import type { BloodGlucose, GlucoseTiming, HealthSnapshot } from '@life/db';
-import { GLUCOSE_TIMINGS, guessTiming, HBA1C_CODE, judgeGlucose, judgeLab } from '@life/db';
+import { GLUCOSE_TIMINGS, glucoseAttentionReasons, guessTiming, HBA1C_CODE, judgeGlucose, judgeLab } from '@life/db';
 import type { HealthApi } from '../useHealth';
 import type { Nav, VitalForm } from '../App';
 import { fmtDateTime, parseNum } from '../format';
 import { TrendChart } from './TrendChart';
-import { Badge, Choice, NumField, RangeSeg, sinceOf, useTimeInput, VitalFormShell } from './vital';
+import { AttentionReasons, Badge, Choice, NumField, RangeSeg, sinceOf, useTimeInput, VitalFormShell } from './vital';
 
 export function GlucoseView({ api, snap, nav, form }: { api: HealthApi; snap: HealthSnapshot; nav: Nav; form: VitalForm | null }) {
   const used = GLUCOSE_TIMINGS.filter((t) => snap.glucose.some((x) => x.timing === t));
@@ -63,11 +63,19 @@ function GlucoseTrend({ list, mixed }: { list: BloodGlucose[]; mixed: boolean })
 
 function GlucoseHistory({ list, nav }: { list: BloodGlucose[]; nav: Nav }) {
   const [limit, setLimit] = useState(30);
-  const rows = [...list].reverse();
+  const [attentionOnly, setAttentionOnly] = useState(false);
+  const allRows = [...list].reverse();
+  const rows = attentionOnly ? allRows.filter((x) => glucoseAttentionReasons(x.timing, x.mgdl).length > 0) : allRows;
   return (
     <section className="card">
-      <h2>紀錄</h2>
-      <div className="table-wrap">
+      <div className="chart-head">
+        <h2>紀錄</h2>
+        <div className="seg">
+          <button className={!attentionOnly ? 'active' : ''} onClick={() => { setAttentionOnly(false); setLimit(30); }}>全部</button>
+          <button className={attentionOnly ? 'active' : ''} onClick={() => { setAttentionOnly(true); setLimit(30); }}>只看需注意</button>
+        </div>
+      </div>
+      {rows.length === 0 ? <p className="muted center-text">沒有需要注意的血糖紀錄</p> : <div className="table-wrap">
         <table className="data-table">
           <thead>
             <tr>
@@ -95,7 +103,7 @@ function GlucoseHistory({ list, nav }: { list: BloodGlucose[]; nav: Nav }) {
             ))}
           </tbody>
         </table>
-      </div>
+      </div>}
       {rows.length > limit && (
         <button className="link" onClick={() => setLimit(limit + 50)}>
           顯示更多（還有 {rows.length - limit} 筆）
@@ -127,6 +135,7 @@ function GlucoseForm({ api, nav, rec, initialTime }: { api: HealthApi; nav: Nav;
   };
   const v = parseNum(mgdl);
   const judge = v != null && v > 0 ? judgeGlucose(timing, v) : null;
+  const reasons = v != null && v > 0 ? glucoseAttentionReasons(timing, v) : [];
 
   return (
     <div className="body-form">
@@ -160,6 +169,7 @@ function GlucoseForm({ api, nav, rec, initialTime }: { api: HealthApi; nav: Nav;
           {!picked && <span className="hint">依時間自動選的，不對可以改</span>}
         </div>
         <NumField label="血糖" unit="mg/dL" value={mgdl} onChange={setMgdl} autoFocus={!rec} hint={judge && <Badge judge={judge} />} />
+        <AttentionReasons reasons={reasons} />
       </VitalFormShell>
       <p className="muted small">
         {timing}的標準：{STANDARD[timing]}；任何時機低於 70 偏低、低於 54 低血糖。

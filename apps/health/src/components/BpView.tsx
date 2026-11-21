@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import type { BloodPressure, HealthSnapshot } from '@life/db';
-import { compute722, formatRange, judgeBp, recentBpAverage, toDateKey, toInputDateTime } from '@life/db';
+import { bpAttentionReasons, compute722, formatRange, judgeBp, judgeBpReading, recentBpAverage, toDateKey, toInputDateTime } from '@life/db';
 import type { HealthApi } from '../useHealth';
 import type { Nav, VitalForm } from '../App';
 import { fmtDateTime, parseNum } from '../format';
 import { TrendChart } from './TrendChart';
-import { Badge, NumField, RangeSeg, sinceOf, useTimeInput, VitalFormShell } from './vital';
+import { AttentionReasons, Badge, NumField, RangeSeg, sinceOf, useTimeInput, VitalFormShell } from './vital';
 
 export function BpView({ api, snap, nav, form }: { api: HealthApi; snap: HealthSnapshot; nav: Nav; form: VitalForm | null }) {
   if (form) return <BpForm api={api} nav={nav} rec={form.rec as BloodPressure | null} initialTime={form.initialTime} />;
@@ -117,11 +117,19 @@ function BpTrend({ snap }: { snap: HealthSnapshot }) {
 
 function BpHistory({ snap, nav }: { snap: HealthSnapshot; nav: Nav }) {
   const [limit, setLimit] = useState(30);
-  const rows = [...snap.bp].reverse();
+  const [attentionOnly, setAttentionOnly] = useState(false);
+  const allRows = [...snap.bp].reverse();
+  const rows = attentionOnly ? allRows.filter((x) => bpAttentionReasons(x.systolic, x.diastolic, x.pulse).length > 0) : allRows;
   return (
     <section className="card">
-      <h2>紀錄</h2>
-      <div className="table-wrap">
+      <div className="chart-head">
+        <h2>紀錄</h2>
+        <div className="seg">
+          <button className={!attentionOnly ? 'active' : ''} onClick={() => { setAttentionOnly(false); setLimit(30); }}>全部</button>
+          <button className={attentionOnly ? 'active' : ''} onClick={() => { setAttentionOnly(true); setLimit(30); }}>只看需注意</button>
+        </div>
+      </div>
+      {rows.length === 0 ? <p className="muted center-text">沒有需要注意的血壓紀錄</p> : <div className="table-wrap">
         <table className="data-table">
           <thead>
             <tr>
@@ -143,13 +151,13 @@ function BpHistory({ snap, nav }: { snap: HealthSnapshot; nav: Nav }) {
                 <td className="num">{showBp(x.systolic, x.diastolic)}</td>
                 <td className="num">{x.pulse ?? '—'}</td>
                 <td className="num">
-                  <Badge judge={judgeBp(x.systolic, x.diastolic)} />
+                  <Badge judge={judgeBpReading(x.systolic, x.diastolic, x.pulse)} />
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-      </div>
+      </div>}
       {rows.length > limit && (
         <button className="link" onClick={() => setLimit(limit + 50)}>
           顯示更多（還有 {rows.length - limit} 筆）
@@ -168,7 +176,9 @@ function BpForm({ api, nav, rec, initialTime }: { api: HealthApi; nav: Nav; rec:
   const [count, setCount] = useState(0);
   const s = parseNum(sys);
   const d = parseNum(dia);
-  const judge = s && d && s > d ? judgeBp(s, d) : null;
+  const p = parseNum(pulse);
+  const judge = s != null && d != null && s > d ? judgeBpReading(s, d, Number.isNaN(p) ? null : p) : null;
+  const reasons = s != null && d != null && s > d ? bpAttentionReasons(s, d, Number.isNaN(p) ? null : p) : [];
 
   return (
     <div className="body-form">
@@ -205,13 +215,14 @@ function BpForm({ api, nav, rec, initialTime }: { api: HealthApi; nav: Nav; rec:
           <NumField label="舒張壓（低）" unit="mmHg" value={dia} onChange={setDia} />
           <NumField label="脈搏" unit="次/分" value={pulse} onChange={setPulse} />
         </div>
+        <AttentionReasons reasons={reasons} />
         {judge && (
           <p>
             <Badge judge={judge} />
           </p>
         )}
       </VitalFormShell>
-      <p className="muted small">標準：低於 130/80 正常；130–139 或 80–89 偏高；140/90 以上高；低於 90/60 偏低（台灣 2022 居家血壓）。</p>
+      <p className="muted small">標準：低於 130/80 正常；130–139 或 80–89 偏高；140/90 以上高；低於 90/60 偏低（台灣 2022 居家血壓）。脈搏以安靜休息時成人一般 60～100 次／分作參考。</p>
     </div>
   );
 }

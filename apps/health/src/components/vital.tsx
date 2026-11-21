@@ -1,6 +1,6 @@
 /** 血壓、血糖、體溫共用的小元件 */
 import { useState, type ReactNode } from 'react';
-import type { Judge } from '@life/db';
+import type { AttentionReason, Judge } from '@life/db';
 import { toInputDateTime } from '@life/db';
 import type { HealthApi } from '../useHealth';
 
@@ -8,6 +8,18 @@ import type { HealthApi } from '../useHealth';
 export function Badge({ judge }: { judge: Judge | null }) {
   if (!judge) return null;
   return <span className={`lv ${judge.level}`}>{judge.label}</span>;
+}
+
+/** 修改紀錄時列出全部需注意原因；這是一般參考，不作疾病診斷。 */
+export function AttentionReasons({ reasons }: { reasons: AttentionReason[] }) {
+  if (!reasons.length) return null;
+  return (
+    <div className="attention-reasons" role="status">
+      <strong>這筆紀錄需要注意：</strong>
+      <ul>{reasons.map((reason) => <li key={reason.text} className={reason.level}>{reason.text}</li>)}</ul>
+      <span>以上為一般參考，不作為疾病診斷；若不舒服或數值持續異常，請詢問醫療人員。</span>
+    </div>
+  );
 }
 
 export const RANGES = [

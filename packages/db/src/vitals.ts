@@ -11,6 +11,11 @@ export interface Judge {
   label: string;
 }
 
+export interface AttentionReason {
+  level: Exclude<Level, 'ok'>;
+  text: string;
+}
+
 // ───────────── 型別 ─────────────
 
 interface Base {
@@ -62,6 +67,30 @@ export function judgeBp(sys: number, dia: number): Judge {
   return { level: 'ok', label: '正常' };
 }
 
+/** 一筆血壓需要注意的全部原因，包含收縮壓、舒張壓與脈搏。（2026-11-21 使用者決定） */
+export function bpAttentionReasons(sys: number, dia: number, pulse: number | null): AttentionReason[] {
+  const reasons: AttentionReason[] = [];
+  if (sys >= 140) reasons.push({ level: 'bad', text: `收縮壓過高：${sys} mmHg（140 以上）` });
+  else if (sys >= 130) reasons.push({ level: 'warn', text: `收縮壓偏高：${sys} mmHg（130–139）` });
+  else if (sys < 90) reasons.push({ level: 'warn', text: `收縮壓偏低：${sys} mmHg（低於 90）` });
+
+  if (dia >= 90) reasons.push({ level: 'bad', text: `舒張壓過高：${dia} mmHg（90 以上）` });
+  else if (dia >= 80) reasons.push({ level: 'warn', text: `舒張壓偏高：${dia} mmHg（80–89）` });
+  else if (dia < 60) reasons.push({ level: 'warn', text: `舒張壓偏低：${dia} mmHg（低於 60）` });
+
+  if (pulse != null && pulse < 60) reasons.push({ level: 'warn', text: `心跳偏慢：${pulse} 次／分（低於 60）` });
+  else if (pulse != null && pulse > 100) reasons.push({ level: 'warn', text: `心跳過快：${pulse} 次／分（高於 100）` });
+  return reasons;
+}
+
+/** 列表用的整筆判斷；有任一原因就顯示「需注意」。 */
+export function judgeBpReading(sys: number, dia: number, pulse: number | null): Judge {
+  const reasons = bpAttentionReasons(sys, dia, pulse);
+  return reasons.length
+    ? { level: reasons.some((reason) => reason.level === 'bad') ? 'bad' : 'warn', label: '需注意' }
+    : { level: 'ok', label: '一般範圍' };
+}
+
 /**
  * 血糖：任何時機 < 54 低血糖（紅）、< 70 偏低（黃）；
  * 空腹 / 飯前 70–99 正常、100–125 偏高、≥ 126 高；
@@ -78,6 +107,20 @@ export function judgeGlucose(timing: GlucoseTiming, mgdl: number): Judge {
     if (mgdl >= 140) return { level: 'warn', label: '偏高' };
   } else if (mgdl >= 200) return { level: 'bad', label: '高' };
   return { level: 'ok', label: '正常' };
+}
+
+/** 一筆血糖需要注意的原因，文字包含測量時機與該時機的門檻。（2026-11-21 使用者決定） */
+export function glucoseAttentionReasons(timing: GlucoseTiming, mgdl: number): AttentionReason[] {
+  if (mgdl < 54) return [{ level: 'bad', text: `${timing}血糖過低：${mgdl} mg/dL（低於 54，低血糖）` }];
+  if (mgdl < 70) return [{ level: 'warn', text: `${timing}血糖偏低：${mgdl} mg/dL（低於 70）` }];
+  if (timing === '空腹' || timing === '飯前') {
+    if (mgdl >= 126) return [{ level: 'bad', text: `${timing}血糖過高：${mgdl} mg/dL（126 以上）` }];
+    if (mgdl >= 100) return [{ level: 'warn', text: `${timing}血糖偏高：${mgdl} mg/dL（100–125）` }];
+  } else if (timing === '飯後2小時') {
+    if (mgdl >= 200) return [{ level: 'bad', text: `飯後 2 小時血糖過高：${mgdl} mg/dL（200 以上）` }];
+    if (mgdl >= 140) return [{ level: 'warn', text: `飯後 2 小時血糖偏高：${mgdl} mg/dL（140–199）` }];
+  } else if (mgdl >= 200) return [{ level: 'bad', text: `${timing}血糖過高：${mgdl} mg/dL（200 以上）` }];
+  return [];
 }
 
 /** 一般體溫：≥ 38 發燒（紅）、≥ 37.5 微燒（黃）；基礎體溫不標顏色 */

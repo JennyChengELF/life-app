@@ -68,6 +68,11 @@ button.full { width: 100%; margin-bottom: 12px; }
 .req { color: var(--danger); }
 .warn-card { background: var(--warn-soft); border-color: transparent; }
 .warn-card h2 { color: var(--warn); }
+.attention-reasons { margin: 10px 0; padding: 10px 12px; border-radius: 10px; background: var(--warn-soft); font-size: 0.9rem; }
+.attention-reasons ul { margin: 6px 0; padding-left: 1.3rem; }
+.attention-reasons li.warn { color: var(--warn); }
+.attention-reasons li.bad { color: var(--danger); font-weight: 600; }
+.attention-reasons span { color: var(--muted); font-size: 0.78rem; }
 
 /* ── 偶爾量測 ── */
 .occ-group { padding: 10px 0; border-bottom: 1px solid var(--line); }
