@@ -982,6 +982,11 @@ export interface EntryForm {
   /** 我的部分：分類＋金額（支出 / 收入可拆成好幾筆） */
   cats: { category: string | null; amount: number | null; note?: string | null; budget?: string | null }[];
   /**
+   * 同一筆裡方向相反的分類明細：支出畫面是折抵／收入，收入畫面是扣除／支出。
+   * （2026-11-21 使用者決定：不另設混合模式，帳戶只依收入與支出的淨額增減。）
+   */
+  counterCats: { category: string | null; amount: number | null; note?: string | null; budget?: string | null }[];
+  /**
    * 選人物的明細（2026-11-19）：支出 = 他欠我（代墊、借給他）；收入 = 我欠他（向他借）。
    * 不算收支、不扣預算、不選分類，可以填備註。
    */
@@ -1010,6 +1015,7 @@ export const emptyForm = (mode: EntryForm['mode'] = '支出', time = Date.now())
   paidBy: null,
   currency: null,
   cats: [{ category: null, amount: null }],
+  counterCats: [],
   shares: [],
   person: null,
   sub: mode === '還款' ? '他還我' : null,
@@ -1025,20 +1031,21 @@ export const emptyForm = (mode: EntryForm['mode'] = '支出', time = Date.now())
 
 const sum = (xs: (number | null)[]) => xs.reduce<number>((a, b) => a + (b ?? 0), 0);
 
-/** 支出 / 收入畫面的總額＝分類的部分＋人物的部分（朋友先付時只有我的部分） */
-export const formTotal = (f: EntryForm) => sum(f.cats.map((c) => c.amount)) + (f.paidBy ? 0 : sum(f.shares.map((s) => s.amount)));
+/** 支出 / 收入畫面的帳戶實際增減＝主要分類＋人物部分−反向分類（朋友先付時只有我的部分） */
+export const formTotal = (f: EntryForm) =>
+  sum(f.cats.map((c) => c.amount)) + (f.paidBy ? 0 : sum(f.shares.map((s) => s.amount)) - sum(f.counterCats.map((c) => c.amount)));
 
 /** 表單 → 要存的交易（不檢查；存之前用 checkTxn 檢查） */
 export function formToTxn(f: EntryForm): TxnInput {
   const base = { time: f.time, store: f.store?.trim() || null, branch: f.store?.trim() ? f.branch?.trim() || null : null, statementText: f.statementText?.trim() || null, note: f.note?.trim() || null, tags: f.tags, toAccount: null, toAmount: null, paidBy: null, currency: null };
-  const cats = (kind: '支出' | '收入'): LineInput[] =>
-    f.cats.filter((c) => c.category || c.amount).map((c) => ({ kind, amount: c.amount ?? 0, category: c.category, note: c.note ?? null, budget: c.budget ?? null }));
+  const cats = (items: EntryForm['cats'], kind: '支出' | '收入'): LineInput[] =>
+    items.filter((c) => c.category || c.amount).map((c) => ({ kind, amount: c.amount ?? 0, category: c.category, note: c.note ?? null, budget: c.budget ?? null }));
   const shareLines = (kind: '他欠我' | '我欠他'): LineInput[] =>
     f.shares.filter((s) => s.person || s.amount).map((s) => ({ kind, amount: s.amount ?? 0, person: s.person, note: s.note?.trim() || null }));
   switch (f.mode) {
     case '支出': {
       if (f.paidBy) {
-        const mine = cats('支出');
+        const mine = cats(f.cats, '支出');
         return {
           ...base,
           direction: null,
@@ -1052,11 +1059,23 @@ export function formToTxn(f: EntryForm): TxnInput {
       }
       // 加總是負的（退款）→ 錢回到帳戶
       const total = formTotal(f);
-      return { ...base, direction: total < 0 ? '入' : '出', account: f.account, amount: Math.abs(total), lines: [...cats('支出'), ...shareLines('他欠我')] };
+      return {
+        ...base,
+        direction: total < 0 ? '入' : '出',
+        account: f.account,
+        amount: Math.abs(total),
+        lines: [...cats(f.cats, '支出'), ...cats(f.counterCats, '收入'), ...shareLines('他欠我')],
+      };
     }
     case '收入': {
       const total = formTotal(f);
-      return { ...base, direction: total < 0 ? '出' : '入', account: f.account, amount: Math.abs(total), lines: [...cats('收入'), ...shareLines('我欠他')] };
+      return {
+        ...base,
+        direction: total < 0 ? '出' : '入',
+        account: f.account,
+        amount: Math.abs(total),
+        lines: [...cats(f.cats, '收入'), ...cats(f.counterCats, '支出'), ...shareLines('我欠他')],
+      };
     }
     case '轉帳':
       return { ...base, direction: '轉帳', account: f.account, amount: f.amount, toAccount: f.toAccount, toAmount: f.toAmount, statement: f.statement ?? null, lines: [] };
@@ -1180,6 +1199,7 @@ export function txnToForm(t: Txn): EntryForm {
   const f: EntryForm = { ...emptyForm('其他', t.time), store: t.store, branch: t.branch, statementText: t.statementText, note: t.note, tags: t.tags, account: t.account, currency: t.currency, cats: [] };
   const L = t.lines;
   const only = (...kinds: LineKind[]) => L.length > 0 && L.every((l) => kinds.includes(l.kind));
+  const has = (kind: LineKind) => L.some((l) => l.kind === kind);
   const catsOf = (kind: LineKind) => L.filter((l) => l.kind === kind).map((l) => ({ category: l.category, amount: l.amount, note: l.note, budget: l.budget }));
   if (t.direction === '轉帳') return { ...f, mode: '轉帳', amount: t.amount, toAccount: t.toAccount, toAmount: t.toAmount, statement: t.statement };
   const sharesOf = (kind: LineKind) => L.filter((l) => l.kind === kind).map((l) => ({ person: l.person, amount: l.amount, note: l.note }));
@@ -1187,6 +1207,19 @@ export function txnToForm(t: Txn): EntryForm {
   if (t.direction === '出' && only('支出', '他欠我')) return { ...f, mode: '支出', cats: catsOf('支出'), shares: sharesOf('他欠我') };
   // 收入＋選人物的明細（向別人借）
   if (t.direction === '入' && only('收入', '我欠他')) return { ...f, mode: '收入', cats: catsOf('收入'), shares: sharesOf('我欠他') };
+  // 同一筆同時有支出和收入：依帳戶實際方向回到原本的支出／收入畫面。
+  if (has('支出') && has('收入') && has('他欠我') && only('支出', '收入', '他欠我')) {
+    return { ...f, mode: '支出', cats: catsOf('支出'), counterCats: catsOf('收入'), shares: sharesOf('他欠我') };
+  }
+  if (has('收入') && has('支出') && has('我欠他') && only('收入', '支出', '我欠他')) {
+    return { ...f, mode: '收入', cats: catsOf('收入'), counterCats: catsOf('支出'), shares: sharesOf('我欠他') };
+  }
+  if (t.direction === '出' && has('支出') && has('收入') && only('支出', '收入')) {
+    return { ...f, mode: '支出', cats: catsOf('支出'), counterCats: catsOf('收入') };
+  }
+  if (t.direction === '入' && has('收入') && has('支出') && only('收入', '支出')) {
+    return { ...f, mode: '收入', cats: catsOf('收入'), counterCats: catsOf('支出') };
+  }
   if (!t.direction && t.paidBy && only('支出', '我欠他') && L.filter((l) => l.kind === '我欠他').length === 1) {
     const debt = L.find((l) => l.kind === '我欠他')!;
     const mine = catsOf('支出');

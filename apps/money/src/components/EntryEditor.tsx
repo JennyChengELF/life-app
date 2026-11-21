@@ -105,7 +105,7 @@ export function EntryEditor({ api, snap, editing, onClose, onCopy }: { api: Mone
   const currencies = useMemo(() => [...new Set(['TWD', ...snap.accounts.map((a) => a.currency)])], [snap.accounts]);
 
   const switchMode = (mode: EntryForm['mode']) =>
-    set({ mode, sub: mode === '還款' ? '他還我' : null, cats: [{ category: null, amount: null }], shares: [], paidBy: null });
+    set({ mode, sub: mode === '還款' ? '他還我' : null, cats: [{ category: null, amount: null }], counterCats: [], shares: [], paidBy: null });
 
   const save = async () => {
     let tx;
@@ -219,6 +219,50 @@ export function EntryEditor({ api, snap, editing, onClose, onCopy }: { api: Mone
       </button>
     </div>
   );
+
+  /** 2026-11-21 使用者決定：支出可加收入折抵；收入可加支出扣除，帳戶只依淨額增減。 */
+  const counterCatRows = (kind: '支出' | '收入') => {
+    const title = kind === '收入' ? '折抵／收入項目' : '扣除／支出項目';
+    return (
+      <div className="field">
+        {f.counterCats.length > 0 && title}
+        <div className="split-rows">
+          {f.counterCats.map((c, i) => (
+            <div className="cat-line" key={i}>
+              <div className="row">
+                <AmountInput value={c.amount} onChange={(n) => set({ counterCats: f.counterCats.map((x, j) => (j === i ? { ...x, amount: n } : x)) })} />
+                <button className="x-btn" onClick={() => set({ counterCats: f.counterCats.filter((_, j) => j !== i) })} aria-label="移除">
+                  ✕
+                </button>
+              </div>
+              <CategoryPicker
+                api={api}
+                snap={snap}
+                kind={kind}
+                value={c.category}
+                onChange={(v) => set({ counterCats: f.counterCats.map((x, j) => (j === i ? withBudget({ ...x, category: v }) : x)) })}
+              />
+              <BudgetSelect
+                snap={snap}
+                kind={kind}
+                value={c.budget ?? null}
+                onChange={(v) => set({ counterCats: f.counterCats.map((x, j) => (j === i ? { ...x, budget: v } : x)) })}
+              />
+              <LineNote
+                snap={snap}
+                category={c.category}
+                value={c.note ?? null}
+                onChange={(v) => set({ counterCats: f.counterCats.map((x, j) => (j === i ? { ...x, note: v } : x)) })}
+              />
+            </div>
+          ))}
+        </div>
+        <button className="chip-add" onClick={() => set({ counterCats: [...f.counterCats, { category: null, amount: null }] })}>
+          ＋ {title}
+        </button>
+      </div>
+    );
+  };
 
   /**
    * 選人物的明細（2026-11-19）：支出 = 他欠我（代墊、借給他）；收入 = 我欠他（向他借）。
@@ -356,8 +400,26 @@ export function EntryEditor({ api, snap, editing, onClose, onCopy }: { api: Mone
       {/* 2026-11-19 改版：最上面用大字顯示總額 */}
       {(f.mode === '支出' || f.mode === '收入') && (
         <div className="total-head">
-          <div className="sum-label">{f.mode === '收入' ? '收到' : paidByMode ? `${f.paidBy ?? '朋友'} 幫我付（我的部分）` : '我付了'}</div>
+          <div className="sum-label">
+            {f.mode === '收入'
+              ? f.counterCats.length
+                ? '帳戶實際入帳'
+                : '收到'
+              : paidByMode
+                ? `${f.paidBy ?? '朋友'} 幫我付（我的部分）`
+                : f.counterCats.length
+                  ? '帳戶實際支出'
+                  : '我付了'}
+          </div>
           <div className={`total-big num${f.mode === '收入' ? ' in' : ''}`}>{fmtMoney(formTotal(f), currency)}</div>
+          {!paidByMode && f.counterCats.length > 0 && (
+            <div className="hint">
+              {f.mode === '支出' ? (f.shares.length ? '支出／人物' : '支出') : f.shares.length ? '收入／人物' : '收入'}{' '}
+              {fmtMoney(f.cats.reduce((n, c) => n + (c.amount ?? 0), 0) + f.shares.reduce((n, s) => n + (s.amount ?? 0), 0), currency)} −{' '}
+              {f.mode === '支出' ? '折抵／收入' : '扣除／支出'}{' '}
+              {fmtMoney(f.counterCats.reduce((n, c) => n + (c.amount ?? 0), 0), currency)}
+            </div>
+          )}
         </div>
       )}
 
@@ -423,6 +485,8 @@ export function EntryEditor({ api, snap, editing, onClose, onCopy }: { api: Mone
               )}
               {storePicker('支出')}
               {catRows('支出')}
+
+              {!paidByMode && counterCatRows('收入')}
 
               {!paidByMode && shareRows('支出')}
 
@@ -512,6 +576,7 @@ export function EntryEditor({ api, snap, editing, onClose, onCopy }: { api: Mone
               </label>
               {storePicker('收入')}
               {catRows('收入')}
+              {counterCatRows('支出')}
               {shareRows('收入')}
             </>
           )}

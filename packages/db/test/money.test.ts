@@ -131,6 +131,42 @@ describe('表單 ↔ 交易', () => {
     expect(t.lines[1]).toMatchObject({ kind: '我欠他', person: '小明', amount: 500 });
     expect(back).toMatchObject({ mode: '支出', paidBy: '小明' });
   });
+  it('購物同時記折抵收入：支出 1,000、收入 100，帳戶實際支出 900', () => {
+    const { t, txn, back } = roundTrip(
+      form({
+        account: '台幣現金',
+        cats: [{ category: '住 / 日用品', amount: 1000, note: '購物' }],
+        counterCats: [{ category: '薪資', amount: 100, note: '滿千折百', budget: '小確幸' }],
+      }),
+    );
+    expect(t).toMatchObject({ direction: '出', amount: 900 });
+    expect(t.lines).toEqual([
+      { kind: '支出', amount: 1000, category: '住 / 日用品', note: '購物', budget: null },
+      { kind: '收入', amount: 100, category: '薪資', note: '滿千折百', budget: '小確幸' },
+    ]);
+    expect(back).toMatchObject({
+      mode: '支出',
+      cats: [{ category: '住 / 日用品', amount: 1000 }],
+      counterCats: [{ category: '薪資', amount: 100 }],
+    });
+    expect(monthStats([txn], [], refs.accounts, '2026-11')[0]).toMatchObject({ expense: 1000, income: 100 });
+  });
+  it('薪資同時記扣除支出：收入 60,000、勞健保 2,000，帳戶實際入帳 58,000', () => {
+    const { t, back } = roundTrip(
+      form({
+        mode: '收入',
+        account: '台幣現金',
+        cats: [{ category: '薪資', amount: 60000 }],
+        counterCats: [{ category: '住 / 日用品', amount: 2000, note: '勞保／健保' }],
+      }),
+    );
+    expect(t).toMatchObject({ direction: '入', amount: 58000 });
+    expect(t.lines.map((l) => [l.kind, l.amount])).toEqual([
+      ['收入', 60000],
+      ['支出', 2000],
+    ]);
+    expect(back).toMatchObject({ mode: '收入', counterCats: [{ category: '住 / 日用品', amount: 2000, note: '勞保／健保' }] });
+  });
   it('收入、轉帳、借錢、還款、不用還了', () => {
     expect(roundTrip(form({ mode: '收入', account: '台幣現金', cats: [{ category: '薪資', amount: 60000 }] })).back.mode).toBe('收入');
     const tr = roundTrip(form({ mode: '轉帳', account: '台幣現金', toAccount: '日圓現金', amount: 10500, toAmount: 50000 }));
