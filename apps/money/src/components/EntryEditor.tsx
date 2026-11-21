@@ -23,6 +23,7 @@ import {
   isFeeTxn,
   lastCategoryOfStore,
   txnToForm,
+  backfillBudgetNames,
 } from '@life/db';
 import type { Editing } from '../App';
 import type { MoneyApi } from '../useMoney';
@@ -131,6 +132,7 @@ export function EntryEditor({ api, snap, editing, onClose, onCopy }: { api: Mone
     if (paidByMode && !f.paidBy) p.unshift('請選誰先幫你付');
     setProblems(p);
     if (p.length) return;
+    const backfill = backfillBudgetNames(snap, tx);
     // 國外交易手續費：另外記一筆（2026-11-18 確認）
     const card = snap.accounts.find((a) => a.name === tx.account && a.type === '信用卡');
     const fee = feeOn && feeCard && card && !existingFee && tx.direction === '出' ? feeAmount : null;
@@ -162,19 +164,20 @@ export function EntryEditor({ api, snap, editing, onClose, onCopy }: { api: Mone
       return true;
     });
     if (ok) {
+      const savedText = parts
+        ? `已記錄 ${parts.length} 期${feeTx ? '（含手續費）' : ''}`
+        : txn
+          ? feeTx
+            ? '已修改（補記手續費）'
+            : feeChanged
+              ? '已修改；手續費那筆不會自動改，記得也去改'
+              : '已修改'
+          : feeTx
+            ? '已記錄（含手續費）'
+            : '已記錄';
       api.showToast({
         kind: 'info',
-        text: parts
-          ? `已記錄 ${parts.length} 期${feeTx ? '（含手續費）' : ''}`
-          : txn
-            ? feeTx
-              ? '已修改（補記手續費）'
-              : feeChanged
-                ? '已修改；手續費那筆不會自動改，記得也去改'
-                : '已修改'
-            : feeTx
-              ? '已記錄（含手續費）'
-              : '已記錄',
+        text: backfill.length ? `${savedText}；這筆早於最新期初，只會重算舊月份，不會改動已整理的新預算` : savedText,
       });
       onClose();
     }
@@ -408,6 +411,13 @@ export function EntryEditor({ api, snap, editing, onClose, onCopy }: { api: Mone
   const feeOn = feeOnState ?? (txn ? false : storeForeign);
   const feeAmount = feeEdit ?? estimateFee(Math.max(0, formTotal(f)), feeCard?.fxFeeRate ?? null);
   const to = snap.accounts.find((a) => a.name === f.toAccount);
+  const backfillPreview = (() => {
+    try {
+      return backfillBudgetNames(snap, formToTxn(paidByMode ? f : { ...f, paidBy: null }));
+    } catch {
+      return [];
+    }
+  })();
 
   return (
     <section className="editor">
@@ -710,6 +720,12 @@ export function EntryEditor({ api, snap, editing, onClose, onCopy }: { api: Mone
                 <AmountInput value={f.amount} onChange={(n) => set({ amount: n })} />
               </label>
             </>
+          )}
+
+          {backfillPreview.length > 0 && (
+            <div className="msg info">
+              補登日期早於「{backfillPreview.join('、')}」最新的預算期初；儲存後只會重算舊月份，不會改動已整理的新預算。
+            </div>
           )}
 
           {(txn?.statementText || editing.form.statementText) && (

@@ -5,9 +5,9 @@
  * - 支出可以不選預算（不擋存檔），預算頁提醒補填
  * - 第一版只算新台幣（外幣換算之後再做）
  */
-import type { Allocation, Budget, Line, MoneySnapshot, Txn } from './money';
+import type { Allocation, Budget, Line, MoneySnapshot, Txn, TxnInput } from './money';
 import { isRecordOnlyTxn, personBalances, txnCurrency } from './money';
-import { addDays, startOfDay } from './time';
+import { addDays, startOfDay, toDateKey } from './time';
 
 const monthStart = (m: string) => `${m}-01`;
 export function prevMonth(m: string): string {
@@ -30,6 +30,41 @@ export function budgetBaseline(allocations: Allocation[], budget: string, upTo: 
     if (!best || a.date > best.date! || (a.date === best.date && a.rowNumber > best.rowNumber)) best = a;
   }
   return best;
+}
+
+/**
+ * 某一天「開始時」各預算原本可用的金額。
+ * 月分配視為月初放入；若期初在月中，該月分配已包含在期初金額裡。
+ */
+export function budgetStartAmounts(snap: MoneySnapshot, date: string): { budget: string; amount: number }[] {
+  const before = addDays(date, -1);
+  const beforeMonth = before.slice(0, 7);
+  const lines = twdLines(snap);
+  return snap.budgets.map((budget) => {
+    const sameDay = budgetBaseline(snap.allocations, budget.name, date);
+    if (sameDay?.date === date) return { budget: budget.name, amount: sameDay.amount };
+    const base = budgetBaseline(snap.allocations, budget.name, before);
+    const since = base?.date ?? '0000-00-00';
+    let amount = base?.amount ?? 0;
+    for (const a of snap.allocations) {
+      if (a.budget !== budget.name || a.kind === '期初' || a.month > beforeMonth || monthStart(a.month) < since) continue;
+      amount += a.amount;
+    }
+    for (const x of lines) {
+      if (x.line.budget !== budget.name || x.txn.date < since || x.txn.date > before) continue;
+      amount += x.line.kind === '收入' ? x.line.amount : -x.line.amount;
+    }
+    return { budget: budget.name, amount };
+  });
+}
+
+/** 補登早於最新期初的交易時，這些預算只會重算舊月份，不會改動新預算。 */
+export function backfillBudgetNames(snap: MoneySnapshot, tx: Pick<TxnInput, 'time' | 'lines'>): string[] {
+  const date = toDateKey(tx.time);
+  return [...new Set(tx.lines.map((line) => line.budget).filter((name): name is string => !!name))].filter((name) => {
+    const latest = budgetBaseline(snap.allocations, name, '9999-12-31');
+    return !!latest?.date && date < latest.date;
+  });
 }
 
 /** 新台幣的支出 / 收入明細（含交易） */

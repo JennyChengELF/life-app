@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { addTestCategories } from './helpers';
 import type { EntryForm, MoneySnapshot } from '../src';
 import {
+  backfillBudgetNames,
   budgetDraft,
   budgetMonth,
+  budgetStartAmounts,
   defaultBudgetFor,
   emptyForm,
   formToTxn,
@@ -76,16 +78,52 @@ describe('預算', () => {
   it('重新整理預算：從期初那天開始算，之前的不算；以最新一次為準', async () => {
     await store.allocate('2026-10', '每月', [{ budget: '日常雜支', amount: 9000 }]);
     await spend('2026-10-05 12:00', 8000, '日常雜支');
-    await store.setBaseline('2026-11-01', [{ budget: '日常雜支', amount: 3000 }]);
+    await store.setBaseline('2026-11-01', [
+      { budget: '日常雜支', amount: 3000 },
+      { budget: '應援支出', amount: 0 },
+    ]);
     await spend('2026-11-03 12:00', 500, '日常雜支');
     snap = await store.load();
     const nov = budgetMonth(snap, '2026-11').rows[0];
     expect(nov).toMatchObject({ carry: 3000, used: 500, available: 2500, since: '2026-11-01' });
     // 看 10 月：期初還沒發生，照原本算
     expect(budgetMonth(snap, '2026-10').rows[0].available).toBe(1000);
-    await store.setBaseline('2026-11-10', [{ budget: '日常雜支', amount: 100 }]);
+    await store.setBaseline('2026-11-10', [
+      { budget: '日常雜支', amount: 100 },
+      { budget: '應援支出', amount: 0 },
+    ]);
     snap = await store.load();
     expect(budgetMonth(snap, '2026-11').rows[0]).toMatchObject({ carry: 100, used: 0, available: 100 });
+  });
+
+  it('預算盤點要記錄全部預算；補登期初以前的舊交易不影響已盤點的新預算', async () => {
+    await store.allocate('2026-03', '每月', [{ budget: '日常雜支', amount: 1000 }]);
+    await spend('2026-03-05 12:00', 300, '日常雜支');
+    snap = await store.load();
+    expect(budgetStartAmounts(snap, '2026-11-01')).toEqual([
+      { budget: '日常雜支', amount: 700 },
+      { budget: '應援支出', amount: 0 },
+    ]);
+    await expect(store.setBaseline('2026-11-01', [{ budget: '日常雜支', amount: 500 }])).rejects.toThrow('每個使用中的預算');
+    await store.setBaseline(
+      '2026-11-01',
+      [
+        { budget: '日常雜支', amount: 500 },
+        { budget: '應援支出', amount: -400 },
+      ],
+      '重新盤點剩餘預算',
+    );
+    snap = await store.load();
+    expect(snap.allocations.filter((a) => a.kind === '期初')).toHaveLength(2);
+    expect(snap.allocations.filter((a) => a.kind === '期初').every((a) => a.note === '重新盤點剩餘預算')).toBe(true);
+    expect(budgetMonth(snap, '2026-11').rows.map((r) => r.available)).toEqual([500, -400]);
+
+    const old = formToTxn({ ...emptyForm('支出', at('2026-03-20 12:00')), account: '錢包', cats: [{ category: '食 / 三餐', amount: 100, budget: '日常雜支' }] });
+    expect(backfillBudgetNames(snap, old)).toEqual(['日常雜支']);
+    await store.saveTxn(old);
+    snap = await store.load();
+    expect(budgetMonth(snap, '2026-03').rows[0].available).toBe(600);
+    expect(budgetMonth(snap, '2026-11').rows.map((r) => r.available)).toEqual([500, -400]);
   });
 
   it('待分配 = 上個月沒放進預算的收入 − 本月分配；設定成本月就和本月比', async () => {

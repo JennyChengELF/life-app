@@ -2377,15 +2377,21 @@ export class MoneyStore {
     if (out.length) await this.b.append('moneyBudgetAllocations', out);
   }
 
-  /** 重新整理預算（2026-11-18 確認）：某一天開始時每個預算的金額；之後只從這天開始算，以最新一次為準 */
-  async setBaseline(date: string, rows: { budget: string; amount: number }[]) {
+  /** 重新整理預算：某一天開始時每個使用中預算的金額；之後只從這天開始算，以最新一次為準。 */
+  async setBaseline(date: string, rows: { budget: string; amount: number }[], note?: string | null) {
     const snap = await this.fresh();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('請選日期');
+    // 2026-11-21 使用者決定：每次整理要替所有使用中的預算留下期初，即使金額是 0。
+    const active = snap.budgets.filter((b) => !b.archived);
+    const names = new Set(rows.map((r) => r.budget));
+    if (names.size !== rows.length) throw new Error('同一個預算不能重複');
+    if (active.some((b) => !names.has(b.name)) || rows.some((r) => !active.some((b) => b.name === r.budget))) {
+      throw new Error('重新整理時，每個使用中的預算都要填期初金額');
+    }
     const now = Date.now();
     const out = rows.map((r) => {
-      if (!snap.budgets.some((b) => b.name === r.budget)) throw new Error(`找不到預算「${r.budget}」`);
       if (!Number.isFinite(r.amount)) throw new Error(`「${r.budget}」金額請填數字`);
-      return { month: date.slice(0, 7), budget: r.budget, kind: '期初', amount: Math.round(r.amount), date, id: newId(now), createdAt: now, updatedAt: now };
+      return { month: date.slice(0, 7), budget: r.budget, kind: '期初', amount: Math.round(r.amount), date, note: note?.trim() || null, id: newId(now), createdAt: now, updatedAt: now };
     });
     if (out.length) await this.b.append('moneyBudgetAllocations', out);
   }

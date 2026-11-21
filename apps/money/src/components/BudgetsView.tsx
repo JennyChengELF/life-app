@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { BudgetMonth, BudgetMonthRow, MoneySnapshot } from '@life/db';
-import { budgetDraft, budgetMonth, emptyForm, fmtMoney, loansOutstanding, todayKey, toHHmm, txnTitle, yearGaps } from '@life/db';
+import { budgetDraft, budgetMonth, budgetStartAmounts, emptyForm, fmtMoney, loansOutstanding, todayKey, toHHmm, txnTitle, yearGaps } from '@life/db';
 import type { Editing } from '../App';
 import type { MoneyApi } from '../useMoney';
 import { amountText, MonthNav, parseAmount } from './common';
@@ -338,15 +338,28 @@ function BonusPanel({ api, snap, month, onDone }: { api: MoneyApi; snap: MoneySn
 function BaselinePanel({ api, snap, bm, onDone }: { api: MoneyApi; snap: MoneySnapshot; bm: BudgetMonth; onDone: () => void }) {
   const [date, setDate] = useState(`${bm.month}-01`);
   const list = snap.budgets.filter((b) => !b.archived);
-  const [vals, setVals] = useState<Record<string, string>>({});
+  const amountsAt = (d: string) => Object.fromEntries(budgetStartAmounts(snap, d).filter((x) => list.some((b) => b.name === x.budget)).map((x) => [x.budget, x.amount]));
+  const [original, setOriginal] = useState<Record<string, number>>(() => amountsAt(date));
+  const [vals, setVals] = useState<Record<string, string>>(() => Object.fromEntries(Object.entries(original).map(([name, amount]) => [name, amountText(amount)])));
+  const [note, setNote] = useState('');
+  const valueOf = (name: string) => parseAmount(vals[name] ?? '');
+  const beforeTotal = list.reduce((total, b) => total + (original[b.name] ?? 0), 0);
+  const afterTotal = list.reduce((total, b) => total + (valueOf(b.name) ?? 0), 0);
+  const totalDiff = afterTotal - beforeTotal;
+  const changeDate = (next: string) => {
+    setDate(next);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(next)) return;
+    const amounts = amountsAt(next);
+    setOriginal(amounts);
+    setVals(Object.fromEntries(Object.entries(amounts).map(([name, amount]) => [name, amountText(amount)])));
+  };
   const save = async () => {
-    const rows = list
-      .filter((b) => (vals[b.name] ?? '').trim() !== '')
-      .map((b) => ({ budget: b.name, amount: parseAmount(vals[b.name]) ?? 0 }));
-    if (!rows.length) return api.showToast({ kind: 'error', text: '請至少填一個預算的金額' });
-    if (rows.some((r) => Number.isNaN(r.amount))) return api.showToast({ kind: 'error', text: '金額請填數字' });
-    if (!confirm(`從 ${date} 開始重新計算 ${rows.length} 個預算？這天以前的紀錄不再影響這些預算。`)) return;
-    const ok = await api.run((s) => s.setBaseline(date, rows).then(() => true));
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return api.showToast({ kind: 'error', text: '請選重新整理的日期' });
+    const rows = list.map((b) => ({ budget: b.name, amount: valueOf(b.name) }));
+    if (rows.some((r) => r.amount == null || Number.isNaN(r.amount))) return api.showToast({ kind: 'error', text: '每個預算都要填金額；沒有剩餘請填 0' });
+    if (!confirm(`從 ${date} 開始重新計算全部 ${rows.length} 個預算？這天以前的紀錄不再影響新的預算。`)) return;
+    if (totalDiff !== 0 && !confirm(`全部預算合計會${totalDiff > 0 ? '增加' : '減少'} ${n0(Math.abs(totalDiff))}。這不是收入或支出，也不會改變帳戶餘額；確定仍要儲存？`)) return;
+    const ok = await api.run((s) => s.setBaseline(date, rows as { budget: string; amount: number }[], note).then(() => true));
     if (ok) {
       api.showToast({ kind: 'info', text: '已重新整理預算' });
       onDone();
@@ -355,18 +368,41 @@ function BaselinePanel({ api, snap, bm, onDone }: { api: MoneyApi; snap: MoneySn
   return (
     <div className="subbox">
       <h2>重新整理預算</h2>
-      <p className="hint">填某一天「開始時」每個預算有多少錢（可以是負的）。之後只從這天開始算；以後亂了可以再整理一次，以最新一次為準。空白的預算不變。</p>
+      <p className="hint">重新確認某一天「開始時」每個預算有多少錢（可以是 0 或負數）。這不是收入、支出或預算間移轉，調整加減不必平衡，也不會改變帳戶餘額。</p>
       <label className="field">
         從哪一天開始
-        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        <input type="date" value={date} onChange={(e) => changeDate(e.target.value)} />
       </label>
+      <p className="hint">日期代表這一天開始時；若當天的消費都已記完，請選隔天，避免再扣一次。</p>
+      <div className="draft-row draft-head">
+        <span>預算</span>
+        <span>原本可用</span>
+        <span>重新確認</span>
+        <span>差額</span>
+      </div>
       {list.map((b) => (
-        <div className="draft-row three" key={b.id}>
+        <div className="draft-row" key={b.id}>
           <span>{b.name}</span>
-          <span className="num muted small">目前可用 {n0(bm.rows.find((r) => r.budget.id === b.id)?.available ?? 0)}</span>
+          <span className="num muted">{n0(original[b.name] ?? 0)}</span>
           <NumInput value={vals[b.name] ?? ''} onChange={(v) => setVals({ ...vals, [b.name]: v })} />
+          <span className={`num ${neg((valueOf(b.name) ?? 0) - (original[b.name] ?? 0))}`}>
+            {(valueOf(b.name) ?? 0) - (original[b.name] ?? 0) > 0 ? '+' : ''}
+            {n0((valueOf(b.name) ?? 0) - (original[b.name] ?? 0))}
+          </span>
         </div>
       ))}
+      <div className="draft-row draft-head">
+        <span>全部合計</span>
+        <span className="num">{n0(beforeTotal)}</span>
+        <span className="num">{n0(afterTotal)}</span>
+        <span className={`num ${neg(totalDiff)}`}>{totalDiff > 0 ? '+' : ''}{n0(totalDiff)}</span>
+      </div>
+      {totalDiff !== 0 && <p className="hint warn">合計不平衡也可以儲存；確認時會再提醒一次。</p>}
+      <label className="field">
+        整理原因（選填）
+        <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="例：11 月重新盤點剩餘預算" />
+      </label>
+      <p className="hint">每個使用中的預算都會留下期初紀錄，包括 0 元。之後補登這個日期以前的舊紀錄，只會重算舊月份，不會改動這次整理後的金額。</p>
       <div className="editor-actions">
         <button className="primary" onClick={save} disabled={api.busy}>
           確認
