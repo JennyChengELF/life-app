@@ -25,8 +25,17 @@ export function App() {
   const api = usePeriod();
   const [tab, setTab] = useState<Tab>('today');
   const [date, setDate] = useState(requestedDate);
+  const [editRequest, setEditRequest] = useState<number | null>(null);
   const openDate = (d: string) => {
+    setEditRequest(null);
     setDate(d);
+    setTab('today');
+    window.scrollTo(0, 0);
+  };
+  const editDate = (d: string) => {
+    // （2026-11-22 使用者決定：月曆先看唯讀內容，只有按編輯才切到今天並直接開啟編輯。）
+    setDate(d);
+    setEditRequest(Date.now());
     setTab('today');
     window.scrollTo(0, 0);
   };
@@ -46,8 +55,8 @@ export function App() {
           : api.status === 'need-connect' ? <div className="center connect"><p>資料存在你的 Google 試算表，需要先連線。</p><button className="primary big" onClick={api.connect}>連線 Google</button>{api.error && <p className="error-text">{api.error}</p>}<p className="muted small">會建立「生活APP-生理期」，並在「生活APP-健康」加入共用身體狀況表。</p></div>
           : api.status === 'error' ? <div className="center"><p className="error-text">{api.error}</p><button className="primary" onClick={() => location.reload()}>重新載入</button></div>
           : api.snap && api.conditions ? <>
-              {tab === 'today' && <TodayView api={api} snap={api.snap} conditions={api.conditions} date={date} setDate={setDate} goSettings={() => setTab('settings')} />}
-              {tab === 'calendar' && <CalendarView snap={api.snap} openDate={openDate} />}
+              {tab === 'today' && <TodayView api={api} snap={api.snap} conditions={api.conditions} date={date} setDate={setDate} goSettings={() => setTab('settings')} editRequest={editRequest} onEditRequestHandled={() => setEditRequest(null)} />}
+              {tab === 'calendar' && <CalendarView snap={api.snap} conditions={api.conditions} editDate={editDate} />}
               {tab === 'stats' && <StatsView api={api} snap={api.snap} openDate={openDate} />}
               {tab === 'settings' && <SettingsView api={api} snap={api.snap} conditions={api.conditions} />}
             </> : null}

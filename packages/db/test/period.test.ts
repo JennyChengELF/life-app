@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ConditionStore,
   cycleDifference,
+  cycleDifferenceToNext,
   durationDifference,
   estimatedCycleEnd,
   LocalBackend,
@@ -103,6 +104,9 @@ describe('個人平均提醒', () => {
     expect(cycleDifference(cycles, cycles[4])).toEqual({ average: 35, difference: 11, direction: 'longer' });
     // 後面的資料不會回頭改變第 5 次的基準。
     expect(cycleDifference([...cycles, cycle('7', '2026-09-01', '2026-09-05')], cycles[4])).toEqual({ average: 35, difference: 11, direction: 'longer' });
+    // 歷史列「第 4 次開始～第 5 次開始」要顯示第 5 次所代表的這段週期提醒。
+    expect(cycleDifferenceToNext(cycles, cycles[3])).toEqual({ average: 35, difference: 11, direction: 'longer' });
+    expect(cycleDifferenceToNext(cycles, cycles[5])).toBeNull();
   });
 
   it('經期長度差三天才提醒', () => {

@@ -6,47 +6,30 @@ import {
   dateDiff,
   durationDifference,
   estimatedCycleEnd,
-  isDateInCycle,
   PERIOD_CLOTS,
   PERIOD_COLORS,
   PERIOD_FLOWS,
   predictPeriod,
-  projectPeriods,
   todayKey,
   toHHmm,
 } from '@life/db';
 import { Icon } from '@life/ui/icon';
 import type { PeriodApi } from '../usePeriod';
 import { CalendarView } from './CalendarView';
+import { DaySummary, periodDateContext } from './DaySummary';
 
 interface DraftCondition extends ConditionLogDraft {
   key: string;
   expanded: boolean;
 }
 
-export function TodayView({ api, snap, conditions, date, setDate, goSettings }: { api: PeriodApi; snap: PeriodSnapshot; conditions: ConditionSnapshot; date: string; setDate: (d: string) => void; goSettings: () => void }) {
+export function TodayView({ api, snap, conditions, date, setDate, goSettings, editRequest, onEditRequestHandled }: { api: PeriodApi; snap: PeriodSnapshot; conditions: ConditionSnapshot; date: string; setDate: (d: string) => void; goSettings: () => void; editRequest: number | null; onEditRequestHandled: () => void }) {
   const today = todayKey();
   const prediction = predictPeriod(snap);
   const sortedCycles = [...snap.cycles].sort((a, b) => a.startDate.localeCompare(b.startDate));
   const lastCycle = sortedCycles.at(-1) ?? null;
   const ongoing = lastCycle && !lastCycle.endDate ? lastCycle : null;
-  const completedCycle = sortedCycles.find((c) => !!c.endDate && isDateInCycle(date, c)) ?? null;
-  const pendingCycle = [...sortedCycles].reverse().find((c, reverseIndex) => {
-    if (c.endDate || date < c.startDate) return false;
-    const originalIndex = sortedCycles.length - 1 - reverseIndex;
-    const nextStart = sortedCycles[originalIndex + 1]?.startDate ?? null;
-    return !nextStart || date < nextStart;
-  }) ?? null;
-  const selectedCycle = completedCycle ?? pendingCycle;
-  const projections = date > today ? projectPeriods(snap, date) : [];
-  const projectedPeriod = projections.find((x) => date >= x.startDate && date <= x.endDate) ?? null;
-  const projectedStarts = projections.filter((x) => x.startDate <= date).map((x) => x.startDate);
-  const predictionBase = projectedStarts.at(-1) ?? lastCycle?.startDate ?? null;
-  const predictionLabel = date > today
-    ? projectedPeriod
-      ? `預計經期第 ${dateDiff(projectedPeriod.startDate, date) + 1} 天`
-      : predictionBase ? `預測週期第 ${dateDiff(predictionBase, date) + 1} 天` : null
-    : null;
+  const { cycle: selectedCycle, predictionLabel } = periodDateContext(snap, date);
   const latest = snap.cycles[snap.cycles.length - 1] ?? null;
   const [editorDirty, setEditorDirty] = useState(false);
   const messages: string[] = [];
@@ -99,7 +82,7 @@ export function TodayView({ api, snap, conditions, date, setDate, goSettings }: 
       {!ongoing && <button className="primary status-action" disabled={api.busy} onClick={() => void startToday()}>今天經期開始</button>}
     </section>
     <PeriodControlCard api={api} date={date} cycle={selectedCycle} cycles={snap.cycles} settings={snap.settings} />
-    <DailyDetails api={api} conditions={conditions} date={date} cycle={selectedCycle} predictionLabel={predictionLabel} day={snap.days.find((x) => x.date === date) ?? null} onDirtyChange={setEditorDirty} />
+    <DailyDetails api={api} conditions={conditions} date={date} cycle={selectedCycle} predictionLabel={predictionLabel} day={snap.days.find((x) => x.date === date) ?? null} onDirtyChange={setEditorDirty} editRequest={editRequest} onEditRequestHandled={onEditRequestHandled} />
   </>;
 }
 
@@ -143,10 +126,9 @@ function PeriodControlCard({ api, date, cycle, cycles, settings }: { api: Period
   </section>;
 }
 
-function DailyDetails({ api, conditions, date, cycle, predictionLabel, day, onDirtyChange }: { api: PeriodApi; conditions: ConditionSnapshot; date: string; cycle: PeriodCycle | null; predictionLabel: string | null; day: PeriodDay | null; onDirtyChange: (value: boolean) => void }) {
+function DailyDetails({ api, conditions, date, cycle, predictionLabel, day, onDirtyChange, editRequest, onEditRequestHandled }: { api: PeriodApi; conditions: ConditionSnapshot; date: string; cycle: PeriodCycle | null; predictionLabel: string | null; day: PeriodDay | null; onDirtyChange: (value: boolean) => void; editRequest: number | null; onEditRequestHandled: () => void }) {
   const items = conditions.items.filter((x) => x.showInPeriod && !x.archived);
   const currentLogs = conditions.logs.filter((x) => x.date === date && conditions.items.find((i) => i.name === x.symptom)?.showInPeriod);
-  const latestWeight = conditions.weights.filter((x) => x.date === date).at(-1) ?? null;
   const toDraft = (): DraftCondition[] => currentLogs.map((x) => ({ key: x.id, id: x.id, rowNumber: x.rowNumber, symptom: x.symptom, severity: x.severity, note: x.note, time: x.time, expanded: false }));
   const [editing, setEditing] = useState(false);
   const [flow, setFlow] = useState<PeriodDay['flow']>(day?.flow ?? null);
@@ -166,6 +148,11 @@ function DailyDetails({ api, conditions, date, cycle, predictionLabel, day, onDi
     setEditing(false);
     reset();
   }, [date, day?.id, day?.flow, day?.clotSize, day?.note, day?.colors.join('、'), conditions.loadedAt]);
+  useEffect(() => {
+    if (editRequest == null) return;
+    setEditing(true);
+    onEditRequestHandled();
+  }, [editRequest, onEditRequestHandled]);
 
   const originalDay = JSON.stringify({ flow: day?.flow ?? null, colors: day?.colors ?? [], clotSize: day?.clotSize ?? null, note: day?.note ?? '' });
   const editedDay = JSON.stringify({ flow, colors, clotSize, note });
@@ -176,20 +163,7 @@ function DailyDetails({ api, conditions, date, cycle, predictionLabel, day, onDi
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
   useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
 
-  if (!editing) return <>
-    <section className="card day-summary-card">
-      <div className="day-summary-heading"><div><h2>{formatLongDate(date)}</h2>{cycle ? <p className="muted small">{cycle.endDate ? `經期第 ${dateDiff(cycle.startDate, date) + 1} 天` : `經期第 ${dateDiff(cycle.startDate, date) + 1} 天・待確認結束日`}</p> : predictionLabel && <p className="muted small">{predictionLabel}</p>}</div></div>
-      <dl className="day-summary-list">
-        <div><dt>體重</dt><dd>{latestWeight ? `${latestWeight.kg} kg` : '沒有紀錄'}</dd></div>
-        <div><dt>經血量</dt><dd>{day?.flow ?? '沒有紀錄'}</dd></div>
-        <div><dt>血色</dt><dd>{day?.colors.length ? day.colors.join('、') : '沒有紀錄'}</dd></div>
-        <div><dt>最大血塊</dt><dd>{day?.clotSize ?? '沒有紀錄'}</dd></div>
-      </dl>
-    </section>
-    <section className="card"><h2>備註</h2><p className={day?.note ? '' : 'muted'}>{day?.note ?? '沒有紀錄'}</p></section>
-    <section className="card"><h2>身體狀況</h2>{currentLogs.length ? <ul className="condition-summary-list">{currentLogs.map((log) => <li key={log.id}><strong>{log.symptom}</strong>{log.severity && <span>程度：{log.severity}</span>}{log.time != null && <span>時間：{toHHmm(log.time)}</span>}{log.note && <span>備註：{log.note}</span>}</li>)}</ul> : <p className="muted">沒有紀錄</p>}</section>
-    <button className="day-edit-fab" aria-label="編輯這天的紀錄" title="編輯這天的紀錄" onClick={() => setEditing(true)}><Icon name="pencil" size={22} /><span>編輯</span></button>
-  </>;
+  if (!editing) return <DaySummary conditions={conditions} date={date} cycle={cycle} predictionLabel={predictionLabel} day={day} onEdit={() => setEditing(true)} />;
 
   const toggleColor = (x: (typeof PERIOD_COLORS)[number]) => setColors(colors.includes(x) ? colors.filter((c) => c !== x) : [...colors, x]);
   const addCondition = (symptom: string) => setDrafts((rows) => [...rows, { key: `new-${Date.now()}-${rows.length}`, symptom, severity: null, note: null, time: null, expanded: false }]);
@@ -245,7 +219,3 @@ function Choice<T extends string>({ label, options, value, setValue }: { label: 
 }
 
 const formatDate = (date: string) => date.replaceAll('-', '/');
-const formatLongDate = (date: string) => {
-  const [year, month, day] = date.split('-').map(Number);
-  return `${year} 年 ${month} 月 ${day} 日`;
-};

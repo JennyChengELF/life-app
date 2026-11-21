@@ -92,10 +92,15 @@
 .stat-value small { font-size: .75rem; font-weight: 400; color: var(--muted); }
 .prediction-date { font-size: 1.25rem; font-weight: 700; }
 .cycle-list li { border-bottom: 1px solid var(--line); padding: 7px 0; }
+.cycle-list li.history-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: start; }
 .cycle-row { width: 100%; border: 0; background: none; padding: 4px; display: flex; flex-direction: column; align-items: flex-start; white-space: normal; text-align: left; }
 .cycle-row em { margin-left: 7px; color: var(--warn); font-size: .75rem; font-style: normal; }
 .cycle-row small { color: var(--warn); }
-.history-values { display: flex; flex-wrap: wrap; gap: 5px 18px; margin-top: 4px; color: var(--muted); font-size: .82rem; }
+.history-values { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px 18px; margin-top: 4px; color: var(--muted); font-size: .82rem; }
+.history-metric { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.history-metric small { color: var(--warn); }
+.history-exclude { margin-top: 2px; white-space: nowrap; }
+.calendar-day-details { margin-top: 12px; }
 .history-more { width: 100%; margin-top: 10px; color: var(--accent); background: var(--accent-soft); border-color: transparent; justify-content: center; }
 .check.compact { font-size: .8rem; color: var(--muted); padding-left: 4px; }
 .issue-row { border-top: 1px solid var(--line); padding-top: 8px; }
@@ -109,6 +114,7 @@
   .condition-more { grid-template-columns: 1fr; gap: 8px; }
   .day-summary-list > div { grid-template-columns: 86px 1fr; }
   .period-cal-day { min-height: 51px; font-size: .82rem; }
+  .history-values { grid-template-columns: 1fr; }
   .row.split { flex-direction: column; }
   .condition-draft .row.split { flex-direction: row; }
   .daily-save-bar { flex-wrap: wrap; }

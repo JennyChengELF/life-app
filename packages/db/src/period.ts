@@ -217,6 +217,15 @@ export function cycleDifference(cycles: PeriodCycle[], cycle: PeriodCycle): Pers
   );
 }
 
+/** 歷史列表一列顯示「本次開始到下次開始」，提醒也必須使用同一段週期。 */
+export function cycleDifferenceToNext(cycles: PeriodCycle[], cycle: PeriodCycle): PersonalDifference | null {
+  // （2026-11-22 使用者決定：週期長短說明要跟它所描述的週期天數放在同一筆。）
+  const next = cycles
+    .filter((x) => x.startDate > cycle.startDate)
+    .sort((a, b) => a.startDate.localeCompare(b.startDate))[0] ?? null;
+  return next ? cycleDifference(cycles, next) : null;
+}
+
 export function durationDifference(cycles: PeriodCycle[], cycle: PeriodCycle): PersonalDifference | null {
   // （2026-11-20 使用者決定：經期天數只和先前個人平均比較，相差至少 3 天才提醒。）
   const current = periodLength(cycle);
