@@ -80,7 +80,7 @@ export function AmountInput({
 const PAID_BY = '\u0000paidBy';
 const MODE_TITLE: Record<string, string> = { 不用還了: '不用還了', 調整: '盤點調整', 其他: '交易' };
 
-export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; snap: MoneySnapshot; editing: Editing; onClose: () => void }) {
+export function EntryEditor({ api, snap, editing, onClose, onCopy }: { api: MoneyApi; snap: MoneySnapshot; editing: Editing; onClose: () => void; onCopy?: () => void }) {
   const txn = editing.txn;
   const [f, setF] = useState<EntryForm>(() => (txn ? txnToForm(txn) : editing.form));
   const [problems, setProblems] = useState<string[]>([]);
@@ -88,7 +88,7 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
   const [splitN, setSplitN] = useState(2);
   const [paidByMode, setPaidByMode] = useState(!!f.paidBy);
   /** 國外交易手續費（信用卡支出）：null = 自動（新增時國外店家就勾；修改時不勾） */
-  const [feeOnState, setFeeOnState] = useState<boolean | null>(null);
+  const [feeOnState, setFeeOnState] = useState<boolean | null>(() => (editing.copied ? false : null));
   /** 新的店家（還不在機構清單）先記在這裡，存檔時一起建立 */
   const [newForeign, setNewForeign] = useState(false);
   const [feeEdit, setFeeEdit] = useState<number | null>(null);
@@ -639,6 +639,11 @@ export function EntryEditor({ api, snap, editing, onClose }: { api: MoneyApi; sn
         )}
         <button onClick={onClose}>取消</button>
         <span className="spacer" />
+        {txn && onCopy && (
+          <button onClick={onCopy} disabled={api.busy}>
+            複製一筆
+          </button>
+        )}
         {txn && (
           <button className="danger" onClick={remove} disabled={api.busy}>
             刪除

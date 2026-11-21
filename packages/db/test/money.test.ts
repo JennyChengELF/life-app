@@ -4,6 +4,7 @@ import type { Account, EntryForm, MoneySnapshot, Txn } from '../src';
 import {
   accountBalance,
   accountLabel,
+  canCopyTxn,
   categoryBreakdown,
   moneyDayTotals,
   moneyEntries,
@@ -11,6 +12,7 @@ import {
   parseEditHash,
   categoryTree,
   checkTxn,
+  copyTxnForm,
   MAX_CATEGORY_DEPTH,
   frequentCategories,
   DEFAULT_CATEGORIES,
@@ -149,6 +151,54 @@ describe('表單 ↔ 交易', () => {
     const forgive = roundTrip(form({ mode: '不用還了', sub: '他還我', person: '小明', amount: 300, cats: [{ category: '人情 / 送禮', amount: null }] }));
     expect(forgive.t.lines.map((l) => l.kind)).toEqual(['支出', '他還我']);
     expect(forgive.back).toMatchObject({ mode: '不用還了', person: '小明', amount: 300 });
+  });
+});
+
+describe('複製交易', () => {
+  it('複製成新草稿，保留使用者內容並改時間；清除帳單配對、帳單文字與標籤', () => {
+    const original = roundTrip(form({
+      time: at('2026-11-01 08:00'),
+      account: '台幣現金',
+      store: '早餐店',
+      branch: '站前店',
+      note: '整筆備註',
+      tags: ['旅行'],
+      cats: [{ category: '食 / 三餐', amount: 80, note: '蛋餅', budget: '日常' }],
+      shares: [{ person: '小明', amount: 20, note: '幫忙買' }],
+    })).txn;
+    original.statement = 'statement-1';
+    original.statementText = '帳單上的店名';
+    original.lines[0].budget = '日常';
+    const copied = copyTxnForm(original, at('2026-11-21 13:30'));
+
+    expect(copied).toMatchObject({
+      mode: '支出',
+      time: at('2026-11-21 13:30'),
+      account: '台幣現金',
+      store: '早餐店',
+      branch: '站前店',
+      note: '整筆備註',
+      tags: [],
+      statement: null,
+      statementText: null,
+      cats: [{ category: '食 / 三餐', amount: 80, note: '蛋餅', budget: '日常' }],
+      shares: [{ person: '小明', amount: 20, note: '幫忙買' }],
+    });
+  });
+
+  it('系統產生的手續費、分期、定存與盤點調整不提供複製', () => {
+    const regular = roundTrip(form({ account: '台幣現金', cats: [{ category: '食 / 三餐', amount: 100 }] })).txn;
+    const fee = { ...regular, lines: regular.lines.map((line) => ({ ...line, category: '食 / 國外交易手續費' })) };
+    const installment = { ...regular, note: '1/6 期：手機' };
+    const deposit = { ...regular, note: '開定存' };
+    const adjustment = { ...regular, lines: regular.lines.map((line) => ({ ...line, kind: '調整' as const, category: null })) };
+
+    expect(canCopyTxn(regular)).toBe(true);
+    expect(canCopyTxn(fee)).toBe(false);
+    expect(canCopyTxn(installment)).toBe(false);
+    expect(canCopyTxn(deposit)).toBe(false);
+    expect(canCopyTxn(adjustment)).toBe(false);
+    expect(() => copyTxnForm(fee, Date.now())).toThrow('系統產生');
   });
 });
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { EntryForm, Txn } from '@life/db';
-import { emptyForm, parseEditHash, startOfDay, stocktakeStatus, todayKey, txnMissingCategory } from '@life/db';
+import { canCopyTxn, copyTxnForm, emptyForm, parseEditHash, startOfDay, stocktakeStatus, todayKey, txnMissingCategory } from '@life/db';
 import { useMoney } from './useMoney';
 import { LedgerView } from './components/LedgerView';
 import { EntryEditor } from './components/EntryEditor';
@@ -47,6 +47,8 @@ function timeForDate(date: string) {
 export interface Editing {
   form: EntryForm;
   txn?: Txn;
+  /** 從「複製一筆」開的新草稿：不自動帶出原交易的手續費等附屬交易。 */
+  copied?: boolean;
   /** 「在 APP 裡補完」：存回試算表原本那一列（不另外多一筆） */
   target?: { rowNumber: number; id: string };
   /** 存好或取消後回到哪一頁（例：從對帳頁補登 → 回對帳頁） */
@@ -189,6 +191,10 @@ export function App() {
                     snap={api.snap}
                     editing={editing}
                     onClose={closeEditor}
+                    onCopy={editing.txn && canCopyTxn(editing.txn) ? () => {
+                      edit({ form: copyTxnForm(editing.txn!, timeForDate(date)), copied: true });
+                      api.showToast({ kind: 'info', text: '已複製成新交易，確認或修改後再儲存' });
+                    } : undefined}
                   />
                 )}
                 <LedgerView snap={api.snap} date={date} setDate={setDate} view={view} setView={setView} onEdit={edit} editing={!!editing} />

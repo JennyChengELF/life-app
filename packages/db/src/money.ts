@@ -1212,6 +1212,26 @@ export function txnToForm(t: Txn): EntryForm {
   return f;
 }
 
+const SYSTEM_TXN_NOTE = /^(?:\d+\/\d+ 期|開定存|定存利息|定存到期解約|盤點調整)/;
+
+/** 系統產生或 APP 無法完整重建的交易不提供複製。（2026-11-21 使用者決定） */
+export function canCopyTxn(t: Txn): boolean {
+  const form = txnToForm(t);
+  const editable = ENTRY_MODES.includes(form.mode as (typeof ENTRY_MODES)[number]) || form.mode === '不用還了';
+  if (!editable || isFeeTxn(t)) return false;
+  if (t.lines.some((line) => line.kind === '調整')) return false;
+  return !SYSTEM_TXN_NOTE.test(t.note?.trim() ?? '');
+}
+
+/**
+ * 既有交易 → 尚未儲存的新交易草稿。
+ * 保留使用者輸入內容；清除交易編號（由新存檔產生）、帳單／對帳狀態、標籤及系統附屬關係。
+ */
+export function copyTxnForm(t: Txn, time: number): EntryForm {
+  if (!canCopyTxn(t)) throw new Error('這筆是系統產生的交易，不能複製');
+  return { ...txnToForm(t), time, statement: null, statementText: null, tags: [] };
+}
+
 /** 一筆交易的標題（例：食 / 三餐、轉帳 → 悠遊卡、借給 小明） */
 /** 明細有沒選分類的（支出 / 收入）：記帳列表提醒補 */
 export const txnMissingCategory = (t: Pick<Txn, 'lines'>) => t.lines.some((l) => (l.kind === '支出' || l.kind === '收入') && !l.category);
