@@ -6,11 +6,11 @@ import type { Nav } from '../App';
 import { fieldLabel, parseNum } from '../format';
 
 /** 新增 / 修改一筆身體量測 */
-export function BodyView({ api, snap, editing, nav }: { api: HealthApi; snap: HealthSnapshot; editing: BodyMeasurement | null; nav: Nav }) {
+export function BodyView({ api, snap, editing, initialTime, nav }: { api: HealthApi; snap: HealthSnapshot; editing: BodyMeasurement | null; initialTime?: number; nav: Nav }) {
   const shown = snap.settings.bodyFields;
   const hidden = BODY_FIELDS.map((f) => f.key).filter((k) => !shown.includes(k));
 
-  const [time, setTime] = useState(toInputDateTime(editing?.time ?? Date.now()));
+  const [time, setTime] = useState(toInputDateTime(editing?.time ?? initialTime ?? Date.now()));
   const [vals, setVals] = useState<Partial<Record<BodyValueCol, string>>>(() => {
     const init: Partial<Record<BodyValueCol, string>> = {};
     if (editing) for (const f of BODY_FIELDS) init[f.col] = editing[f.col] == null ? '' : String(editing[f.col]);

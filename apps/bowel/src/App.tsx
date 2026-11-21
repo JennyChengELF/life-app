@@ -31,10 +31,15 @@ function pendingFromHash(): Pending {
   return e?.kind === 'bowel' ? { kind: 'edit', id: e.id } : null;
 }
 
+function requestedDate() {
+  const value = new URLSearchParams(location.search).get('date');
+  return value && /^\d{4}-\d{2}-\d{2}$/.test(value) && value <= todayKey() ? value : todayKey();
+}
+
 export function App() {
   const api = useBowel();
   const [tab, setTabState] = useState<Tab>('today');
-  const [date, setDate] = useState(todayKey);
+  const [date, setDate] = useState(requestedDate);
   const [openId, setOpenId] = useState<string | null>(null);
   const [pending, setPending] = useState<Pending>(pendingFromHash);
   /** 從綜合首頁來的：填完回首頁 */
@@ -52,8 +57,9 @@ export function App() {
     history.replaceState(null, '', location.pathname + location.search);
     setFromHome(true);
     if (pending.kind === 'new') {
-      setDate(todayKey());
-      startLog(api, todayKey(), setOpenId);
+      const selected = requestedDate();
+      setDate(selected);
+      startLog(api, selected, setOpenId);
       return;
     }
     const log = api.snap.logs.find((l) => l.id === pending.id);

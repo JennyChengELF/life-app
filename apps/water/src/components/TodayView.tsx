@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Icon } from '@life/ui/icon';
+import { MonthCalendar } from '@life/ui/month-calendar';
+import { dateLabel } from '@life/ui/timeline';
 import type { WaterLog, WaterSnapshot } from '@life/db';
-import { addDays, computeGoal, drinkOf, goalWeight, startOfDay, todayKey, toHHmm } from '@life/db';
+import { computeGoal, drinkOf, goalWeight, startOfDay, todayKey, toHHmm } from '@life/db';
 import type { WaterApi } from '../useWater';
 import { drinkColor, totalsByDrink } from '../drinkColors';
 import type { Tab } from '../App';
@@ -11,15 +13,6 @@ import { ProgressRing } from './ProgressRing';
 const QUICK = [150, 250, 500];
 /** 選這個飲品時顯示備註欄 */
 const OTHER = '其他';
-
-const WEEK = ['日', '一', '二', '三', '四', '五', '六'];
-function dateLabel(d: string) {
-  const today = todayKey();
-  const wd = WEEK[new Date(startOfDay(d)).getDay()];
-  const [, m, day] = d.split('-').map(Number);
-  const rel = d === today ? '今天' : d === addDays(today, -1) ? '昨天' : '';
-  return `${m}/${day}（${wd}）${rel}`;
-}
 
 /** 在選的日期記錄：今天用現在時間；其他天用那天的現在時刻 */
 function timeForDate(date: string) {
@@ -68,6 +61,18 @@ export function TodayView(props: {
     logs.map((l) => ({ drink: drinkOf(l, snap.drinks), ml: l.ml })),
     snap.drinks,
   );
+  const calendarInfo = (calendarDate: string) => {
+    const dateLogs = snap.logs.filter((log) => log.date === calendarDate);
+    const dateDay = snap.days.get(calendarDate);
+    if (calendarDate !== todayKey() && !dateDay && dateLogs.length === 0) return null;
+    const dateTotal = dateLogs.reduce((sum, log) => sum + log.ml, 0);
+    const dateGoal = dateDay?.goal ?? computeGoal(goalWeight(snap.weights, calendarDate)?.kg ?? null, snap.settings).goal;
+    const reached = dateGoal > 0 && dateTotal >= dateGoal;
+    return {
+      marks: [{ color: reached ? 'var(--ok)' : 'var(--warn)', kind: 'bar' as const }],
+      label: `喝水 ${dateTotal.toLocaleString()}／${dateGoal.toLocaleString()} ml${reached ? '，已達標' : '，未達標'}`,
+    };
+  };
 
   const add = async (ml: number) => {
     const time = timeForDate(date);
@@ -149,23 +154,11 @@ export function TodayView(props: {
         {onlyTodayWeight && <div className="msg info">今天量的體重明天開始用來算目標（今天先用預設 2000ml）</div>}
       </div>
 
-      <div className="date-nav">
-        <button className="icon-btn" onClick={() => setDate(addDays(date, -1))} aria-label="前一天">
-          ‹
-        </button>
-        <span className="date-label">{dateLabel(date)}</span>
-        <button className="icon-btn" onClick={() => setDate(addDays(date, 1))} disabled={isToday} aria-label="後一天">
-          ›
-        </button>
-        {!isToday && (
-          <button className="link" onClick={() => setDate(todayKey())}>
-            回今天
-          </button>
-        )}
-      </div>
+      <MonthCalendar selected={date} setDate={setDate} dayInfo={calendarInfo} maxDate={todayKey()} />
 
       <div className="today-grid">
         <section className="card">
+          <h2>{dateLabel(date)}</h2>
           <ProgressRing total={total} goal={goal} />
           {byDrink.length > 0 && (
             <p className="by-drink">
@@ -242,7 +235,7 @@ export function TodayView(props: {
         </section>
 
         <section className="card">
-          <h2>紀錄（{logs.length} 筆）</h2>
+          <h2>{dateLabel(date)}紀錄（{logs.length} 筆）</h2>
           {logs.length === 0 ? (
             <p className="muted">還沒有紀錄</p>
           ) : (

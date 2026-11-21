@@ -16,10 +16,15 @@ const TABS: { key: Tab; icon: IconName; label: string }[] = [
   { key: 'settings', icon: 'settings', label: '設定' },
 ];
 
+function requestedDate() {
+  const value = new URLSearchParams(location.search).get('date');
+  return value && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : todayKey();
+}
+
 export function App() {
   const api = usePeriod();
   const [tab, setTab] = useState<Tab>('today');
-  const [date, setDate] = useState(todayKey);
+  const [date, setDate] = useState(requestedDate);
   const openDate = (d: string) => {
     setDate(d);
     setTab('today');

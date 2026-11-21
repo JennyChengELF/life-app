@@ -12,7 +12,7 @@ const decimals = (k: TempKind) => (k === '基礎' ? 2 : 1);
 export function TempView({ api, snap, nav, form }: { api: HealthApi; snap: HealthSnapshot; nav: Nav; form: VitalForm | null }) {
   // 預設看最近量的那一種
   const [kind, setKind] = useState<TempKind>(snap.temps[snap.temps.length - 1]?.kind ?? '一般');
-  if (form) return <TempForm api={api} snap={snap} nav={nav} rec={form.rec as Temperature | null} initialKind={form.tempKind ?? kind} />;
+  if (form) return <TempForm api={api} snap={snap} nav={nav} rec={form.rec as Temperature | null} initialKind={form.tempKind ?? kind} initialTime={form.initialTime} />;
   const list = snap.temps.filter((x) => x.kind === kind);
   return (
     <div className="vital">
@@ -107,9 +107,9 @@ function TempHistory({ list, nav }: { list: Temperature[]; nav: Nav }) {
   );
 }
 
-function TempForm(props: { api: HealthApi; snap: HealthSnapshot; nav: Nav; rec: Temperature | null; initialKind: TempKind }) {
+function TempForm(props: { api: HealthApi; snap: HealthSnapshot; nav: Nav; rec: Temperature | null; initialKind: TempKind; initialTime?: number }) {
   const { api, snap, nav, rec } = props;
-  const [time, setTime] = useTimeInput(rec?.time);
+  const [time, setTime] = useTimeInput(rec?.time ?? props.initialTime);
   const [note, setNote] = useState(rec?.note ?? '');
   const [kind, setKind] = useState<TempKind>(rec?.kind ?? props.initialKind);
   const [site, setSite] = useState<TempSite | null>(rec ? rec.site : snap.settings.tempSite[props.initialKind]);

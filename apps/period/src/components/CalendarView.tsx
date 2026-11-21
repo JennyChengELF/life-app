@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { PeriodSnapshot } from '@life/db';
 import { addDays, estimatedCycleEnd, isDateInCycle, projectPeriods, startOfDay, todayKey } from '@life/db';
 
@@ -10,8 +10,11 @@ const moveMonth = (month: string, n: number) => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 };
 
-export function CalendarView({ snap, openDate }: { snap: PeriodSnapshot; openDate: (date: string) => void }) {
-  const [month, setMonth] = useState(monthOf(todayKey()));
+export function CalendarView({ snap, openDate, selected }: { snap: PeriodSnapshot; openDate: (date: string) => void; selected?: string }) {
+  const [month, setMonth] = useState(monthOf(selected ?? todayKey()));
+  useEffect(() => {
+    if (selected) setMonth(monthOf(selected));
+  }, [selected]);
   const first = `${month}-01`;
   const start = addDays(first, -new Date(startOfDay(first)).getDay());
   const dates = Array.from({ length: 42 }, (_, i) => addDays(start, i));
@@ -37,7 +40,7 @@ export function CalendarView({ snap, openDate }: { snap: PeriodSnapshot; openDat
         const fertile = projections.some((p) => !!p.fertileFrom && date >= p.fertileFrom && date <= p.fertileTo!);
         const other = !date.startsWith(month);
         const flowClass = actual ? flowShade(day?.flow ?? null) : '';
-        return <button key={date} className={['period-cal-day', actual && 'actual', flowClass, predicted && 'predicted', ovulation && 'ovulation', fertile && 'fertile', date === today && 'today', other && 'other'].filter(Boolean).join(' ')} onClick={() => openDate(date)}>
+        return <button key={date} className={['period-cal-day', actual && 'actual', flowClass, predicted && 'predicted', ovulation && 'ovulation', fertile && 'fertile', date === today && 'today', date === selected && 'selected', other && 'other'].filter(Boolean).join(' ')} onClick={() => openDate(date)}>
           <span>{Number(date.slice(8))}</span>{bleed && <i className="bleed-dot" />}{ovulation && <small>估計排卵</small>}
         </button>;
       })}

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { BowelLog, BowelSnapshot } from '@life/db';
 import { bowelSummary, constipation, diarrhea, elapsedText, emptyInput, judgeBowel, lastPassed, newId, startOfDay, toDateKey, todayKey, toHHmm } from '@life/db';
-import { DateNav } from '@life/ui/timeline';
+import { MonthCalendar } from '@life/ui/month-calendar';
+import { dateLabel } from '@life/ui/timeline';
 import { Icon } from '@life/ui/icon';
 import type { BowelApi } from '../useBowel';
 import type { Tab } from '../App';
@@ -67,6 +68,14 @@ export function TodayView(props: {
   const constip = constipation(snap, now);
   const diar = diarrhea(snap.logs, date);
   const doctor = logs.map((l) => judgeBowel(l)).filter((j) => j?.seeDoctor);
+  const calendarInfo = (calendarDate: string) => {
+    const dayLogs = snap.logs.filter((log) => log.date === calendarDate);
+    if (dayLogs.length === 0) return null;
+    const judges = dayLogs.map(judgeBowel).filter((judge): judge is NonNullable<ReturnType<typeof judgeBowel>> => !!judge);
+    const level = judges.some((judge) => judge.level === 'bad') ? 'bad' : judges.some((judge) => judge.level === 'warn') ? 'warn' : 'ok';
+    const color = level === 'bad' ? 'var(--danger)' : level === 'warn' ? 'var(--warn)' : level === 'ok' ? 'var(--ok)' : 'var(--muted)';
+    return { marks: [{ color, kind: 'dot' as const }], label: `${dayLogs.length} 筆排便紀錄` };
+  };
 
   const add = () => startLog(api, date, setOpenId);
 
@@ -87,6 +96,8 @@ export function TodayView(props: {
         )}
       </div>
 
+      <MonthCalendar selected={date} setDate={setDate} dayInfo={calendarInfo} maxDate={todayKey()} />
+
       <section className="card since">
         <div className="since-label">距離上次排便</div>
         <div className="since-value">{last ? elapsedText(now - last.time) : '—'}</div>
@@ -100,7 +111,7 @@ export function TodayView(props: {
       </section>
 
       <section className="card">
-        <DateNav date={date} setDate={setDate} />
+        <h2>{dateLabel(date)}排便紀錄</h2>
         {logs.length === 0 ? (
           <p className="muted center-text">這天沒有紀錄</p>
         ) : (

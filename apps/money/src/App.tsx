@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { EntryForm, Txn } from '@life/db';
-import { emptyForm, parseEditHash, stocktakeStatus, todayKey, txnMissingCategory } from '@life/db';
+import { emptyForm, parseEditHash, startOfDay, stocktakeStatus, todayKey, txnMissingCategory } from '@life/db';
 import { useMoney } from './useMoney';
 import { LedgerView } from './components/LedgerView';
 import { EntryEditor } from './components/EntryEditor';
@@ -33,6 +33,16 @@ const TABS: { key: Tab; icon: IconName; label: string }[] = [
 /** 分頁按鈕亮哪一個（子頁面算在它的分頁底下） */
 const tabOf = (t: Tab): Tab => (t === 'budgetsAdmin' ? 'budgets' : t === 'categories' || t === 'settings' ? 'more' : t);
 
+function requestedDate() {
+  const value = new URLSearchParams(location.search).get('date');
+  return value && /^\d{4}-\d{2}-\d{2}$/.test(value) && value <= todayKey() ? value : todayKey();
+}
+
+function timeForDate(date: string) {
+  const now = Date.now();
+  return date === todayKey() ? now : startOfDay(date) + (now - startOfDay(todayKey()));
+}
+
 /** 正在編輯：新的一筆（form）或修改既有的（txn） */
 export interface Editing {
   form: EntryForm;
@@ -49,7 +59,7 @@ export type AccPage = { view: 'detail'; account: string } | { view: 'reconcile';
 export function App() {
   const api = useMoney();
   const [tab, setTabState] = useState<Tab>('ledger');
-  const [date, setDate] = useState(todayKey);
+  const [date, setDate] = useState(requestedDate);
   const [view, setView] = useState<'day' | 'month'>('day');
   const [editing, setEditing] = useState<Editing | null>(null);
   const [accPage, setAccPageState] = useState<AccPage>(null);
@@ -86,7 +96,7 @@ export function App() {
       return setAccPage({ view: 'stocktake' });
     }
     setFromHome(true);
-    if (!pending.id) return edit({ form: emptyForm('支出') });
+    if (!pending.id) return edit({ form: emptyForm('支出', timeForDate(requestedDate())) });
     const t = api.snap.txns.find((x) => x.id === pending.id);
     if (!t) return api.showToast({ kind: 'error', text: '找不到這一筆（可能已經刪除）' });
     setDate(t.date);

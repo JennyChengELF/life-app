@@ -63,6 +63,7 @@
 .period-cal-day { position: relative; min-height: 62px; padding: 5px 2px; border-color: transparent; background: transparent; flex-direction: column; gap: 1px; }
 .period-cal-day.other { opacity: .35; }
 .period-cal-day.today > span { font-weight: 800; color: var(--accent); text-decoration: underline; }
+.period-cal-day.selected { outline: 2px solid var(--accent); outline-offset: 1px; }
 .period-cal-day.actual { border-color: transparent; }
 .period-cal-day.actual.flow-very-light { color: var(--text); background: #dceaff; }
 .period-cal-day.actual.flow-light { color: var(--text); background: #b8d4f8; }

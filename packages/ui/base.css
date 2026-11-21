@@ -173,3 +173,28 @@ button.link { border: 0; background: none; color: var(--accent); padding: 4px 6p
 .tl-name { color: var(--muted); font-size: 0.9rem; }
 .tl-value { font-weight: 600; font-variant-numeric: tabular-nums; }
 .tl-extra { font-size: 0.8rem; color: var(--muted); margin-top: 1px; }
+
+/* ── 各 APP 首頁共用月曆（2026-11-21 使用者決定） ── */
+.date-calendar-card { padding: 12px; }
+.date-calendar-nav { display: grid; grid-template-columns: 44px 1fr 44px; align-items: center; margin-bottom: 8px; }
+.date-calendar-title { border: 0; background: none; display: flex; flex-direction: column; align-items: center; font-weight: 700; }
+.date-calendar-title small { color: var(--muted); font-size: .72rem; font-weight: 400; }
+.date-calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
+.date-calendar-weekday { text-align: center; color: var(--muted); font-size: .75rem; padding: 3px; }
+.date-calendar-day {
+  border: 1px solid transparent; background: none; border-radius: 10px; padding: 4px 2px;
+  min-height: 51px; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 4px;
+}
+.date-calendar-day:hover:not(:disabled) { border-color: var(--line); }
+.date-calendar-day.outside { opacity: .38; }
+.date-calendar-day.selected { background: var(--accent-soft); border-color: var(--accent); }
+.date-calendar-day.today > span:first-child { color: var(--accent); font-weight: 800; }
+.date-calendar-day:disabled { opacity: .22; }
+.date-calendar-marks { min-height: 7px; display: flex; align-items: center; justify-content: center; gap: 3px; width: 100%; }
+.date-calendar-marks i { display: block; background: var(--mark-color); flex: none; }
+.date-calendar-marks .dot { width: 6px; height: 6px; border-radius: 50%; }
+.date-calendar-marks .bar { width: 16px; height: 4px; border-radius: 4px; }
+
+@media (min-width: 760px) {
+  .date-calendar-day { min-height: 57px; }
+}

@@ -78,13 +78,19 @@ const eventInput = (e: CalendarEvent): CalendarEventInput => ({
   status: e.status,
 });
 
+function requestedDate() {
+  const value = new URLSearchParams(location.search).get('date');
+  return value && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : todayKey();
+}
+
 export function App() {
   const api = useCalendar();
+  const initialDate = requestedDate();
   const [tab, setTab] = useState<Tab>(() => location.hash === '#agenda' ? 'agenda' : location.hash === '#groups' ? 'groups' : 'month');
-  const [selectedDate, setSelectedDate] = useState(todayKey);
-  const [month, setMonth] = useState(() => todayKey().slice(0, 7));
+  const [selectedDate, setSelectedDate] = useState(initialDate);
+  const [month, setMonth] = useState(() => initialDate.slice(0, 7));
   const [open, setOpen] = useState<Open | null>(() => {
-    if (location.hash === '#new') return { kind: 'form', eventId: null, date: todayKey(), parentId: null };
+    if (location.hash === '#new') return { kind: 'form', eventId: null, date: initialDate, parentId: null };
     if (location.hash.startsWith('#event/')) return { kind: 'detail', id: decodeURIComponent(location.hash.slice(7)) };
     return null;
   });

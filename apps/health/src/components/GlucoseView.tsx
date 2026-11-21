@@ -14,7 +14,7 @@ export function GlucoseView({ api, snap, nav, form }: { api: HealthApi; snap: He
     const count = (t: GlucoseTiming) => snap.glucose.filter((x) => x.timing === t).length;
     return [...used].sort((a, b) => count(b) - count(a))[0] ?? '全部';
   });
-  if (form) return <GlucoseForm api={api} nav={nav} rec={form.rec as BloodGlucose | null} />;
+  if (form) return <GlucoseForm api={api} nav={nav} rec={form.rec as BloodGlucose | null} initialTime={form.initialTime} />;
   const list = timing === '全部' ? snap.glucose : snap.glucose.filter((x) => x.timing === timing);
   return (
     <div className="vital">
@@ -113,8 +113,8 @@ const STANDARD: Record<GlucoseTiming, string> = {
   隨機: '200 以上高',
 };
 
-function GlucoseForm({ api, nav, rec }: { api: HealthApi; nav: Nav; rec: BloodGlucose | null }) {
-  const [time, setTimeRaw] = useTimeInput(rec?.time);
+function GlucoseForm({ api, nav, rec, initialTime }: { api: HealthApi; nav: Nav; rec: BloodGlucose | null; initialTime?: number }) {
+  const [time, setTimeRaw] = useTimeInput(rec?.time ?? initialTime);
   const [note, setNote] = useState(rec?.note ?? '');
   const [mgdl, setMgdl] = useState(rec ? String(rec.mgdl) : '');
   const [timing, setTiming] = useState<GlucoseTiming>(rec?.timing ?? guessTiming(Date.now()));

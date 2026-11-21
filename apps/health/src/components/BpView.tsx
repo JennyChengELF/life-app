@@ -8,7 +8,7 @@ import { TrendChart } from './TrendChart';
 import { Badge, NumField, RangeSeg, sinceOf, useTimeInput, VitalFormShell } from './vital';
 
 export function BpView({ api, snap, nav, form }: { api: HealthApi; snap: HealthSnapshot; nav: Nav; form: VitalForm | null }) {
-  if (form) return <BpForm api={api} nav={nav} rec={form.rec as BloodPressure | null} />;
+  if (form) return <BpForm api={api} nav={nav} rec={form.rec as BloodPressure | null} initialTime={form.initialTime} />;
   return (
     <div className="vital">
       <button className="primary big full" onClick={() => nav.vital('bp')}>
@@ -159,8 +159,8 @@ function BpHistory({ snap, nav }: { snap: HealthSnapshot; nav: Nav }) {
   );
 }
 
-function BpForm({ api, nav, rec }: { api: HealthApi; nav: Nav; rec: BloodPressure | null }) {
-  const [time, setTime] = useTimeInput(rec?.time);
+function BpForm({ api, nav, rec, initialTime }: { api: HealthApi; nav: Nav; rec: BloodPressure | null; initialTime?: number }) {
+  const [time, setTime] = useTimeInput(rec?.time ?? initialTime);
   const [note, setNote] = useState(rec?.note ?? '');
   const [sys, setSys] = useState(rec ? String(rec.systolic) : '');
   const [dia, setDia] = useState(rec ? String(rec.diastolic) : '');

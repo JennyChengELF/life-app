@@ -15,8 +15,8 @@ import {
   todayKey,
 } from '@life/db';
 import { Icon } from '@life/ui/icon';
-import { DateNav } from '@life/ui/timeline';
 import type { PeriodApi } from '../usePeriod';
+import { CalendarView } from './CalendarView';
 
 interface DraftCondition extends ConditionLogDraft {
   key: string;
@@ -90,13 +90,13 @@ export function TodayView({ api, snap, conditions, date, setDate, goSettings }: 
   };
 
   return <>
+    {messages.length > 0 && <div className="messages">{messages.map((m) => <div className="msg info" key={m}>{m}</div>)}</div>}
+    <CalendarView snap={snap} selected={date} openDate={changeDate} />
     <section className="card status-card compact-status">
       <div className="status-label">目前狀態</div><div className="status-value">{status}</div>
       {!prediction && <button className="link" onClick={goSettings}>設定週期與經期天數</button>}
       {!ongoing && <button className="primary status-action" disabled={api.busy} onClick={() => void startToday()}>今天經期開始</button>}
     </section>
-    {messages.length > 0 && <div className="messages">{messages.map((m) => <div className="msg info" key={m}>{m}</div>)}</div>}
-    <DateNav date={date} setDate={changeDate} />
     <PeriodControlCard api={api} date={date} cycle={selectedCycle} cycles={snap.cycles} settings={snap.settings} />
     <DailyDetails api={api} conditions={conditions} date={date} cycle={selectedCycle} predictionLabel={predictionLabel} day={snap.days.find((x) => x.date === date) ?? null} onDirtyChange={setEditorDirty} />
   </>;

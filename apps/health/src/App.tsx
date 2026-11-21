@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Icon, type IconName } from '@life/ui/icon';
-import { parseEditHash, todayKey } from '@life/db';
+import { parseEditHash, startOfDay, todayKey } from '@life/db';
 import type { BloodGlucose, BloodPressure, BodyMeasurement, Temperature, TempKind } from '@life/db';
 import { useHealth } from './useHealth';
 import { OverviewView } from './components/OverviewView';
@@ -35,6 +35,16 @@ const TABS: { key: Tab; icon: IconName; label: string }[] = [
 ];
 const UNDER: Partial<Record<Tab, Tab>> = { bodyForm: 'body', temp: 'more', lab: 'more', occ: 'more', settings: 'more' };
 
+function requestedDate() {
+  const value = new URLSearchParams(location.search).get('date');
+  return value && /^\d{4}-\d{2}-\d{2}$/.test(value) && value <= todayKey() ? value : todayKey();
+}
+
+function timeForDate(date: string) {
+  const now = Date.now();
+  return date === todayKey() ? now : startOfDay(date) + (now - startOfDay(todayKey()));
+}
+
 /** 網址 #new（記體重）、#bp、#glucose、#temp → 直接打開輸入畫面；#edit/種類/id → 讀完資料後打開那一筆（見 pendingEdit） */
 function fromHash(): { tab: Tab; form: boolean } {
   const h = location.hash.slice(1);
@@ -49,6 +59,8 @@ export type LabOpen = { mode: 'detail'; id: string } | { mode: 'form'; id: strin
 export interface VitalForm {
   /** null = 新增 */
   rec: VitalRecord | null;
+  /** 從月曆新增時，預設使用所選日期。 */
+  initialTime?: number;
   /** 體溫：新增時預設的種類 */
   tempKind?: TempKind;
 }
@@ -60,13 +72,15 @@ const goHome = () => {
 
 export function App() {
   const api = useHealth();
+  const initialDate = requestedDate();
   const [tab, setTabState] = useState<Tab>(() => fromHash().tab);
   /** 正在修改的身體量測（null = 新增） */
   const [editing, setEditing] = useState<BodyMeasurement | null>(null);
+  const [newBodyTime, setNewBodyTime] = useState<number | null>(() => fromHash().tab === 'bodyForm' ? timeForDate(initialDate) : null);
   /** 血壓、血糖、體溫的輸入畫面（null = 看列表） */
-  const [vitalForm, setVitalForm] = useState<VitalForm | null>(() => (fromHash().form ? { rec: null } : null));
+  const [vitalForm, setVitalForm] = useState<VitalForm | null>(() => (fromHash().form ? { rec: null, initialTime: timeForDate(initialDate) } : null));
   /** 總覽看的日期（去修改再回來時保留） */
-  const [overviewDate, setOverviewDate] = useState(todayKey);
+  const [overviewDate, setOverviewDate] = useState(initialDate);
   /** 偶爾量測畫面要先填的項目（例：BMI 不同時按「改身高」） */
   const [focusItem, setFocusItem] = useState<string | null>(null);
   /** 輸入畫面存好 / 取消後回到哪裡（從總覽打開的回總覽；沒有就回那一種的列表） */
@@ -79,7 +93,9 @@ export function App() {
     const onHash = () => {
       const h = fromHash();
       setEditing(null);
-      setVitalForm(h.form ? { rec: null } : null);
+      const selected = requestedDate();
+      setNewBodyTime(h.tab === 'bodyForm' ? timeForDate(selected) : null);
+      setVitalForm(h.form ? { rec: null, initialTime: timeForDate(selected) } : null);
       setTabState(h.tab);
     };
     window.addEventListener('hashchange', onHash);
@@ -101,10 +117,13 @@ export function App() {
     edit: (m, back = null) => {
       setTab('bodyForm');
       setEditing(m);
+      setNewBodyTime(null);
       setFormBack(back);
     },
-    newBody: (back = null) => {
+    newBody: (back = null, initialTime = Date.now()) => {
       setTab('bodyForm');
+      setEditing(null);
+      setNewBodyTime(initialTime);
       setFormBack(back);
     },
     closeBody: () => (formBack === 'home' ? goHome() : setTab(formBack ?? 'body')),
@@ -173,7 +192,7 @@ export function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <a className="icon-btn home-link" href={HOME_URL} title="回首頁" aria-label="回首頁">
+        <a className="icon-btn home-link" href={HOME_URL + location.search} title="回首頁" aria-label="回首頁">
           <Icon name="home" />
         </a>
         <h1>健康</h1>
@@ -218,7 +237,7 @@ export function App() {
           <>
             {tab === 'overview' && <OverviewView api={api} snap={api.snap} nav={nav} date={overviewDate} setDate={setOverviewDate} />}
             {tab === 'body' && <BodyTab api={api} snap={api.snap} nav={nav} />}
-            {tab === 'bodyForm' && <BodyView key={editing?.id ?? 'new'} api={api} snap={api.snap} editing={editing} nav={nav} />}
+            {tab === 'bodyForm' && <BodyView key={editing?.id ?? `new-${newBodyTime ?? ''}`} api={api} snap={api.snap} editing={editing} initialTime={newBodyTime ?? undefined} nav={nav} />}
             {tab === 'bp' && <BpView key={vitalKey} api={api} snap={api.snap} nav={nav} form={vitalForm} />}
             {tab === 'glucose' && <GlucoseView key={vitalKey} api={api} snap={api.snap} nav={nav} form={vitalForm} />}
             {tab === 'temp' && <TempView key={vitalKey} api={api} snap={api.snap} nav={nav} form={vitalForm} />}
@@ -267,7 +286,7 @@ export function App() {
 export type Nav = {
   /** back：存好 / 取消後回到哪個分頁（預設回身體） */
   edit: (m: BodyMeasurement, back?: Back | null) => void;
-  newBody: (back?: Back | null) => void;
+  newBody: (back?: Back | null, initialTime?: number) => void;
   /** 身體量測輸入畫面 → 回去 */
   closeBody: () => void;
   occ: (item?: string | null) => void;

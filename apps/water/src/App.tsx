@@ -18,10 +18,15 @@ const TABS: { key: Tab; icon: IconName; label: string }[] = [
   { key: 'settings', icon: 'settings', label: '設定' },
 ];
 
+function requestedDate() {
+  const value = new URLSearchParams(location.search).get('date');
+  return value && /^\d{4}-\d{2}-\d{2}$/.test(value) && value <= todayKey() ? value : todayKey();
+}
+
 export function App() {
   const api = useWater();
   const [tab, setTab] = useState<Tab>('today');
-  const [date, setDate] = useState(todayKey());
+  const [date, setDate] = useState(requestedDate);
   /** 從綜合首頁點某一筆喝水進來（#edit/water/id）：資料讀好後打開它，改完回首頁 */
   const [pendingEdit, setPendingEdit] = useState(() => parseEditHash(location.hash));
   const [editFromHome, setEditFromHome] = useState<string | null>(null);
@@ -40,7 +45,7 @@ export function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <a className="icon-btn home-link" href={HOME_URL} title="回首頁" aria-label="回首頁">
+        <a className="icon-btn home-link" href={HOME_URL + location.search} title="回首頁" aria-label="回首頁">
           <Icon name="home" />
         </a>
         <h1>喝水</h1>

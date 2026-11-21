@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Icon, type IconName } from '@life/ui/icon';
+import { MonthCalendar } from '@life/ui/month-calendar';
 import type { TimelineEntry } from '@life/db';
 import { bowelEntries, bowelHomeMessage, editHash, fmtMoney, depositsDue, healthEntries, loanReminders, moneyDayTotals, moneyEntries, resolvePinned, stocktakeStatus, sortEntries, todayKey, waterEntries, waterSummary } from '@life/db';
-import { DateNav, Timeline } from '@life/ui/timeline';
+import { dateLabel, Timeline } from '@life/ui/timeline';
 import { useHub } from './useHub';
 
 type AppKey = 'water' | 'health' | 'bowel' | 'money' | 'calendar' | 'period';
@@ -12,8 +13,11 @@ type AppKey = 'water' | 'health' | 'bowel' | 'money' | 'calendar' | 'period';
  * 開發時每個 APP 是不同的 port。網址有 ?local（本機測試模式）時一起帶過去。
  */
 const DEV_PORTS: Record<AppKey, number> = { water: 5173, health: 5174, bowel: 5175, money: 5176, calendar: 5177, period: 5178 };
-function appUrl(app: AppKey, hash = '') {
-  const q = new URLSearchParams(location.search).has('local') ? '?local' : '';
+function appUrl(app: AppKey, hash = '', date?: string) {
+  const params = new URLSearchParams();
+  if (new URLSearchParams(location.search).has('local')) params.set('local', '');
+  if (date && date !== todayKey()) params.set('date', date);
+  const q = params.size ? `?${params.toString()}` : '';
   return import.meta.env.DEV ? `http://${location.hostname}:${DEV_PORTS[app]}/${q}${hash}` : `${app}/${q}${hash}`;
 }
 
@@ -56,9 +60,14 @@ const GROUPS: { key: string; icon: IconName; label: string; tiles: string[] }[] 
 /** 💡 還沒設定過時的常用（和原本首頁一樣） */
 const DEFAULT_PINNED = ['water', 'bowelNew', 'body', 'bp', 'glucose'];
 
-function TileLink({ t }: { t: Tile }) {
+function requestedDate() {
+  const value = new URLSearchParams(location.search).get('date');
+  return value && /^\d{4}-\d{2}-\d{2}$/.test(value) && value <= todayKey() ? value : todayKey();
+}
+
+function TileLink({ t, date }: { t: Tile; date: string }) {
   return (
-    <a className="tile" href={appUrl(t.app, t.hash)}>
+    <a className="tile" href={appUrl(t.app, t.hash, date)}>
       <span className="tile-icon">
         <Icon name={t.icon} size={26} />
       </span>
@@ -67,7 +76,7 @@ function TileLink({ t }: { t: Tile }) {
   );
 }
 
-function Launcher({ hub }: { hub: ReturnType<typeof useHub> }) {
+function Launcher({ hub, date }: { hub: ReturnType<typeof useHub>; date: string }) {
   const pinned = resolvePinned(
     hub.hubSnap?.settings.pinned ?? null,
     TILES.map((t) => t.key),
@@ -94,7 +103,7 @@ function Launcher({ hub }: { hub: ReturnType<typeof useHub> }) {
       {pinned.length > 0 ? (
         <nav className="launcher">
           {pinned.map((k) => (
-            <TileLink key={k} t={tileOf(k)} />
+            <TileLink key={k} t={tileOf(k)} date={date} />
           ))}
         </nav>
       ) : (
@@ -110,7 +119,7 @@ function Launcher({ hub }: { hub: ReturnType<typeof useHub> }) {
       {group && (
         <nav className="launcher group-tiles">
           {group.tiles.map((k) => (
-            <TileLink key={k} t={tileOf(k)} />
+            <TileLink key={k} t={tileOf(k)} date={date} />
           ))}
         </nav>
       )}
@@ -182,7 +191,7 @@ function PinEditor({ initial, hub, onClose }: { initial: string[]; hub: ReturnTy
 
 export function App() {
   const hub = useHub();
-  const [date, setDate] = useState(todayKey);
+  const [date, setDate] = useState(requestedDate);
 
   return (
     <div className="app hub">
@@ -198,7 +207,6 @@ export function App() {
       </header>
       {hub.mode === 'local' && <div className="mode-banner">本機測試模式：資料只存在這個瀏覽器，還沒接上 Google 試算表</div>}
       <main>
-        <Launcher hub={hub} />
         <Day hub={hub} date={date} setDate={setDate} />
       </main>
     </div>
@@ -209,22 +217,28 @@ function Day({ hub, date, setDate }: { hub: ReturnType<typeof useHub>; date: str
   if (hub.status === 'starting' || (hub.status === 'loading' && !hub.waterSnap)) return <div className="center muted">讀取中⋯⋯</div>;
   if (hub.status === 'need-connect')
     return (
-      <div className="center connect">
-        <p>連上 Google 試算表，就能在這裡看每天的紀錄。</p>
-        <button className="primary big" onClick={hub.connect}>
-          連線 Google
-        </button>
-        {hub.error && <p className="error-text">{hub.error}</p>}
-      </div>
+      <>
+        <Launcher hub={hub} date={date} />
+        <div className="center connect">
+          <p>連上 Google 試算表，就能在這裡看每天的紀錄。</p>
+          <button className="primary big" onClick={hub.connect}>
+            連線 Google
+          </button>
+          {hub.error && <p className="error-text">{hub.error}</p>}
+        </div>
+      </>
     );
   if (hub.status === 'error' || !hub.waterSnap || !hub.healthSnap || !hub.bowelSnap || !hub.moneySnap)
     return (
-      <div className="center">
-        <p className="error-text">{hub.error ?? '讀取失敗'}</p>
-        <button className="primary" onClick={() => location.reload()}>
-          重新載入
-        </button>
-      </div>
+      <>
+        <Launcher hub={hub} date={date} />
+        <div className="center">
+          <p className="error-text">{hub.error ?? '讀取失敗'}</p>
+          <button className="primary" onClick={() => location.reload()}>
+            重新載入
+          </button>
+        </div>
+      </>
     );
 
   const w = waterSummary(hub.waterSnap, date);
@@ -234,6 +248,16 @@ function Day({ hub, date, setDate }: { hub: ReturnType<typeof useHub>; date: str
     ...bowelEntries(hub.bowelSnap, date),
     ...moneyEntries(hub.moneySnap, date),
   ]);
+  const calendarInfo = (calendarDate: string) => {
+    const dayEntries = [
+      ...healthEntries(hub.healthSnap!, calendarDate),
+      ...waterEntries(hub.waterSnap!, calendarDate),
+      ...bowelEntries(hub.bowelSnap!, calendarDate),
+      ...moneyEntries(hub.moneySnap!, calendarDate),
+    ];
+    if (dayEntries.length === 0) return null;
+    return { marks: [{ color: 'var(--accent)', kind: 'dot' as const }], label: `${dayEntries.length} 筆生活紀錄` };
+  };
   const money = moneyDayTotals(hub.moneySnap, date);
   // 借出太久沒還（天數在記帳 APP 設定，2026-11-18）
   const loans = loanReminders(hub.moneySnap);
@@ -288,9 +312,11 @@ function Day({ hub, date, setDate }: { hub: ReturnType<typeof useHub>; date: str
           </div>
         </div>
       )}
+      <MonthCalendar selected={date} setDate={setDate} dayInfo={calendarInfo} maxDate={todayKey()} />
+      <Launcher hub={hub} date={date} />
       <section className="card">
-        <DateNav date={date} setDate={setDate} />
-        <a className="water-sum" href={appUrl('water')}>
+        <h2>{dateLabel(date)}生活紀錄</h2>
+        <a className="water-sum" href={appUrl('water', '', date)}>
           <span className="sum-icon">
             <Icon name="droplet" size={18} />
           </span>
@@ -303,7 +329,7 @@ function Day({ hub, date, setDate }: { hub: ReturnType<typeof useHub>; date: str
           </span>
         </a>
         {(money.expense !== 0 || money.income !== 0) && (
-          <a className="money-sum" href={appUrl('money')}>
+          <a className="money-sum" href={appUrl('money', '', date)}>
             <span className="sum-icon">
               <Icon name="wallet" size={18} />
             </span>

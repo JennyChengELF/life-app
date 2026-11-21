@@ -6,6 +6,7 @@
   "exports": {
     "./base.css": "./base.css",
     "./timeline": "./src/Timeline.tsx",
+    "./month-calendar": "./src/MonthCalendar.tsx",
     "./icon": "./src/Icon.tsx"
   },
   "peerDependencies": {

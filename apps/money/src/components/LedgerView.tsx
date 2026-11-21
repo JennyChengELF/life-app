@@ -1,9 +1,8 @@
 import type { MoneySnapshot, Txn } from '@life/db';
 import { emptyForm, fmtMoney, monthStats, startOfDay, todayKey, toHHmm, topCategory, txnCurrency, txnMissingCategory, txnMyNet, txnTitle } from '@life/db';
-import { DateNav } from '@life/ui/timeline';
+import { MonthCalendar } from '@life/ui/month-calendar';
 import { Icon, type IconName } from '@life/ui/icon';
 import type { Editing } from '../App';
-import { MonthNav } from './common';
 
 const WEEK = ['日', '一', '二', '三', '四', '五', '六'];
 export function dayLabel(date: string) {
@@ -186,6 +185,10 @@ export function LedgerView({
 }) {
   const month = date.slice(0, 7);
   const newEntry = (mode: '支出' | '收入' | '轉帳') => onEdit({ form: emptyForm(mode, view === 'day' ? timeFor(date) : Date.now()) });
+  const calendarInfo = (calendarDate: string) => {
+    const count = snap.txns.filter((txn) => txn.date === calendarDate).length;
+    return count ? { marks: [{ color: 'var(--accent)', kind: 'dot' as const }], label: `${count} 筆記帳紀錄` } : null;
+  };
 
   return (
     <>
@@ -197,9 +200,10 @@ export function LedgerView({
       )}
       {!snap.accounts.length && <p className="hint warn">還沒有帳戶：請先到「帳戶」新增帳戶（例：台幣現金、信用卡）。</p>}
 
+      <MonthCalendar selected={date} setDate={setDate} dayInfo={calendarInfo} maxDate={todayKey()} />
+
       <section className="ledger-head-wrap">
         <div className="ledger-head">
-          {view === 'day' ? <DateNav date={date} setDate={setDate} /> : <MonthNav month={month} setMonth={(m) => setDate(`${m}-01`)} />}
           <div className="seg">
             <button className={view === 'day' ? 'active' : ''} onClick={() => setView('day')}>
               日

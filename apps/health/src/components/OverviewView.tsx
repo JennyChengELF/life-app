@@ -1,7 +1,8 @@
 import type { HealthSnapshot, TimelineEntry } from '@life/db';
 import { Icon } from '@life/ui/icon';
-import { healthEntries, mismatchFields, sortEntries, todayKey } from '@life/db';
-import { DateNav, Timeline } from '@life/ui/timeline';
+import { healthEntries, mismatchFields, sortEntries, startOfDay, todayKey } from '@life/db';
+import { MonthCalendar } from '@life/ui/month-calendar';
+import { dateLabel, Timeline } from '@life/ui/timeline';
 import type { HealthApi } from '../useHealth';
 import type { Nav } from '../App';
 
@@ -11,9 +12,25 @@ export function OverviewView(props: { api: HealthApi; snap: HealthSnapshot; nav:
   const mismatches = snap.body.filter((m) => mismatchFields(m, snap).length > 0);
   const lastTemp = snap.temps[snap.temps.length - 1];
   const entries = sortEntries(healthEntries(snap, date));
+  const calendarInfo = (calendarDate: string) => {
+    const dayEntries = healthEntries(snap, calendarDate);
+    if (dayEntries.length === 0) return null;
+    const level = dayEntries.some((entry) => entry.judge?.level === 'bad')
+      ? 'bad'
+      : dayEntries.some((entry) => entry.warn || entry.judge?.level === 'warn') ? 'warn' : 'ok';
+    const color = level === 'bad' ? 'var(--danger)' : level === 'warn' ? 'var(--warn)' : 'var(--accent)';
+    return {
+      marks: [{ color, kind: 'dot' as const }],
+      label: `${dayEntries.length} 筆健康紀錄${level === 'ok' ? '' : '，有需注意的數值'}`,
+    };
+  };
 
   const pick = (e: TimelineEntry) => {
     if (e.ref.app === 'health') nav.openRecord(e.ref.kind, e.ref.id, 'overview');
+  };
+  const timeForSelectedDate = () => {
+    const now = Date.now();
+    return date === todayKey() ? now : startOfDay(date) + (now - startOfDay(todayKey()));
   };
 
   return (
@@ -31,24 +48,26 @@ export function OverviewView(props: { api: HealthApi; snap: HealthSnapshot; nav:
         )}
       </div>
 
-      {/* 快速記錄：記的是現在，記完回到今天 */}
-      <div className="quick" onClickCapture={() => setDate(todayKey())}>
-        <button onClick={() => nav.newBody('overview')}>
+      <MonthCalendar selected={date} setDate={setDate} dayInfo={calendarInfo} maxDate={todayKey()} />
+
+      {/* 快速記錄：日期預設使用月曆選取日（2026-11-21 使用者決定） */}
+      <div className="quick">
+        <button onClick={() => nav.newBody('overview', timeForSelectedDate())}>
           <Icon name="weight" className="q-icon" />記身體
         </button>
-        <button onClick={() => nav.vital('bp', undefined, 'overview')}>
+        <button onClick={() => nav.vital('bp', { rec: null, initialTime: timeForSelectedDate() }, 'overview')}>
           <Icon name="heartPulse" className="q-icon" />記血壓
         </button>
-        <button onClick={() => nav.vital('glucose', undefined, 'overview')}>
+        <button onClick={() => nav.vital('glucose', { rec: null, initialTime: timeForSelectedDate() }, 'overview')}>
           <Icon name="candy" className="q-icon" />記血糖
         </button>
-        <button onClick={() => nav.vital('temp', { rec: null, tempKind: lastTemp?.kind ?? '一般' }, 'overview')}>
+        <button onClick={() => nav.vital('temp', { rec: null, tempKind: lastTemp?.kind ?? '一般', initialTime: timeForSelectedDate() }, 'overview')}>
           <Icon name="thermometer" className="q-icon" />記體溫
         </button>
       </div>
 
       <section className="card">
-        <DateNav date={date} setDate={setDate} />
+        <h2>{dateLabel(date)}健康紀錄</h2>
         <Timeline entries={entries} onPick={pick} />
       </section>
       {api.busy && <p className="muted small center-text">更新中⋯⋯</p>}
