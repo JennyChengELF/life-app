@@ -413,7 +413,8 @@ export class WaterStore {
   async addWeight(kg: number, time = Date.now()) {
     if (!validKg(kg)) throw new Error('體重的數值不合理');
     const now = Date.now();
-    await this.b.append('healthBodyMeasurements', [{ time, kg, date: toDateKey(time), createdVia: this.via, id: newId(now), createdAt: now, updatedAt: now }]);
+    // 2026-11-21 使用者決定：身體量測預設為「起床後」。
+    await this.b.append('healthBodyMeasurements', [{ time, timing: '起床後', kg, date: toDateKey(time), createdVia: this.via, id: newId(now), createdAt: now, updatedAt: now }]);
   }
 
   // ───── 常用杯子 ─────

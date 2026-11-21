@@ -99,7 +99,9 @@ button.full { width: 100%; margin-bottom: 12px; }
 .chart .pt.s1, .chart .pt-last.s1, .chart .pt-hover.s1 { fill: var(--s1); }
 .chart .line.s2 { stroke: var(--s2); }
 .chart .pt.s2, .chart .pt-last.s2, .chart .pt-hover.s2 { fill: var(--s2); }
-.chart .pt-last.s1, .chart .pt-last.s2, .chart .pt-hover.s1, .chart .pt-hover.s2 { stroke: var(--card); stroke-width: 2; }
+.chart .line.s3 { stroke: #8b5cf6; }
+.chart .pt.s3, .chart .pt-last.s3, .chart .pt-hover.s3 { fill: #8b5cf6; }
+.chart .pt-last.s1, .chart .pt-last.s2, .chart .pt-last.s3, .chart .pt-hover.s1, .chart .pt-hover.s2, .chart .pt-hover.s3 { stroke: var(--card); stroke-width: 2; }
 .chart .ref { stroke: var(--warn); stroke-width: 1; stroke-dasharray: 5 4; opacity: 0.7; }
 .chart .ref-label { fill: var(--muted); font-size: 11px; }
 .legend { display: flex; gap: 14px; font-size: 0.82rem; color: var(--muted); margin-bottom: 4px; }
@@ -107,6 +109,8 @@ button.full { width: 100%; margin-bottom: 12px; }
 .sw { display: inline-block; width: 14px; height: 3px; border-radius: 2px; }
 .sw.s1 { background: var(--s1); }
 .sw.s2 { background: var(--s2); }
+.sw.s3 { background: #8b5cf6; }
+.trend-mode { width: fit-content; margin: 10px 0; }
 
 .big-num { font-size: 2rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
 .big-num small { font-size: 0.85rem; font-weight: 400; color: var(--muted); }

@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import type { BodyFieldKey, BodyMeasurement, HealthSnapshot } from '@life/db';
-import { bodyField, bodyValue, HEIGHT_CODE, heightAt, mismatchFields } from '@life/db';
+import type { BodyFieldKey, BodyMeasurement, BodyTrendPeriod, HealthSnapshot } from '@life/db';
+import { BODY_TIMINGS, bodyField, bodyTrendAverages, bodyValue, HEIGHT_CODE, heightAt, mismatchFields } from '@life/db';
 import type { HealthApi } from '../useHealth';
 import type { Nav } from '../App';
 import { fieldLabel, fmt, fmtDateTime, hasTwin } from '../format';
@@ -54,21 +54,11 @@ export function BodyTab({ api, snap, nav }: { api: HealthApi; snap: HealthSnapsh
   );
 }
 
-/** 前一筆有這個項目的紀錄 */
-function previousValue(snap: HealthSnapshot, m: BodyMeasurement, key: BodyFieldKey): number | null {
-  const idx = snap.body.indexOf(m);
-  for (let i = idx - 1; i >= 0; i--) {
-    const v = bodyValue(snap.body[i], key, snap);
-    if (v != null) return v;
-  }
-  return null;
-}
-
 function LatestCard({ snap, latest, fields, onEdit }: { snap: HealthSnapshot; latest: BodyMeasurement; fields: BodyFieldKey[]; onEdit: () => void }) {
   return (
     <section className="card">
       <div className="chart-head">
-        <h2>最新 · {fmtDateTime(latest.time)}</h2>
+        <h2>最新・{latest.timing} · {fmtDateTime(latest.time)}</h2>
         <button className="link" onClick={onEdit}>
           修改
         </button>
@@ -87,6 +77,7 @@ function LatestCard({ snap, latest, fields, onEdit }: { snap: HealthSnapshot; la
                 {fmt(k, v)}
                 {f.unit && v != null && <small> {f.unit}</small>}
               </div>
+              {v != null && prev == null && <div className="stat-diff">第一次紀錄</div>}
               {shown != null && (
                 <div className="stat-diff">
                   {shown === 0 ? '持平' : `${shown > 0 ? '▲' : '▼'} ${Math.abs(shown).toFixed(f.decimals)}`}
@@ -101,15 +92,38 @@ function LatestCard({ snap, latest, fields, onEdit }: { snap: HealthSnapshot; la
   );
 }
 
+/** 前一筆有這個項目的紀錄 */
+function previousValue(snap: HealthSnapshot, m: BodyMeasurement, key: BodyFieldKey): number | null {
+  const idx = snap.body.indexOf(m);
+  for (let i = idx - 1; i >= 0; i--) {
+    const value = bodyValue(snap.body[i], key, snap);
+    if (value != null) return value;
+  }
+  return null;
+}
+
 function TrendCard({ snap, fields }: { snap: HealthSnapshot; fields: BodyFieldKey[] }) {
   const [key, setKey] = useState<BodyFieldKey>(fields[0] ?? 'kg');
   const [range, setRange] = useState<number>(90);
+  const [mode, setMode] = useState<'record' | BodyTrendPeriod>('record');
   const k = fields.includes(key) ? key : 'kg';
   const since = range ? Date.now() - range * 86400000 : -Infinity;
-  const points = snap.body
-    .filter((m) => m.time >= since)
-    .map((m) => ({ time: m.time, value: bodyValue(m, k, snap) }))
-    .filter((p): p is { time: number; value: number } => p.value != null);
+  const source = snap.body
+    .map((m) => ({ time: m.time, date: m.date, timing: m.timing, value: bodyValue(m, k, snap) }))
+    .filter((p): p is typeof p & { value: number } => p.value != null);
+  const averages = mode === 'record' ? [] : bodyTrendAverages(source, mode);
+  const series = BODY_TIMINGS.map((timing) => ({
+    label: timing,
+    points: mode === 'record'
+      ? source.filter((p) => p.timing === timing && p.time >= since).map((p) => ({ time: p.time, value: p.value }))
+      : averages.filter((p) => p.timing === timing && p.time >= since).map((p) => ({
+        time: p.time,
+        value: p.value,
+        label: mode === 'week'
+          ? `${shortDate(p.startDate)}～${shortDate(p.endDate)}（${p.days} 天）`
+          : `${p.startDate.slice(0, 7).replace('-', '/')}（${p.days} 天）`,
+      })),
+  }));
   const f = bodyField(k);
   return (
     <section className="card">
@@ -123,6 +137,11 @@ function TrendCard({ snap, fields }: { snap: HealthSnapshot; fields: BodyFieldKe
           ))}
         </div>
       </div>
+      <div className="seg trend-mode">
+        <button className={mode === 'record' ? 'active' : ''} onClick={() => setMode('record')}>每筆</button>
+        <button className={mode === 'week' ? 'active' : ''} onClick={() => setMode('week')}>每週平均</button>
+        <button className={mode === 'month' ? 'active' : ''} onClick={() => setMode('month')}>每月平均</button>
+      </div>
       <div className="chips">
         {fields.map((x) => (
           <button key={x} className={x === k ? 'active' : ''} onClick={() => setKey(x)}>
@@ -130,7 +149,8 @@ function TrendCard({ snap, fields }: { snap: HealthSnapshot; fields: BodyFieldKe
           </button>
         ))}
       </div>
-      <TrendChart points={points} unit={f.unit} format={(v) => fmt(k, v)} />
+      <TrendChart series={series} unit={f.unit} format={(v) => fmt(k, v)} />
+      {mode !== 'record' && <p className="muted small">同一天同一時段有多筆時先取當天平均；沒有量的日期不列入平均天數。</p>}
     </section>
   );
 }
@@ -146,6 +166,7 @@ function HistoryCard({ snap, fields, onEdit }: { snap: HealthSnapshot; fields: B
           <thead>
             <tr>
               <th>時間</th>
+              <th>時段</th>
               {fields.map((k) => (
                 <th key={k}>
                   {fieldLabel(k)}
@@ -163,6 +184,7 @@ function HistoryCard({ snap, fields, onEdit }: { snap: HealthSnapshot; fields: B
                     {fmtDateTime(m.time)}
                     {m.note && ' 📝'}
                   </td>
+                  <td className="nowrap">{m.timing}</td>
                   {fields.map((k) => (
                     <td key={k} className="num">
                       {fmt(k, bodyValue(m, k, snap))}
@@ -183,3 +205,8 @@ function HistoryCard({ snap, fields, onEdit }: { snap: HealthSnapshot; fields: B
     </section>
   );
 }
+
+const shortDate = (date: string) => {
+  const [, month, day] = date.split('-').map(Number);
+  return `${month}/${day}`;
+};

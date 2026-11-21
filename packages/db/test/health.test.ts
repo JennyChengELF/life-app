@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BODY_TIMINGS,
   bmiInfo,
+  bodyTrendAverages,
   mismatchFields,
   pctKgMismatches,
   computeBmi,
@@ -101,7 +103,7 @@ describe('HealthStore', () => {
     const { store } = setup();
     await store.addBody({ kg: 55.24, bodyFatPct: 28.15, bodyAge: 40.4, bmrKcal: 1180 }, at('2026-11-17 07:00'));
     const s = await store.load();
-    expect(s.body[0]).toMatchObject({ kg: 55.2, bodyFatPct: 28.2, bodyAge: 40, bmrKcal: 1180, date: '2026-11-17' });
+    expect(s.body[0]).toMatchObject({ kg: 55.2, bodyFatPct: 28.2, bodyAge: 40, bmrKcal: 1180, date: '2026-11-17', timing: '起床後' });
     await expect(store.addBody({ kg: 55, bodyFatPct: 150 })).rejects.toThrow('體脂肪');
   });
 
@@ -114,7 +116,7 @@ describe('HealthStore', () => {
     await b.appendRaw('healthOccasionalMeasurements', { time: at('2026-11-17 08:00'), item: '頸圍', value: 30 });
     const s = await store.load();
     expect(s.body).toHaveLength(1);
-    expect(s.body[0]).toMatchObject({ createdVia: 'sheet', date: '2026-11-17' });
+    expect(s.body[0]).toMatchObject({ createdVia: 'sheet', date: '2026-11-17', timing: '起床後' });
     expect(s.occ.map((o) => o.item)).toEqual(['腰圍']);
     expect(s.issues.map((i) => i.problems[0])).toEqual(['沒有填體重', expect.stringContaining('頸圍')]);
   });
@@ -136,6 +138,65 @@ describe('HealthStore', () => {
     const { store } = setup();
     await store.saveBodyFields(['bmi', 'kg']);
     expect((await store.load()).settings.bodyFields).toEqual(['bmi', 'kg']);
+  });
+});
+
+describe('身體量測時段與趨勢', () => {
+  it('新增與修改都可以選擇量測時段', async () => {
+    const { store } = setup();
+    await store.load();
+    await store.addBody({ kg: 60 }, at('2026-11-01 07:00'), null, '起床後');
+    await store.addBody({ kg: 62 }, at('2026-11-01 13:00'), null, '日間');
+    await store.addBody({ kg: 59 }, at('2026-11-02 07:00'), null, '起床後');
+    let s = await store.load();
+
+    expect(s.body.map((m) => m.timing)).toEqual(['起床後', '日間', '起床後']);
+    await store.updateBody(s.body[2], { timing: '日間' });
+    s = await store.load();
+    expect(s.body[2].timing).toBe('日間');
+  });
+
+  it('既有空白時段自動補成起床後，未知時段放入需要補齊', async () => {
+    const { b, store } = setup();
+    await store.load();
+    await b.appendRaw('healthBodyMeasurements', { time: at('2026-11-17 07:00'), kg: 55 });
+    await b.appendRaw('healthBodyMeasurements', { time: at('2026-11-17 22:00'), timing: '晚上', kg: 56 });
+    const s = await store.load();
+
+    expect(s.body).toHaveLength(1);
+    expect(s.body[0].timing).toBe('起床後');
+    expect(s.issues.some((issue) => issue.problems.some((problem) => problem.includes('量測時段')))).toBe(true);
+  });
+
+  it('週平均先算每日平均，只除以有資料的天數，並以星期日至星期六分週', () => {
+    const points = [
+      { time: at('2026-11-01 07:00'), date: '2026-11-01', timing: '起床後' as const, value: 60 },
+      { time: at('2026-11-01 08:00'), date: '2026-11-01', timing: '起床後' as const, value: 62 },
+      { time: at('2026-11-07 07:00'), date: '2026-11-07', timing: '起床後' as const, value: 59 },
+      { time: at('2026-11-07 22:00'), date: '2026-11-07', timing: '睡前' as const, value: 63 },
+      { time: at('2026-11-08 07:00'), date: '2026-11-08', timing: '起床後' as const, value: 58 },
+    ];
+    const result = bodyTrendAverages(points, 'week');
+
+    expect(result).toEqual([
+      expect.objectContaining({ startDate: '2026-11-01', endDate: '2026-11-07', timing: '起床後', value: 60, days: 2 }),
+      expect.objectContaining({ startDate: '2026-11-01', endDate: '2026-11-07', timing: '睡前', value: 63, days: 1 }),
+      expect.objectContaining({ startDate: '2026-11-08', endDate: '2026-11-14', timing: '起床後', value: 58, days: 1 }),
+    ]);
+  });
+
+  it('月平均也只除以有資料的天數，且三種時段不混合', () => {
+    const points = BODY_TIMINGS.flatMap((timing, index) => [
+      { time: at('2026-11-01 07:00'), date: '2026-11-01', timing, value: 60 + index },
+      { time: at('2026-11-20 07:00'), date: '2026-11-20', timing, value: 58 + index },
+    ]);
+    const result = bodyTrendAverages(points, 'month');
+
+    expect(result.map(({ startDate, endDate, timing, value, days }) => ({ startDate, endDate, timing, value, days }))).toEqual([
+      { startDate: '2026-11-01', endDate: '2026-11-30', timing: '起床後', value: 59, days: 2 },
+      { startDate: '2026-11-01', endDate: '2026-11-30', timing: '日間', value: 60, days: 2 },
+      { startDate: '2026-11-01', endDate: '2026-11-30', timing: '睡前', value: 61, days: 2 },
+    ]);
   });
 });
 

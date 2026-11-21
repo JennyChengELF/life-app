@@ -4,6 +4,8 @@ import { fmtDateTime } from '../format';
 export interface Point {
   time: number;
   value: number;
+  /** 週／月平均等彙整點可自行提供提示日期文字。 */
+  label?: string;
 }
 
 export interface Series {
@@ -165,7 +167,7 @@ export function TrendChart(props: {
                   </b>
                 ),
             )}
-            <span>{fmtDateTime(ht)}</span>
+            <span>{atHover.find(({ p }) => p?.label)?.p?.label ?? fmtDateTime(ht)}</span>
           </div>
         )}
       </div>

@@ -5,7 +5,7 @@
 import type { Backend, RowUpdate, RowValues, TableRow } from './backend';
 import { newId } from './ids';
 import type { TableName } from './schema';
-import { toDateKey } from './time';
+import { addDays, startOfDay, toDateKey } from './time';
 import type { BloodGlucose, BloodPressure, BpPeriods, GlucoseTiming, Temperature, TempKind, TempSite } from './vitals';
 import type { LabItem, LabKind, LabReport, LabResult } from './lab';
 import { DEFAULT_LAB_ITEMS, LAB_KINDS, splitOptions } from './lab';
@@ -124,11 +124,16 @@ export type OkFlag = 'bmiOk' | PctKgPair['ok'];
 
 export type BodyValues = Partial<Record<BodyValueCol, number | null>>;
 
+/** 2026-11-21 使用者決定：身體量測依起床後／日間／睡前分開比較與畫趨勢。 */
+export const BODY_TIMINGS = ['起床後', '日間', '睡前'] as const;
+export type BodyTiming = (typeof BODY_TIMINGS)[number];
+
 export interface BodyMeasurement extends BodyValues {
   rowNumber: number;
   id: string;
   time: number;
   date: string;
+  timing: BodyTiming;
   kg: number;
   note: string | null;
   createdVia: string | null;
@@ -279,6 +284,70 @@ export function bodyValue(m: BodyMeasurement, key: BodyFieldKey, snap: Pick<Heal
   return m[bodyField(key).col] ?? null;
 }
 
+export type BodyTrendPeriod = 'week' | 'month';
+
+export interface BodyTrendInput {
+  time: number;
+  date: string;
+  timing: BodyTiming;
+  value: number;
+}
+
+export interface BodyTrendAverage {
+  time: number;
+  startDate: string;
+  endDate: string;
+  timing: BodyTiming;
+  value: number;
+  /** 實際有資料的天數；沒有量的日期不列入除數。 */
+  days: number;
+}
+
+const average = (values: number[]) => values.reduce((sum, value) => sum + value, 0) / values.length;
+
+/**
+ * 身體量測的週／月平均：先平均同一天同一時段的多筆資料，再依實際有資料的天數平均。
+ * 每週固定為星期日至星期六；跨月仍保留完整七天。（2026-11-21 使用者決定）
+ */
+export function bodyTrendAverages(points: BodyTrendInput[], period: BodyTrendPeriod): BodyTrendAverage[] {
+  const daily = new Map<string, { date: string; timing: BodyTiming; values: number[] }>();
+  for (const point of points) {
+    const key = `${point.date}|${point.timing}`;
+    const group = daily.get(key) ?? { date: point.date, timing: point.timing, values: [] };
+    group.values.push(point.value);
+    daily.set(key, group);
+  }
+
+  const buckets = new Map<string, { startDate: string; endDate: string; timing: BodyTiming; dailyValues: number[] }>();
+  for (const day of daily.values()) {
+    let startDate: string;
+    let endDate: string;
+    if (period === 'week') {
+      const weekday = new Date(`${day.date}T00:00:00`).getDay();
+      startDate = addDays(day.date, -weekday);
+      endDate = addDays(startDate, 6);
+    } else {
+      startDate = `${day.date.slice(0, 7)}-01`;
+      endDate = addDays(`${addDays(startDate, 32).slice(0, 7)}-01`, -1);
+    }
+    const key = `${startDate}|${day.timing}`;
+    const bucket = buckets.get(key) ?? { startDate, endDate, timing: day.timing, dailyValues: [] };
+    bucket.dailyValues.push(average(day.values));
+    buckets.set(key, bucket);
+  }
+
+  return [...buckets.values()]
+    .map((bucket) => ({
+      time: startOfDay(bucket.startDate),
+      startDate: bucket.startDate,
+      endDate: bucket.endDate,
+      timing: bucket.timing,
+      value: average(bucket.dailyValues),
+      days: bucket.dailyValues.length,
+    }))
+    .sort((a, b) => a.time - b.time || BODY_TIMINGS.indexOf(a.timing) - BODY_TIMINGS.indexOf(b.timing));
+}
+
 /** 設定值 → 項目清單（看不懂的忽略；體重一定要有） */
 export function parseBodyFields(text: unknown): BodyFieldKey[] {
   if (typeof text !== 'string' || !text.trim()) return [...DEFAULT_BODY_FIELDS];
@@ -305,6 +374,9 @@ function checkBodyRow(r: TableRow): string[] {
   if (r.errors.includes('kg')) problems.push('體重不是數字');
   else if (kg == null) problems.push('沒有填體重');
   else if (kg < kgDef.min || kg > kgDef.max) problems.push('體重的數值不合理');
+  const timing = str(r.values.timing)?.trim();
+  // 空白是舊資料，讀取時會自動補成「起床後」；只有填了未知內容才需要補齊。
+  if (timing && !(BODY_TIMINGS as readonly string[]).includes(timing)) problems.push(`量測時段「${timing}」看不懂（請填：${BODY_TIMINGS.join('、')}）`);
   for (const f of BODY_FIELDS) {
     if (f.col === 'kg') continue;
     const label = f.key === 'bmi' ? 'BMI' : `${f.label}${f.unit ? ` ${f.unit}` : ''}`;
@@ -409,6 +481,7 @@ function toBody(r: TableRow): BodyMeasurement {
     id: String(r.values.id),
     time: Number(r.values.time),
     date: String(r.values.date),
+    timing: ((str(r.values.timing)?.trim() || '起床後') as BodyTiming),
     kg: Number(r.values.kg),
     note: str(r.values.note),
     createdVia: str(r.values.createdVia),
@@ -632,6 +705,14 @@ export class HealthStore {
     const items = await this.ensureItems(itemRows, now);
 
     const bt = triage('healthBodyMeasurements', bodyRows, checkBodyRow, now);
+    // 2026-11-21 使用者決定：既有未分類的身體量測全部先設為「起床後」，之後可自行修改。
+    for (const row of bt.valid) {
+      if (str(row.values.timing)?.trim()) continue;
+      row.values.timing = '起床後';
+      const existing = bt.fixes.find((fix) => fix.rowNumber === row.rowNumber);
+      if (existing) existing.values.timing = '起床後';
+      else bt.fixes.push({ rowNumber: row.rowNumber, values: { timing: '起床後', updatedAt: now }, expectId: String(row.values.id) });
+    }
     const ot = triage(
       'healthOccasionalMeasurements',
       occRows,
@@ -824,12 +905,13 @@ export class HealthStore {
 
   // ───── 身體量測 ─────
 
-  async addBody(values: BodyValues & { kg: number }, time = Date.now(), note: string | null = null): Promise<string> {
+  async addBody(values: BodyValues & { kg: number }, time = Date.now(), note: string | null = null, timing: BodyTiming = '起床後'): Promise<string> {
     const clean = cleanBodyValues(values);
+    if (!BODY_TIMINGS.includes(timing)) throw new Error('請選量測時段');
     const now = Date.now();
     const id = newId(now);
     await this.b.append('healthBodyMeasurements', [
-      { ...clean, time, note: note?.trim() || null, date: toDateKey(time), createdVia: this.via, id, createdAt: now, updatedAt: now },
+      { ...clean, time, timing, note: note?.trim() || null, date: toDateKey(time), createdVia: this.via, id, createdAt: now, updatedAt: now },
     ]);
     return id;
   }
@@ -840,12 +922,16 @@ export class HealthStore {
    */
   async updateBody(
     m: Pick<BodyMeasurement, 'rowNumber' | 'id'> & Partial<BodyMeasurement>,
-    patch: BodyValues & { time?: number; note?: string | null } & Partial<Record<OkFlag, boolean>>,
+    patch: BodyValues & { time?: number; timing?: BodyTiming; note?: string | null } & Partial<Record<OkFlag, boolean>>,
   ) {
-    const { time, note, bmiOk, bodyFatOk, skeletalMuscleOk, ...vals } = patch;
+    const { time, timing, note, bmiOk, bodyFatOk, skeletalMuscleOk, ...vals } = patch;
     const clean = cleanBodyValues(vals);
     const values: RowValues = { ...clean, updatedAt: Date.now() };
     if (time !== undefined) Object.assign(values, { time, date: toDateKey(time) });
+    if (timing !== undefined) {
+      if (!BODY_TIMINGS.includes(timing)) throw new Error('請選量測時段');
+      values.timing = timing;
+    }
     if (note !== undefined) values.note = note?.trim() || null;
     const changed = (col: BodyValueCol) => col in clean && (!(col in m) || (m[col] ?? null) !== (clean[col] ?? null));
     const flags: [OkFlag, boolean | undefined, BodyValueCol[]][] = [

@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import type { BodyFieldKey, BodyMeasurement, BodyValueCol, BodyValues, HealthSnapshot } from '@life/db';
-import { BODY_FIELDS, bmiInfo, bodyField, computeBmi, HEIGHT_CODE, heightAt, PCT_KG_PAIRS, PCT_KG_TOLERANCE, pctKgMismatches, toInputDateTime } from '@life/db';
+import type { BodyFieldKey, BodyMeasurement, BodyTiming, BodyValueCol, BodyValues, HealthSnapshot } from '@life/db';
+import { BODY_FIELDS, BODY_TIMINGS, bmiInfo, bodyField, computeBmi, HEIGHT_CODE, heightAt, PCT_KG_PAIRS, PCT_KG_TOLERANCE, pctKgMismatches, toInputDateTime } from '@life/db';
 import type { HealthApi } from '../useHealth';
 import type { Nav } from '../App';
 import { fieldLabel, parseNum } from '../format';
@@ -11,6 +11,7 @@ export function BodyView({ api, snap, editing, initialTime, nav }: { api: Health
   const hidden = BODY_FIELDS.map((f) => f.key).filter((k) => !shown.includes(k));
 
   const [time, setTime] = useState(toInputDateTime(editing?.time ?? initialTime ?? Date.now()));
+  const [timing, setTiming] = useState<BodyTiming>(editing?.timing ?? '起床後');
   const [vals, setVals] = useState<Partial<Record<BodyValueCol, string>>>(() => {
     const init: Partial<Record<BodyValueCol, string>> = {};
     if (editing) for (const f of BODY_FIELDS) init[f.col] = editing[f.col] == null ? '' : String(editing[f.col]);
@@ -36,8 +37,8 @@ export function BodyView({ api, snap, editing, initialTime, nav }: { api: Health
     }
     if (values.kg == null) return api.showToast({ kind: 'error', text: '請輸入體重' });
     const ok = editing
-      ? await api.run((s) => s.updateBody(editing, { ...values, time: timeMs, note }).then(() => true))
-      : await api.run((s) => s.addBody({ ...values, kg: values.kg! }, timeMs, note).then(() => true));
+      ? await api.run((s) => s.updateBody(editing, { ...values, time: timeMs, timing, note }).then(() => true))
+      : await api.run((s) => s.addBody({ ...values, kg: values.kg! }, timeMs, note, timing).then(() => true));
     if (ok) {
       api.showToast({ kind: 'info', text: editing ? '已修改' : `已記錄體重 ${values.kg} kg` });
       nav.closeBody();
@@ -94,6 +95,13 @@ export function BodyView({ api, snap, editing, initialTime, nav }: { api: Health
           量的時間
           <input type="datetime-local" value={time} onChange={(e) => setTime(e.target.value)} />
         </label>
+        <div className="field">
+          <span>量測時段</span>
+          <div className="choice">
+            {BODY_TIMINGS.map((option) => <button key={option} type="button" className={timing === option ? 'active' : ''} onClick={() => setTiming(option)}>{option}</button>)}
+          </div>
+          <span className="hint">起床後、平常活動期間，或睡前；趨勢與升降會分開比較。</span>
+        </div>
         <div className="form-grid">{shown.map(input)}</div>
         {hidden.length > 0 && (
           <>

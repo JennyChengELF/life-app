@@ -16,8 +16,9 @@
  * 11：新增帳單、帳單明細、盤點；交易加入帳日、繳哪一期（2026-11-18）
  * 12：新增行事曆 APP（群組、行程、設定）（2026-11-20）
  * 13：新增生理期 APP、健康共用身體狀況（2026-11-20）
+ * 14：身體量測增加時段分類（起床後、日間、睡前）（2026-11-21）
  */
-export const SCHEMA_VERSION = 13;
+export const SCHEMA_VERSION = 14;
 
 export type ColType = 'datetime' | 'date' | 'number' | 'text' | 'bool' | 'any';
 
@@ -130,6 +131,7 @@ export const TABLES = {
     description: '身體量測（體重計量的，一次量測一列）。可以直接在最下方新增一列，只要填 time 和 kg，其他欄位有量才填。',
     columns: [
       { name: 'time', type: 'datetime', label: '量的時間（必填）' },
+      { name: 'timing', type: 'text', label: '量測時段：起床後、日間、睡前（空白時 APP 自動設為起床後）' },
       { name: 'kg', type: 'number', label: '體重 kg（必填）' },
       { name: 'note', type: 'text', label: '備註' },
       { name: 'date', type: 'date', label: '日期（APP 依 time 自動填）' },
