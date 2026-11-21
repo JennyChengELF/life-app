@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { CategoryKind, CategoryNode, MoneySnapshot } from '@life/db';
 import { ancestorPaths, categoryTree, frequentCategories, MAX_CATEGORY_DEPTH } from '@life/db';
 import type { MoneyApi } from '../useMoney';
@@ -23,16 +23,24 @@ export function CategoryPicker({
   kind,
   value,
   onChange,
+  autoFilled = false,
 }: {
   api: MoneyApi;
   snap: MoneySnapshot;
   kind: CategoryKind;
   value: string | null;
   onChange: (v: string | null) => void;
+  /** 選店家後依上次使用紀錄自動帶入；收合顯示來源與「變更」。 */
+  autoFilled?: boolean;
 }) {
   const [open, setOpen] = useState(!value);
   const tree = categoryTree(snap.categories, kind);
   const frequent = frequentCategories(snap.txns, kind).filter((p) => findNode(tree, p) && !findNode(tree, p)!.hidden);
+
+  useEffect(() => {
+    if (!value) setOpen(true);
+    else if (autoFilled) setOpen(false);
+  }, [autoFilled, value]);
 
   const pick = (path: string) => {
     onChange(path);
@@ -51,6 +59,19 @@ export function CategoryPicker({
   };
 
   if (!open) {
+    if (autoFilled && value) {
+      return (
+        <div className="cat-auto-current">
+          <div>
+            <strong>{value}</strong>
+            <small>依這家店上次使用的分類帶入</small>
+          </div>
+          <button type="button" className="link small" onClick={() => setOpen(true)}>
+            變更
+          </button>
+        </div>
+      );
+    }
     return (
       <button type="button" className="cat-current" onClick={() => setOpen(true)}>
         {value ?? '選擇分類'} <span className="muted">▾</span>

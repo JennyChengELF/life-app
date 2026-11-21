@@ -87,6 +87,8 @@ export function EntryEditor({ api, snap, editing, onClose, onCopy }: { api: Mone
   const [splitTotal, setSplitTotal] = useState<number | null>(null);
   const [splitN, setSplitN] = useState(2);
   const [paidByMode, setPaidByMode] = useState(!!f.paidBy);
+  /** 目前第一筆分類是否仍是依店家自動帶入；使用者手動選過後清除。 */
+  const [autoStoreCategory, setAutoStoreCategory] = useState<string | null>(null);
   /** 國外交易手續費（信用卡支出）：null = 自動（新增時國外店家就勾；修改時不勾） */
   const [feeOnState, setFeeOnState] = useState<boolean | null>(() => (editing.copied ? false : null));
   /** 新的店家（還不在機構清單）先記在這裡，存檔時一起建立 */
@@ -104,8 +106,10 @@ export function EntryEditor({ api, snap, editing, onClose, onCopy }: { api: Mone
   const addPerson = (name: string) => api.run((s) => s.addPerson(name));
   const currencies = useMemo(() => [...new Set(['TWD', ...snap.accounts.map((a) => a.currency)])], [snap.accounts]);
 
-  const switchMode = (mode: EntryForm['mode']) =>
+  const switchMode = (mode: EntryForm['mode']) => {
+    setAutoStoreCategory(null);
     set({ mode, sub: mode === '還款' ? '他還我' : null, cats: [{ category: null, amount: null }], counterCats: [], shares: [], paidBy: null });
+  };
 
   const save = async () => {
     let tx;
@@ -199,7 +203,16 @@ export function EntryEditor({ api, snap, editing, onClose, onCopy }: { api: Mone
               snap={snap}
               kind={kind}
               value={c.category}
-              onChange={(v) => set({ cats: f.cats.map((x, j) => (j === i ? withBudget({ ...x, category: v }) : x)) })}
+              autoFilled={i === 0 && !!autoStoreCategory && autoStoreCategory === c.category}
+              onChange={(v) => {
+                const wasAuto = i === 0 && !!autoStoreCategory;
+                setAutoStoreCategory(null);
+                set({
+                  cats: f.cats.map((x, j) =>
+                    j === i ? withBudget({ ...x, category: v, budget: wasAuto ? defaultBudgetFor(snap, v) : x.budget }) : x,
+                  ),
+                });
+              }}
             />
             <BudgetSelect
               snap={snap}
@@ -341,7 +354,7 @@ export function EntryEditor({ api, snap, editing, onClose, onCopy }: { api: Mone
     );
   };
 
-  // 選店家：分類還沒選的話，帶入這家店上次用的分類（2026-11-18 確認）
+  // 2026-11-21 使用者決定：店家自動帶入的分類立即收合；手動選過後不再被店家覆蓋。
   const storePicker = (kind: '支出' | '收入') => (
     <StorePicker
       snap={snap}
@@ -355,7 +368,16 @@ export function EntryEditor({ api, snap, editing, onClose, onCopy }: { api: Mone
       }}
       onChange={(v) => {
         const last = v ? lastCategoryOfStore(snap.txns, v, kind) : null;
-        set({ store: v, cats: last && f.cats.length === 1 && !f.cats[0].category ? [withBudget({ ...f.cats[0], category: last })] : f.cats });
+        const one = f.cats.length === 1;
+        const canAuto = one && (!f.cats[0].category || f.cats[0].category === autoStoreCategory);
+        if (last && canAuto) {
+          setAutoStoreCategory(last);
+          set({ store: v, cats: [{ ...f.cats[0], category: last, budget: defaultBudgetFor(snap, last) }] });
+        } else if (!last && one && f.cats[0].category === autoStoreCategory) {
+          // 換成沒有歷史分類的店家：清掉上一家自動帶入的值，正常展開讓使用者選。
+          setAutoStoreCategory(null);
+          set({ store: v, cats: [{ ...f.cats[0], category: null, budget: null }] });
+        } else set({ store: v });
       }}
     />
   );
