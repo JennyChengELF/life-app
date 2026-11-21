@@ -12,7 +12,7 @@ import {
   categoryTree,
   checkTxn,
   MAX_CATEGORY_DEPTH,
-  recentCategories,
+  frequentCategories,
   DEFAULT_CATEGORIES,
   emptyForm,
   estimateFee,
@@ -260,6 +260,27 @@ describe('計算', () => {
   });
 });
 
+describe('常用分類', () => {
+  const expense = (time: string, category: string) => roundTrip(form({ time: at(time), account: '台幣現金', cats: [{ category, amount: 100 }] })).txn;
+  const income = (time: string) => roundTrip(form({ mode: '收入', time: at(time), account: '台幣現金', cats: [{ category: '薪資', amount: 100 }] })).txn;
+
+  it('最近 90 天依使用次數排序，支出收入分開；同次數以最近使用優先', () => {
+    const txns = [
+      expense('2026-11-20 12:00', '住 / 日用品'),
+      expense('2026-11-19 12:00', '食 / 三餐'),
+      expense('2026-11-10 12:00', '住 / 日用品'),
+      expense('2026-11-09 12:00', '食 / 三餐'),
+      expense('2026-11-08 12:00', '人情 / 送禮'),
+      income('2026-11-21 08:00'),
+      expense('2026-08-01 12:00', '人情 / 送禮'),
+    ];
+    const now = at('2026-11-21 12:00');
+
+    expect(frequentCategories(txns, '支出', 2, now)).toEqual(['住 / 日用品', '食 / 三餐']);
+    expect(frequentCategories(txns, '收入', 5, now)).toEqual(['薪資']);
+  });
+});
+
 describe('MoneyStore', () => {
   let backend: LocalBackend;
   let store: MoneyStore;
@@ -308,7 +329,7 @@ describe('MoneyStore', () => {
     await backend.appendRaw('moneyCategories', { path: '交通 / 高鐵', kind: '支出' });
     snap = await store.load();
     expect(snap.categories.find((c) => c.path === '交通')?.kind).toBe('支出');
-    expect(recentCategories(snap.txns, '支出')).toEqual([]);
+    expect(frequentCategories(snap.txns, '支出')).toEqual([]);
   });
 
   it('新增帳戶（自動建立機構）、記一筆、修改（明細少一筆會標記刪除）、刪除', async () => {

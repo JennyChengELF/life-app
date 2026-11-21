@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { CategoryKind, CategoryNode, MoneySnapshot } from '@life/db';
-import { ancestorPaths, categoryTree, MAX_CATEGORY_DEPTH, recentCategories } from '@life/db';
+import { ancestorPaths, categoryTree, frequentCategories, MAX_CATEGORY_DEPTH } from '@life/db';
 import type { MoneyApi } from '../useMoney';
 
 /** 找到某個路徑的節點 */
@@ -14,7 +14,8 @@ function findNode(nodes: CategoryNode[], path: string): CategoryNode | null {
 }
 
 /**
- * 選分類：一層一層點（2026-11-18 確認）。可以只選到上層；有「最近用過」；每一層都能直接新增。
+ * 選分類：一層一層點（2026-11-18 確認）。可以只選到上層；每一層都能直接新增。
+ * 正常分類下方顯示最近 90 天最常使用的 5 個完整路徑（2026-11-21 使用者決定）。
  */
 export function CategoryPicker({
   api,
@@ -31,7 +32,7 @@ export function CategoryPicker({
 }) {
   const [open, setOpen] = useState(!value);
   const tree = categoryTree(snap.categories, kind);
-  const recent = recentCategories(snap.txns, kind).filter((p) => p !== value && findNode(tree, p) && !findNode(tree, p)!.hidden);
+  const frequent = frequentCategories(snap.txns, kind).filter((p) => findNode(tree, p) && !findNode(tree, p)!.hidden);
 
   const pick = (path: string) => {
     onChange(path);
@@ -68,16 +69,6 @@ export function CategoryPicker({
 
   return (
     <div className="cat-picker">
-      {recent.length > 0 && (
-        <div className="chips">
-          <span className="chips-label">最近</span>
-          {recent.map((p) => (
-            <button type="button" key={p} className="chip" onClick={() => pick(p)}>
-              {p}
-            </button>
-          ))}
-        </div>
-      )}
       {levels.map(({ parent, nodes }, i) => (
         <div className="chips" key={parent?.cat.path ?? 'root'}>
           {i > 0 && <span className="chips-label">└</span>}
@@ -94,6 +85,16 @@ export function CategoryPicker({
           </button>
         </div>
       ))}
+      {frequent.length > 0 && (
+        <div className="chips">
+          <span className="chips-label">常用</span>
+          {frequent.map((p) => (
+            <button type="button" key={p} className="chip" onClick={() => pick(p)}>
+              {p}
+            </button>
+          ))}
+        </div>
+      )}
       {value && (
         <button type="button" className="link small" onClick={() => setOpen(false)}>
           選好了：{value}

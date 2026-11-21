@@ -478,16 +478,27 @@ export function lastCategoryOfStore(txns: Txn[], store: string, kind: CategoryKi
   return null;
 }
 
-/** 最近用過的分類（新 → 舊，不重複） */
-export function recentCategories(txns: Txn[], kind: CategoryKind, n = 5): string[] {
-  const out: string[] = [];
-  for (const t of txns) {
-    for (const l of t.lines) {
-      if (l.kind === kind && l.category && !out.includes(l.category)) out.push(l.category);
-      if (out.length >= n) return out;
+/**
+ * 常用分類：最近 90 天使用次數最多的完整分類路徑；支出、收入分開。
+ * 次數相同時最近使用的排前面，只計次數、不看金額。（2026-11-21 使用者決定）
+ */
+export function frequentCategories(txns: Txn[], kind: CategoryKind, n = 5, now = Date.now(), days = 90): string[] {
+  const since = now - days * 86400000;
+  const stats = new Map<string, { count: number; last: number }>();
+  for (const txn of txns) {
+    if (txn.time < since || txn.time > now) continue;
+    for (const line of txn.lines) {
+      if (line.kind !== kind || !line.category) continue;
+      const current = stats.get(line.category) ?? { count: 0, last: -Infinity };
+      current.count += 1;
+      current.last = Math.max(current.last, txn.time);
+      stats.set(line.category, current);
     }
   }
-  return out;
+  return [...stats]
+    .sort(([pathA, a], [pathB, b]) => b.count - a.count || b.last - a.last || pathA.localeCompare(pathB, 'zh-Hant'))
+    .slice(0, n)
+    .map(([path]) => path);
 }
 
 /** APP 自動產生的備註（分期、手續費、定存、盤點）不算常用文字 */
