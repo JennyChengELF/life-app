@@ -284,6 +284,21 @@ export function bodyValue(m: BodyMeasurement, key: BodyFieldKey, snap: Pick<Heal
   return m[bodyField(key).col] ?? null;
 }
 
+/** 前一筆同時段、且有該項目數值的紀錄；不同時段不能互相比較。（2026-11-21 使用者決定） */
+export function previousBodyValue(
+  snap: Pick<HealthSnapshot, 'body' | 'items' | 'occ'>,
+  m: BodyMeasurement,
+  key: BodyFieldKey,
+): number | null {
+  const idx = snap.body.findIndex((item) => item.id === m.id);
+  for (let i = idx - 1; i >= 0; i--) {
+    if (snap.body[i].timing !== m.timing) continue;
+    const value = bodyValue(snap.body[i], key, snap);
+    if (value != null) return value;
+  }
+  return null;
+}
+
 export type BodyTrendPeriod = 'week' | 'month';
 
 export interface BodyTrendInput {

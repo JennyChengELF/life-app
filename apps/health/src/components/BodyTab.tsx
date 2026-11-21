@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { BodyFieldKey, BodyMeasurement, BodyTrendPeriod, HealthSnapshot } from '@life/db';
-import { BODY_TIMINGS, bodyField, bodyTrendAverages, bodyValue, HEIGHT_CODE, heightAt, mismatchFields } from '@life/db';
+import { BODY_TIMINGS, bodyField, bodyTrendAverages, bodyValue, HEIGHT_CODE, heightAt, mismatchFields, previousBodyValue } from '@life/db';
 import type { HealthApi } from '../useHealth';
 import type { Nav } from '../App';
 import { fieldLabel, fmt, fmtDateTime, hasTwin } from '../format';
@@ -66,7 +66,7 @@ function LatestCard({ snap, latest, fields, onEdit }: { snap: HealthSnapshot; la
       <div className="stat-grid">
         {fields.map((k) => {
           const v = bodyValue(latest, k, snap);
-          const prev = v == null ? null : previousValue(snap, latest, k);
+          const prev = v == null ? null : previousBodyValue(snap, latest, k);
           const diff = v != null && prev != null ? v - prev : null;
           const f = bodyField(k);
           const shown = diff == null ? null : Number(diff.toFixed(f.decimals));
@@ -77,7 +77,7 @@ function LatestCard({ snap, latest, fields, onEdit }: { snap: HealthSnapshot; la
                 {fmt(k, v)}
                 {f.unit && v != null && <small> {f.unit}</small>}
               </div>
-              {v != null && prev == null && <div className="stat-diff">第一次紀錄</div>}
+              {v != null && prev == null && <div className="stat-diff">第一次{latest.timing}紀錄</div>}
               {shown != null && (
                 <div className="stat-diff">
                   {shown === 0 ? '持平' : `${shown > 0 ? '▲' : '▼'} ${Math.abs(shown).toFixed(f.decimals)}`}
@@ -90,16 +90,6 @@ function LatestCard({ snap, latest, fields, onEdit }: { snap: HealthSnapshot; la
       {latest.note && <p className="small muted">📝 {latest.note}</p>}
     </section>
   );
-}
-
-/** 前一筆有這個項目的紀錄 */
-function previousValue(snap: HealthSnapshot, m: BodyMeasurement, key: BodyFieldKey): number | null {
-  const idx = snap.body.indexOf(m);
-  for (let i = idx - 1; i >= 0; i--) {
-    const value = bodyValue(snap.body[i], key, snap);
-    if (value != null) return value;
-  }
-  return null;
 }
 
 function TrendCard({ snap, fields }: { snap: HealthSnapshot; fields: BodyFieldKey[] }) {

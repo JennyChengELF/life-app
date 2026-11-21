@@ -13,6 +13,7 @@ import {
   memoryStorage,
   parseBodyFields,
   parseDateTimeText,
+  previousBodyValue,
   WaterStore,
 } from '../src';
 
@@ -166,6 +167,24 @@ describe('身體量測時段與趨勢', () => {
     expect(s.body).toHaveLength(1);
     expect(s.body[0].timing).toBe('起床後');
     expect(s.issues.some((issue) => issue.problems.some((problem) => problem.includes('量測時段')))).toBe(true);
+  });
+
+  it('升降只比較前一筆相同時段；修改分類後立即重新找前一筆', async () => {
+    const { store } = setup();
+    await store.load();
+    await store.addBody({ kg: 60, bodyFatPct: 30 }, at('2026-11-01 07:00'), null, '起床後');
+    await store.addBody({ kg: 62, bodyFatPct: 32 }, at('2026-11-01 13:00'), null, '日間');
+    await store.addBody({ kg: 59, bodyFatPct: 29 }, at('2026-11-02 07:00'), null, '起床後');
+    let s = await store.load();
+
+    expect(previousBodyValue(s, s.body[2], 'kg')).toBe(60);
+    expect(previousBodyValue(s, s.body[2], 'bodyFatPct')).toBe(30);
+    expect(previousBodyValue(s, s.body[1], 'kg')).toBeNull();
+
+    await store.updateBody(s.body[2], { timing: '日間' });
+    s = await store.load();
+    expect(previousBodyValue(s, s.body[2], 'kg')).toBe(62);
+    expect(previousBodyValue(s, s.body[2], 'bodyFatPct')).toBe(32);
   });
 
   it('週平均先算每日平均，只除以有資料的天數，並以星期日至星期六分週', () => {
