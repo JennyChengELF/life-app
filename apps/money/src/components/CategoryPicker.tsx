@@ -70,29 +70,33 @@ export function CategoryPicker({
   return (
     <div className="cat-picker">
       {levels.map(({ parent, nodes }, i) => (
-        <div className="chips" key={parent?.cat.path ?? 'root'}>
-          {i > 0 && <span className="chips-label">└</span>}
-          {nodes
-            .filter((n) => !n.hidden)
-            .map((n) => (
-              <button type="button" key={n.cat.id} className={`chip ${chain.includes(n.cat.path) ? 'active' : ''}`} onClick={() => pick(n.cat.path)}>
-                {n.name}
-                {n.children.some((c) => !c.hidden) ? ' ›' : ''}
-              </button>
-            ))}
-          <button type="button" className="chip add" onClick={() => add(parent)} title="新增分類">
-            ＋
-          </button>
+        <div className={`cat-level ${i > 0 ? 'child' : ''}`} key={parent?.cat.path ?? 'root'}>
+          {i > 0 && <div className="cat-level-label">└ 子分類</div>}
+          <div className="cat-options">
+            {nodes
+              .filter((n) => !n.hidden)
+              .map((n) => (
+                <button type="button" key={n.cat.id} className={`cat-option ${chain.includes(n.cat.path) ? 'active' : ''}`} onClick={() => pick(n.cat.path)}>
+                  {n.name}
+                  {n.children.some((c) => !c.hidden) ? ' ›' : ''}
+                </button>
+              ))}
+            <button type="button" className="cat-add" onClick={() => add(parent)}>
+              {parent ? '＋ 新增子分類' : '＋ 新增分類'}
+            </button>
+          </div>
         </div>
       ))}
       {frequent.length > 0 && (
-        <div className="chips">
-          <span className="chips-label">常用</span>
-          {frequent.map((p) => (
-            <button type="button" key={p} className="chip" onClick={() => pick(p)}>
-              {p}
-            </button>
-          ))}
+        <div className="cat-frequent">
+          <div className="cat-frequent-title">常用 <small>最近 90 天</small></div>
+          <div className="cat-frequent-options">
+            {frequent.map((p) => (
+              <button type="button" key={p} className="cat-frequent-option" onClick={() => pick(p)}>
+                {p}
+              </button>
+            ))}
+          </div>
         </div>
       )}
       {value && (
