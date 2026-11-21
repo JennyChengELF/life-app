@@ -76,6 +76,7 @@ function roundTrip(f: EntryForm) {
     createdVia: 'money',
     postedDate: null,
     statement: t.statement ?? null,
+    cardPayments: [],
     lines: t.lines.map((l, i) => ({
       rowNumber: 2 + i,
       id: `L${i}`,
@@ -300,6 +301,7 @@ describe('計算', () => {
     createdVia: 'money',
     postedDate: null,
     statement: null,
+    cardPayments: [],
     lines: [],
     ...patch,
   });

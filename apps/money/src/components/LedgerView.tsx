@@ -82,7 +82,7 @@ function TxBadges({ t }: { t: Txn }) {
 
 export function subText(t: Txn, withBadges = true) {
   const parts: string[] = [];
-  if (t.direction === '轉帳') parts.push(`${t.account} → ${t.toAccount}`);
+  if (t.direction === '轉帳') parts.push(t.cardPayments.length ? `${t.account} → ${[...new Set(t.cardPayments.map((x) => x.account))].join('、')}` : `${t.account} → ${t.toAccount}`);
   else if (t.account) parts.push(t.account);
   if (t.paidBy) parts.push(`${t.paidBy} 先付`);
   // 有分類又有人物 → 註明人物（只有人物時標題已經寫了；列表用小標籤顯示）

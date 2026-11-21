@@ -192,7 +192,11 @@ export function moneyEntries(snap: MoneySnapshot, date: string): TimelineEntry[]
       const extra = [
         isRecordOnlyTxn(t) ? '僅記錄' : null,
         t.store,
-        t.direction === '轉帳' ? `${t.account} → ${t.toAccount}` : (t.account ?? (t.paidBy ? `${t.paidBy} 先付` : null)),
+        t.direction === '轉帳'
+          ? t.cardPayments.length
+            ? `${t.account} → ${[...new Set(t.cardPayments.map((x) => x.account))].join('、')}`
+            : `${t.account} → ${t.toAccount}`
+          : (t.account ?? (t.paidBy ? `${t.paidBy} 先付` : null)),
       ]
         .filter(Boolean)
         .join('・');

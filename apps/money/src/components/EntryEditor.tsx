@@ -3,11 +3,13 @@ import type { EntryForm, MoneySnapshot, Txn, TxnInput } from '@life/db';
 import {
   noteSuggestions,
   unpaidStatements,
+  statementPaid,
   checkTxn,
   ENTRY_MODES,
   fmtMoney,
   formToTxn,
   formTotal,
+  cardPaymentTotal,
   personBalances,
   splitEven,
   splitTags,
@@ -82,7 +84,12 @@ const MODE_TITLE: Record<string, string> = { 不用還了: '不用還了', 調�
 
 export function EntryEditor({ api, snap, editing, onClose, onCopy }: { api: MoneyApi; snap: MoneySnapshot; editing: Editing; onClose: () => void; onCopy?: () => void }) {
   const txn = editing.txn;
-  const [f, setF] = useState<EntryForm>(() => (txn ? txnToForm(txn) : editing.form));
+  const [f, setF] = useState<EntryForm>(() => {
+    const form = txn ? txnToForm(txn) : editing.form;
+    const first = form.cardPayments[0]?.account;
+    return first ? { ...form, cardPaymentOrg: snap.accounts.find((a) => a.name === first)?.org ?? null } : form;
+  });
+  const [multiCard, setMultiCard] = useState(() => f.cardPayments.length > 0);
   const [problems, setProblems] = useState<string[]>([]);
   const [splitTotal, setSplitTotal] = useState<number | null>(null);
   const [splitN, setSplitN] = useState(2);
@@ -119,6 +126,8 @@ export function EntryEditor({ api, snap, editing, onClose, onCopy }: { api: Mone
       return setProblems([e instanceof Error ? e.message : String(e)]);
     }
     const p = checkTxn(tx, snap);
+    if (multiCard && !f.cardPaymentOrg) p.unshift('請選發卡機構');
+    if (multiCard && !f.cardPayments.length) p.unshift('請至少勾選一期帳單');
     if (paidByMode && !f.paidBy) p.unshift('請選誰先幫你付');
     setProblems(p);
     if (p.length) return;
@@ -609,28 +618,48 @@ export function EntryEditor({ api, snap, editing, onClose, onCopy }: { api: Mone
                 從
                 <AccountSelect snap={snap} value={f.account} onChange={(v) => set({ account: v })} placeholder="轉出帳戶" />
               </label>
-              <label className="field">
-                到
-                <AccountSelect snap={snap} value={f.toAccount} onChange={(v) => set({ toAccount: v })} placeholder="轉入帳戶" />
-              </label>
-              <label className="field">
-                金額{from ? `（${from.currency}）` : ''}
-                <AmountInput value={f.amount} onChange={(n) => set({ amount: n })} />
-              </label>
-              {from && to && from.currency !== to.currency && (
-                <label className="field">
-                  轉入帳戶收到多少（{to.currency}）
-                  <AmountInput value={f.toAmount} onChange={(n) => set({ toAmount: n })} />
-                  {f.amount && f.toAmount ? (
-                    <span className="hint">
-                      匯率：1 {to.currency === 'TWD' ? from.currency : to.currency} ≈{' '}
-                      {to.currency === 'TWD' ? (f.toAmount / f.amount).toFixed(4) : (f.amount / f.toAmount).toFixed(5)}{' '}
-                      {to.currency === 'TWD' ? 'TWD' : from.currency}
-                    </span>
-                  ) : null}
+              <div className="subbox">
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={multiCard}
+                    onChange={(e) => {
+                      const on = e.target.checked;
+                      setMultiCard(on);
+                      set(on ? { toAccount: null, toAmount: null, statement: null } : { cardPaymentOrg: null, cardPayments: [] });
+                    }}
+                  />
+                  同一筆扣款繳多張卡／多個帳單
                 </label>
+              </div>
+              {multiCard ? (
+                <MultiCardPayment snap={snap} form={f} current={txn ?? null} onChange={set} />
+              ) : (
+                <>
+                  <label className="field">
+                    到
+                    <AccountSelect snap={snap} value={f.toAccount} onChange={(v) => set({ toAccount: v })} placeholder="轉入帳戶" />
+                  </label>
+                  <label className="field">
+                    金額{from ? `（${from.currency}）` : ''}
+                    <AmountInput value={f.amount} onChange={(n) => set({ amount: n })} />
+                  </label>
+                  {from && to && from.currency !== to.currency && (
+                    <label className="field">
+                      轉入帳戶收到多少（{to.currency}）
+                      <AmountInput value={f.toAmount} onChange={(n) => set({ toAmount: n })} />
+                      {f.amount && f.toAmount ? (
+                        <span className="hint">
+                          匯率：1 {to.currency === 'TWD' ? from.currency : to.currency} ≈{' '}
+                          {to.currency === 'TWD' ? (f.toAmount / f.amount).toFixed(4) : (f.amount / f.toAmount).toFixed(5)}{' '}
+                          {to.currency === 'TWD' ? 'TWD' : from.currency}
+                        </span>
+                      ) : null}
+                    </label>
+                  )}
+                  {to?.type === '信用卡' && <PayStatement snap={snap} card={to.name} value={f.statement} isNew={!txn} onChange={(v) => set({ statement: v })} />}
+                </>
               )}
-              {to?.type === '信用卡' && <PayStatement snap={snap} card={to.name} value={f.statement} isNew={!txn} onChange={(v) => set({ statement: v })} />}
               <p className="hint">提款、繳卡費、加值悠遊卡、換外幣、開定存都用轉帳（不算收支）。</p>
             </>
           )}
@@ -738,6 +767,100 @@ export function EntryEditor({ api, snap, editing, onClose, onCopy }: { api: Mone
         )}
       </div>
     </section>
+  );
+}
+
+/**
+ * 一筆銀行扣款分配到同一家發卡機構的多張卡／多期帳單。
+ * 2026-11-21 使用者決定：預設帶尚未繳的金額，仍可改成部分繳款；同一期之後也能再繳。
+ */
+function MultiCardPayment({
+  snap,
+  form,
+  current,
+  onChange,
+}: {
+  snap: MoneySnapshot;
+  form: EntryForm;
+  current: Txn | null;
+  onChange: (patch: Partial<EntryForm>) => void;
+}) {
+  const cards = snap.accounts.filter((a) => a.type === '信用卡' && (!a.archived || form.cardPayments.some((x) => x.account === a.name)));
+  const orgs = [...new Set(cards.map((a) => a.org).filter((x): x is string => !!x))].sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+  const orgCards = cards.filter((a) => a.org === form.cardPaymentOrg);
+  const selectedIds = new Set(form.cardPayments.map((x) => x.statement).filter(Boolean));
+  const otherTxns = current ? snap.txns.filter((t) => t.id !== current.id) : snap.txns;
+  const options = orgCards
+    .flatMap((card) =>
+      snap.statements
+        .filter((s) => s.account === card.name && (selectedIds.has(s.id) || unpaidStatements({ ...snap, txns: otherTxns }, card.name).some((u) => u.id === s.id)))
+        .map((statement) => ({ card, statement })),
+    )
+    .sort((a, b) => a.statement.closeDate.localeCompare(b.statement.closeDate) || a.card.name.localeCompare(b.card.name, 'zh-Hant'));
+  const sourceCurrency = snap.accounts.find((a) => a.name === form.account)?.currency ?? 'TWD';
+
+  const toggle = (account: string, statement: string, checked: boolean) => {
+    if (!checked) return onChange({ cardPayments: form.cardPayments.filter((x) => x.statement !== statement) });
+    const stmt = snap.statements.find((s) => s.id === statement)!;
+    const paid = statementPaid(stmt, otherTxns);
+    const remaining = stmt.amountDue == null ? null : Math.max(0, stmt.amountDue - paid);
+    onChange({ cardPayments: [...form.cardPayments, { account, statement, amount: remaining && remaining > 0 ? remaining : null }] });
+  };
+
+  return (
+    <div className="subbox">
+      <label className="field">
+        發卡機構
+        <select
+          value={form.cardPaymentOrg ?? ''}
+          onChange={(e) => onChange({ cardPaymentOrg: e.target.value || null, cardPayments: [] })}
+        >
+          <option value="">請選擇</option>
+          {orgs.map((org) => (
+            <option key={org}>{org}</option>
+          ))}
+        </select>
+      </label>
+      {form.cardPaymentOrg && !options.length && <p className="hint">這家機構目前沒有未繳帳單。若帳單尚未建立，請先到信用卡帳戶的「帳單對帳」新增。</p>}
+      {options.map(({ card, statement }) => {
+        const payment = form.cardPayments.find((x) => x.statement === statement.id);
+        const paid = statementPaid(statement, otherTxns);
+        const remaining = statement.amountDue == null ? null : Math.max(0, statement.amountDue - paid);
+        const label = card.last4 ? `${card.name}（${card.last4}）` : card.name;
+        return (
+          <div className="card-payment-row" key={statement.id}>
+            <label className="check card-payment-check">
+              <input type="checkbox" checked={!!payment} onChange={(e) => toggle(card.name, statement.id, e.target.checked)} />
+              <span>
+                <strong>{label}</strong>
+                <span className="small muted">{statement.closeDate.replace(/-/g, '/')} 結帳</span>
+              </span>
+            </label>
+            <div className="small muted">
+              {remaining == null ? '尚未填應繳金額' : `尚未繳 ${fmtMoney(remaining, card.currency)}`}
+              {statement.dueDate ? `・${statement.dueDate.slice(5).replace('-', '/')} 前` : ''}
+            </div>
+            {payment && (
+              <label className="field card-payment-amount">
+                這次分配
+                <AmountInput
+                  value={payment.amount}
+                  onChange={(amount) => onChange({ cardPayments: form.cardPayments.map((x) => (x.statement === statement.id ? { ...x, amount } : x)) })}
+                />
+              </label>
+            )}
+          </div>
+        );
+      })}
+      {form.cardPayments.length > 0 && (
+        <div className="total-head card-payment-total">
+          <div className="sum-label">銀行實際扣款</div>
+          <div className="total-big num">{fmtMoney(cardPaymentTotal(form), sourceCurrency)}</div>
+          <div className="hint">等於上面各帳單的分配加總</div>
+        </div>
+      )}
+      <p className="hint">只列出同一家機構尚未繳清的帳單；若銀行是合併帳單，只勾合併後的那一期即可。</p>
+    </div>
   );
 }
 

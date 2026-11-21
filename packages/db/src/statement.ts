@@ -149,9 +149,14 @@ function subsetsSumming<T>(list: T[], val: (x: T) => number, target: number, max
 
 // ───────────── 繳卡費 ─────────────
 
-/** 這期繳了多少：轉到這張卡、而且填了「繳哪一期」= 這期的轉帳 */
+/** 這期繳了多少：包含舊的單卡轉帳，以及銀行一筆扣款拆給多卡／多期的分配。 */
 export function statementPaid(stmt: Pick<Statement, 'id' | 'account'>, txns: Txn[]): number {
-  return txns.filter((t) => t.direction === '轉帳' && t.statement === stmt.id && t.toAccount === stmt.account).reduce((a, t) => a + (t.toAmount ?? t.amount ?? 0), 0);
+  return txns.reduce((paid, t) => {
+    if (t.direction !== '轉帳') return paid;
+    if (t.statement === stmt.id && t.toAccount === stmt.account) paid += t.toAmount ?? t.amount ?? 0;
+    paid += t.cardPayments.filter((x) => x.statement === stmt.id && x.account === stmt.account).reduce((n, x) => n + x.amount, 0);
+    return paid;
+  }, 0);
 }
 
 /** 這期繳清了沒（沒填應繳金額時：有繳就算） */

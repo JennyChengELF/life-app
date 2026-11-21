@@ -517,6 +517,19 @@ export const TABLES = {
       ...systemCols,
     ],
   },
+  moneyCardPayments: {
+    file: 'money',
+    description:
+      '信用卡繳款分配：一筆銀行扣款可以分配到同一發卡機構的多張卡、不同期帳單；同一期也可以分次繳。建議在 APP 裡操作。',
+    columns: [
+      { name: 'transaction', type: 'text', label: '銀行扣款交易（moneyTransactions 的 id，必填）' },
+      { name: 'account', type: 'text', label: '繳入的信用卡帳戶（必填）' },
+      { name: 'statement', type: 'text', label: '繳哪一期帳單（moneyStatements 的 id，必填）' },
+      { name: 'amount', type: 'number', label: '這張卡／這一期分配到的金額（必填）' },
+      { name: 'sort', type: 'number', label: '同一筆扣款內的順序' },
+      ...systemCols,
+    ],
+  },
   moneyBudgets: {
     file: 'money',
     description: '預算（信封袋）。每個預算有理想金額、基本金額；每月草稿帶入基本金額。請在 APP 裡新增或修改（改名時用到的紀錄會一起改）。',

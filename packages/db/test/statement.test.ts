@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { MoneySnapshot, TxnInput } from '../src';
 import {
   bookBalance,
+  accountDelta,
   cardTxnStatus,
   checkDiff,
+  checkTxn,
   defaultCloseDate,
   dueDateFor,
   formToTxn,
@@ -20,6 +22,7 @@ import {
   reconcile,
   stocktakeStatus,
   stocktakeWindow,
+  statementPaid,
   storeForStatementText,
   txnToForm,
   unpaidStatements,
@@ -221,6 +224,62 @@ describe('對帳', () => {
     expect(snap.txns.find((t) => t.direction === '轉帳')!.statement).toBe(stmt().id);
     expect(cardTxnStatus(snap, px, '大戶卡')).toBe('已繳');
     expect(unpaidStatements(snap, '大戶卡')).toEqual([]);
+  });
+
+  it('一筆銀行扣款可分配到同機構多張卡，並支援同一期分次繳', async () => {
+    await store.saveAccount({ ...base, name: '大戶卡 2', type: '信用卡', openingBalance: 0, closingDay: 20, dueDay: 8 });
+    await store.saveAccount({ ...base, name: '別家卡', type: '信用卡', org: '台新銀行', openingBalance: 0, closingDay: 20, dueDay: 8 });
+    await store.saveStatement('大戶卡', '2026-11-15', { amountDue: 1500 });
+    await store.saveStatement('大戶卡 2', '2026-11-20', { amountDue: 800 });
+    await store.saveStatement('別家卡', '2026-11-20', { amountDue: 500 });
+    snap = await store.load();
+    const first = snap.statements.find((s) => s.account === '大戶卡' && s.closeDate === '2026-11-15')!;
+    const second = snap.statements.find((s) => s.account === '大戶卡 2')!;
+    const other = snap.statements.find((s) => s.account === '別家卡')!;
+    const makePay = (payments: { account: string; statement: string; amount: number }[]): TxnInput => ({
+      time: at('2026-12-01 09:00'),
+      direction: '轉帳',
+      account: '大戶活存',
+      amount: payments.reduce((n, x) => n + x.amount, 0),
+      paidBy: null,
+      currency: null,
+      toAccount: null,
+      toAmount: null,
+      store: null,
+      branch: null,
+      statementText: null,
+      note: '信用卡合併扣款',
+      tags: [],
+      lines: [],
+      cardPayments: payments,
+    });
+
+    await store.saveTxn(
+      makePay([
+        { account: '大戶卡', statement: first.id, amount: 1000 },
+        { account: '大戶卡 2', statement: second.id, amount: 800 },
+      ]),
+    );
+    snap = await store.load();
+    const pay = snap.txns.find((t) => t.cardPayments.length === 2)!;
+    expect(pay).toMatchObject({ direction: '轉帳', account: '大戶活存', amount: 1800, toAccount: null, statement: null });
+    expect(accountDelta(pay, '大戶活存')).toBe(-1800);
+    expect(accountDelta(pay, '大戶卡')).toBe(1000);
+    expect(accountDelta(pay, '大戶卡 2')).toBe(800);
+    expect(statementPaid(first, snap.txns)).toBe(1000);
+    expect(statementPaid(second, snap.txns)).toBe(800);
+
+    await store.saveTxn(makePay([{ account: '大戶卡', statement: first.id, amount: 300 }]));
+    snap = await store.load();
+    expect(statementPaid(first, snap.txns)).toBe(1300);
+    expect(unpaidStatements(snap, '大戶卡').some((s) => s.id === first.id)).toBe(true);
+
+    const mixed = makePay([
+      { account: '大戶卡', statement: first.id, amount: 200 },
+      { account: '別家卡', statement: other.id, amount: 500 },
+    ]);
+    expect(checkTxn(mixed, { ...snap, statements: snap.statements }).join('、')).toContain('同一家發卡機構');
+    await expect(store.saveTxn(mixed)).rejects.toThrow('同一家發卡機構');
   });
 
   it('帳戶改名：帳單、帳單明細一起改', async () => {
