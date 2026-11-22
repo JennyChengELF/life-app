@@ -11,6 +11,7 @@
     "./app-tabs": "./src/AppTabs.tsx",
     "./week-date-strip": "./src/WeekDateStrip.tsx",
     "./time-field": "./src/TimeField.tsx",
+    "./date-time-field": "./src/DateTimeField.tsx",
     "./icon": "./src/Icon.tsx"
   },
   "peerDependencies": {

@@ -1,9 +1,8 @@
 import { useState } from 'react';
 import type { BodyFieldKey, BodyMeasurement, BodyTrendPeriod, HealthSnapshot } from '@life/db';
-import { BODY_TIMINGS, bodyField, bodyTrendAverages, bodyValue, HEIGHT_CODE, heightAt, mismatchFields, previousBodyValue } from '@life/db';
+import { BODY_TIMINGS, bodyField, bodyTrendAverages, bodyValue, previousBodyValue } from '@life/db';
 import type { HealthApi } from '../useHealth';
-import type { Nav } from '../App';
-import { fieldLabel, fmt, fmtDateTime, hasTwin } from '../format';
+import { fieldLabel, fmt, fmtDateTime } from '../format';
 import { TrendChart } from './TrendChart';
 
 const RANGES = [
@@ -14,37 +13,16 @@ const RANGES = [
 ] as const;
 
 /** 身體分頁：最新數值、趨勢、紀錄 */
-export function BodyTab({ api, snap, nav }: { api: HealthApi; snap: HealthSnapshot; nav: Nav }) {
+export function BodyTab({ api, snap }: { api: HealthApi; snap: HealthSnapshot }) {
   const fields = snap.settings.bodyFields;
-  const latest = snap.body[snap.body.length - 1] ?? null;
-  const mismatches = snap.body.filter((m) => mismatchFields(m, snap).length > 0);
-  const noHeight = heightAt(snap, Date.now()) == null;
-  const heightName = snap.items.find((i) => i.code === HEIGHT_CODE)?.name ?? '身高';
+  const latest = BODY_TIMINGS.map((timing) => [...snap.body].reverse().find((item) => item.timing === timing) ?? null).filter((item): item is BodyMeasurement => !!item);
 
   return (
     <div className="body-tab">
-      <div className="messages">
-        {mismatches.length > 0 && (
-          <button className="msg warn" onClick={() => nav.edit(mismatches[mismatches.length - 1])}>
-            ⚠️ 有 {mismatches.length} 筆數值對不起來（BMI 或 % 和 kg），點這裡看{mismatches.length > 1 ? '最新一筆' : ''} ›
-          </button>
-        )}
-        {noHeight && (
-          <button className="msg info" onClick={() => nav.occ(heightName)}>
-            填身高就能自動算 BMI ›
-          </button>
-        )}
-      </div>
-
-      <button className="primary big full" onClick={() => nav.newBody()}>
-        ⚖️ 記一筆身體量測
-      </button>
-
-      {latest ? (
+      {latest.length ? (
         <>
-          <LatestCard snap={snap} latest={latest} fields={fields} onEdit={() => nav.edit(latest)} />
+          <LatestCard snap={snap} latest={latest} fields={fields} />
           <TrendCard snap={snap} fields={fields} />
-          <HistoryCard snap={snap} fields={fields} onEdit={nav.edit} />
         </>
       ) : (
         <p className="muted center-text">還沒有身體量測紀錄</p>
@@ -54,40 +32,16 @@ export function BodyTab({ api, snap, nav }: { api: HealthApi; snap: HealthSnapsh
   );
 }
 
-function LatestCard({ snap, latest, fields, onEdit }: { snap: HealthSnapshot; latest: BodyMeasurement; fields: BodyFieldKey[]; onEdit: () => void }) {
+function LatestCard({ snap, latest, fields }: { snap: HealthSnapshot; latest: BodyMeasurement[]; fields: BodyFieldKey[] }) {
   return (
     <section className="card">
-      <div className="chart-head">
-        <h2>最新・{latest.timing} · {fmtDateTime(latest.time)}</h2>
-        <button className="link" onClick={onEdit}>
-          修改
-        </button>
-      </div>
-      <div className="stat-grid">
-        {fields.map((k) => {
-          const v = bodyValue(latest, k, snap);
-          const prev = v == null ? null : previousBodyValue(snap, latest, k);
-          const diff = v != null && prev != null ? v - prev : null;
-          const f = bodyField(k);
-          const shown = diff == null ? null : Number(diff.toFixed(f.decimals));
-          return (
-            <div key={k} className="stat-tile">
-              <div className="stat-label">{fieldLabel(k)}</div>
-              <div className="stat-value">
-                {fmt(k, v)}
-                {f.unit && v != null && <small> {f.unit}</small>}
-              </div>
-              {v != null && prev == null && <div className="stat-diff">第一次{latest.timing}紀錄</div>}
-              {shown != null && (
-                <div className="stat-diff">
-                  {shown === 0 ? '持平' : `${shown > 0 ? '▲' : '▼'} ${Math.abs(shown).toFixed(f.decimals)}`}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-      {latest.note && <p className="small muted">📝 {latest.note}</p>}
+      <h2>各時段最近一次</h2>
+      {latest.map((measurement) => <div key={measurement.id} className="latest-timing"><div className="sum-head"><b>{measurement.timing}</b><span className="muted small">{fmtDateTime(measurement.time)}</span></div><div className="stat-grid">{fields.map((k) => {
+        const v = bodyValue(measurement, k, snap);
+        const prev = v == null ? null : previousBodyValue(snap, measurement, k);
+        const diff = v != null && prev != null ? Number((v - prev).toFixed(bodyField(k).decimals)) : null;
+        return <div key={k} className="stat-tile"><div className="stat-label">{fieldLabel(k)}</div><div className="stat-value">{fmt(k, v)}{bodyField(k).unit && v != null && <small> {bodyField(k).unit}</small>}</div><div className="stat-diff">{v != null && prev == null ? `第一次${measurement.timing}紀錄` : diff == null ? '' : diff === 0 ? '持平' : `${diff > 0 ? '▲' : '▼'} ${Math.abs(diff).toFixed(bodyField(k).decimals)}`}</div></div>;
+      })}</div></div>)}
     </section>
   );
 }
@@ -141,57 +95,6 @@ function TrendCard({ snap, fields }: { snap: HealthSnapshot; fields: BodyFieldKe
       </div>
       <TrendChart series={series} unit={f.unit} format={(v) => fmt(k, v)} />
       {mode !== 'record' && <p className="muted small">同一天同一時段有多筆時先取當天平均；沒有量的日期不列入平均天數。</p>}
-    </section>
-  );
-}
-
-function HistoryCard({ snap, fields, onEdit }: { snap: HealthSnapshot; fields: BodyFieldKey[]; onEdit: (m: BodyMeasurement) => void }) {
-  const [limit, setLimit] = useState(20);
-  const rows = [...snap.body].reverse();
-  return (
-    <section className="card">
-      <h2>紀錄</h2>
-      <div className="table-wrap">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>時間</th>
-              <th>時段</th>
-              {fields.map((k) => (
-                <th key={k}>
-                  {fieldLabel(k)}
-                  {bodyField(k).unit && !hasTwin(k) && <small> {bodyField(k).unit}</small>}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.slice(0, limit).map((m) => {
-              const warn = mismatchFields(m, snap);
-              return (
-                <tr key={m.id} onClick={() => onEdit(m)} title="點一下修改">
-                  <td className="nowrap">
-                    {fmtDateTime(m.time)}
-                    {m.note && ' 📝'}
-                  </td>
-                  <td className="nowrap">{m.timing}</td>
-                  {fields.map((k) => (
-                    <td key={k} className="num">
-                      {fmt(k, bodyValue(m, k, snap))}
-                      {warn.includes(k) && ' ⚠️'}
-                    </td>
-                  ))}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      {rows.length > limit && (
-        <button className="link" onClick={() => setLimit(limit + 50)}>
-          顯示更多（還有 {rows.length - limit} 筆）
-        </button>
-      )}
     </section>
   );
 }

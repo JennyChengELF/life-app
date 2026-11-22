@@ -34,9 +34,13 @@ export interface BloodPressure extends Base {
 
 export const GLUCOSE_TIMINGS = ['空腹', '飯前', '飯後2小時', '睡前', '隨機'] as const;
 export type GlucoseTiming = (typeof GLUCOSE_TIMINGS)[number];
+export const GLUCOSE_MEALS = ['早餐', '午餐', '晚餐', '其他'] as const;
+export type GlucoseMeal = (typeof GLUCOSE_MEALS)[number];
 
 export interface BloodGlucose extends Base {
   timing: GlucoseTiming;
+  /** 2026-11-22 使用者決定：飯前／飯後可記是哪一餐；舊資料維持空白。 */
+  meal: GlucoseMeal | null;
   mgdl: number;
 }
 

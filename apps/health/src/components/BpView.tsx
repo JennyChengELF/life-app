@@ -8,19 +8,18 @@ import { TrendChart } from './TrendChart';
 import { AttentionReasons, Badge, NumField, RangeSeg, sinceOf, useTimeInput, VitalFormShell } from './vital';
 
 export function BpView({ api, snap, nav, form }: { api: HealthApi; snap: HealthSnapshot; nav: Nav; form: VitalForm | null }) {
+  const [selected, setSelected] = useState<BloodPressure | null>(null);
   if (form) return <BpForm api={api} nav={nav} rec={form.rec as BloodPressure | null} initialTime={form.initialTime} />;
+  if (selected) return <section className="card"><button type="button" className="link" onClick={() => setSelected(null)}>返回血壓統計</button><h2>血壓詳細內容</h2><p className="big-num">{showBp(selected.systolic, selected.diastolic)} <small>mmHg</small></p><p>脈搏：{selected.pulse ?? '未填'} 次／分</p><p className="muted">{fmtDateTime(selected.time)}</p><AttentionReasons reasons={bpAttentionReasons(selected.systolic, selected.diastolic, selected.pulse)} />{selected.note && <p>備註：{selected.note}</p>}<button type="button" className="primary" onClick={() => nav.vital('bp', { rec: selected }, 'stats')}>編輯</button></section>;
   return (
     <div className="vital">
-      <button className="primary big full" onClick={() => nav.vital('bp')}>
-        🩸 記一筆血壓
-      </button>
       {snap.bp.length === 0 ? (
         <p className="muted center-text">還沒有血壓紀錄</p>
       ) : (
         <>
           <AverageCard snap={snap} />
           <BpTrend snap={snap} />
-          <BpHistory snap={snap} nav={nav} />
+          <BpHistory snap={snap} onPick={setSelected} />
         </>
       )}
     </div>
@@ -115,7 +114,7 @@ function BpTrend({ snap }: { snap: HealthSnapshot }) {
   );
 }
 
-function BpHistory({ snap, nav }: { snap: HealthSnapshot; nav: Nav }) {
+function BpHistory({ snap, onPick }: { snap: HealthSnapshot; onPick: (record: BloodPressure) => void }) {
   const [limit, setLimit] = useState(30);
   const [attentionOnly, setAttentionOnly] = useState(false);
   const allRows = [...snap.bp].reverse();
@@ -143,7 +142,7 @@ function BpHistory({ snap, nav }: { snap: HealthSnapshot; nav: Nav }) {
           </thead>
           <tbody>
             {rows.slice(0, limit).map((x) => (
-              <tr key={x.id} onClick={() => nav.vital('bp', { rec: x })} title="點一下修改">
+              <tr key={x.id} onClick={() => onPick(x)} title="點一下看詳細內容">
                 <td className="nowrap">
                   {fmtDateTime(x.time)}
                   {x.note && ' 📝'}

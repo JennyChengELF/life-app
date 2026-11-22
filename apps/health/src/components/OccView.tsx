@@ -1,29 +1,35 @@
 import { useState } from 'react';
-import type { HealthSnapshot, OccItem, OccMeasurement } from '@life/db';
-import { toInputDateTime } from '@life/db';
+import type { HealthSnapshot } from '@life/db';
+import { startOfDay, toDateKey, toHHmm } from '@life/db';
+import { TimeField } from '@life/ui/time-field';
 import type { HealthApi } from '../useHealth';
-import { fmtDateTime, parseNum } from '../format';
+import { parseNum } from '../format';
+import { TrendChart } from './TrendChart';
+import { sinceOf } from './vital';
 
 const fmtVal = (v: number) => String(Number(v.toFixed(2)));
 
-/** 偶爾量測：身高、圍度⋯⋯（一個項目一列） */
-export function OccView({ api, snap, focusItem }: { api: HealthApi; snap: HealthSnapshot; focusItem: string | null }) {
+/** 身體尺寸：身高、圍度⋯⋯（一個項目一列） */
+export function OccView({ api, snap, focusItem, mode = 'add', initialTime, onDone }: { api: HealthApi; snap: HealthSnapshot; focusItem: string | null; mode?: 'add' | 'stats'; initialTime?: number; onDone?: () => void }) {
   return (
     <div className="occ">
-      <OccForm api={api} snap={snap} focusItem={focusItem} />
-      <LatestCard snap={snap} />
-      <HistoryCard api={api} snap={snap} />
+      {mode === 'add' && <OccForm api={api} snap={snap} focusItem={focusItem} initialTime={initialTime} onDone={onDone} />}
+      {mode === 'stats' && <><LatestCard snap={snap} /><OccTrend snap={snap} /></>}
     </div>
   );
 }
-
-function OccForm({ api, snap, focusItem }: { api: HealthApi; snap: HealthSnapshot; focusItem: string | null }) {
-  const [time, setTime] = useState(toInputDateTime(Date.now()));
+function OccForm({ api, snap, focusItem, initialTime, onDone }: { api: HealthApi; snap: HealthSnapshot; focusItem: string | null; initialTime?: number; onDone?: () => void }) {
+  const initial = initialTime ?? Date.now();
+  const [date, setDate] = useState(toDateKey(initial));
+  const [time, setTime] = useState(toHHmm(initial));
   const [vals, setVals] = useState<Record<string, string>>({});
   const [note, setNote] = useState('');
 
   const save = async () => {
-    const t = new Date(time).getTime();
+    const [hour, minute] = time.split(':').map(Number);
+    const value = new Date(startOfDay(date));
+    value.setHours(hour, minute, 0, 0);
+    const t = value.getTime();
     if (!Number.isFinite(t)) return api.showToast({ kind: 'error', text: '請輸入時間' });
     const entries: { item: string; value: number }[] = [];
     for (const i of snap.items) {
@@ -38,17 +44,16 @@ function OccForm({ api, snap, focusItem }: { api: HealthApi; snap: HealthSnapsho
       setVals({});
       setNote('');
       api.showToast({ kind: 'info', text: `已記錄 ${entries.map((e) => e.item).join('、')}` });
+      onDone?.();
     }
   };
 
   return (
     <section className="card">
-      <h2>記錄偶爾量測</h2>
+      <h2>記錄身體尺寸</h2>
       <p className="muted small">有量的才填，沒量的空著。項目可以在「設定」新增。</p>
-      <label className="field">
-        量的時間
-        <input type="datetime-local" value={time} onChange={(e) => setTime(e.target.value)} />
-      </label>
+      <label className="field">量測日期<input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
+      <TimeField value={time} onChange={setTime} label="量的時間" />
       <div className="form-grid">
         {snap.items.map((i) => (
           <label key={i.id} className="field">
@@ -71,13 +76,20 @@ function OccForm({ api, snap, focusItem }: { api: HealthApi; snap: HealthSnapsho
         備註
         <input value={note} onChange={(e) => setNote(e.target.value)} />
       </label>
-      <button className="primary big" onClick={save} disabled={api.busy}>
-        儲存
-      </button>
+      <div className="editor-actions"><button className="primary big" onClick={save} disabled={api.busy}>儲存</button>{onDone && <button type="button" onClick={onDone}>取消</button>}</div>
     </section>
   );
 }
-
+function OccTrend({ snap }: { snap: HealthSnapshot }) {
+  const names = snap.items.filter((item) => snap.occ.some((record) => record.item === item.name));
+  const [item, setItem] = useState(names[0]?.name ?? '');
+  const [range, setRange] = useState(365);
+  if (!names.length) return null;
+  const selected = names.some((entry) => entry.name === item) ? item : names[0].name;
+  const unit = names.find((entry) => entry.name === selected)?.unit ?? '';
+  const points = snap.occ.filter((record) => record.item === selected && record.time >= sinceOf(range)).map((record) => ({ time: record.time, value: record.value }));
+  return <section className="card"><div className="chart-head"><h2>趨勢</h2><div className="seg">{([90, 365, 0] as const).map((days) => <button key={days} className={range === days ? 'active' : ''} onClick={() => setRange(days)}>{days === 0 ? '全部' : days === 365 ? '1 年' : '90 天'}</button>)}</div></div><div className="chips">{names.map((entry) => <button key={entry.id} className={entry.name === selected ? 'active' : ''} onClick={() => setItem(entry.name)}>{entry.name}</button>)}</div><TrendChart points={points} unit={unit} format={(value) => String(Number(value.toFixed(2)))} /></section>;
+}
 /** 各項目最新的值和上一次比較 */
 function LatestCard({ snap }: { snap: HealthSnapshot }) {
   const rows = snap.items
@@ -108,78 +120,5 @@ function LatestCard({ snap }: { snap: HealthSnapshot }) {
         </tbody>
       </table>
     </section>
-  );
-}
-
-/** 依時間分組（同一個時間 = 同一次量的） */
-function HistoryCard({ api, snap }: { api: HealthApi; snap: HealthSnapshot }) {
-  const [editing, setEditing] = useState<string | null>(null);
-  const [limit, setLimit] = useState(15);
-  const groups = new Map<number, OccMeasurement[]>();
-  for (const o of [...snap.occ].reverse()) groups.set(o.time, [...(groups.get(o.time) ?? []), o]);
-  const list = [...groups.entries()];
-  if (!list.length) return null;
-  const unitOf = (name: string) => snap.items.find((i: OccItem) => i.name === name)?.unit ?? '';
-  return (
-    <section className="card">
-      <h2>紀錄</h2>
-      <ul className="log-list">
-        {list.slice(0, limit).map(([time, os]) => (
-          <li key={time} className="occ-group">
-            <div className="log-time">{fmtDateTime(time)}</div>
-            <div className="occ-values">
-              {os.map((o) =>
-                editing === o.id ? (
-                  <OccEditor
-                    key={o.id}
-                    o={o}
-                    unit={unitOf(o.item)}
-                    onSave={(value) => {
-                      setEditing(null);
-                      api.run((s) => s.updateOcc(o, { value }));
-                    }}
-                    onDelete={() => {
-                      setEditing(null);
-                      api.run((s) => s.deleteOcc(o));
-                    }}
-                    onCancel={() => setEditing(null)}
-                  />
-                ) : (
-                  <button key={o.id} className="chip" onClick={() => setEditing(o.id)} title="點一下修改">
-                    {o.item} <b>{fmtVal(o.value)}</b>
-                    {unitOf(o.item) && <small> {unitOf(o.item)}</small>}
-                  </button>
-                ),
-              )}
-            </div>
-            {os[0].note && <div className="small muted">📝 {os[0].note}</div>}
-          </li>
-        ))}
-      </ul>
-      {list.length > limit && (
-        <button className="link" onClick={() => setLimit(limit + 30)}>
-          顯示更多
-        </button>
-      )}
-    </section>
-  );
-}
-
-function OccEditor(props: { o: OccMeasurement; unit: string; onSave: (v: number) => void; onDelete: () => void; onCancel: () => void }) {
-  const [v, setV] = useState(String(props.o.value));
-  const n = Number(v);
-  return (
-    <div className="editor occ-editor">
-      <span>{props.o.item}</span>
-      <input type="number" inputMode="decimal" step="0.1" value={v} onChange={(e) => setV(e.target.value)} className="narrow" autoFocus />
-      <span className="muted">{props.unit}</span>
-      <button className="primary" onClick={() => props.onSave(n)} disabled={!(n > 0)}>
-        儲存
-      </button>
-      <button onClick={props.onCancel}>取消</button>
-      <button className="danger" onClick={() => confirm(`刪除這筆${props.o.item}？`) && props.onDelete()}>
-        刪除
-      </button>
-    </div>
   );
 }

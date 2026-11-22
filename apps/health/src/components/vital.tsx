@@ -2,6 +2,7 @@
 import { useState, type ReactNode } from 'react';
 import type { AttentionReason, Judge } from '@life/db';
 import { toInputDateTime } from '@life/db';
+import { DateTimeField } from '@life/ui/date-time-field';
 import type { HealthApi } from '../useHealth';
 
 /** 顏色標示（一定附文字，不只靠顏色） */
@@ -87,10 +88,7 @@ export function VitalFormShell(props: {
   return (
     <section className="card">
       <h2>{props.title}</h2>
-      <label className="field">
-        量的時間
-        <input type="datetime-local" value={props.time} onChange={(e) => props.setTime(e.target.value)} />
-      </label>
+      <DateTimeField value={props.time} onChange={props.setTime} label="量測日期" />
       {props.children}
       <label className="field">
         備註

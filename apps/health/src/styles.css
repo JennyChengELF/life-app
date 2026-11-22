@@ -74,7 +74,7 @@ button.full { width: 100%; margin-bottom: 12px; }
 .attention-reasons li.bad { color: var(--danger); font-weight: 600; }
 .attention-reasons span { color: var(--muted); font-size: 0.78rem; }
 
-/* ── 偶爾量測 ── */
+/* ── 身體尺寸 ── */
 .occ-group { padding: 10px 0; border-bottom: 1px solid var(--line); }
 .occ-group:last-child { border-bottom: 0; }
 .occ-values { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
@@ -134,6 +134,22 @@ button.full { width: 100%; margin-bottom: 12px; }
 .choice { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 .choice button { border-radius: 999px; padding: 5px 12px; font-size: 0.9rem; }
 .choice button.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+
+/* ── 新增／統計入口 ── */
+.health-add, .overview { padding-bottom: 72px; }
+.health-entry-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.health-entry-grid button { min-height: 118px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 5px; padding: 14px; text-align: left; background: var(--card); border-color: var(--line); }
+.health-entry-grid button > .icon { color: var(--accent); width: 28px; height: 28px; }
+.health-entry-grid button b { font-size: 1rem; }
+.health-entry-grid button small { color: var(--muted); line-height: 1.35; }
+@media (max-width: 420px) { .health-entry-grid { grid-template-columns: 1fr; } }
+
+.fab { position: fixed; right: max(18px, calc((100vw - 760px) / 2 + 18px)); bottom: calc(82px + env(safe-area-inset-bottom)); width: 56px; height: 56px; border: 0; border-radius: 18px; color: #fff; background: var(--accent); box-shadow: 0 6px 18px rgb(20 55 95 / 25%); z-index: 6; padding: 0; display: grid; place-items: center; }
+@media (min-width: 760px) { .fab { bottom: 28px; } }
+
+.health-more .more-label > span { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.health-more .more-label small { color: var(--muted); font-size: .78rem; }
+.health-more button.warn b, .health-more button.warn > .more-label > .icon { color: var(--warn); }
 
 
 /* ── 健檢 ── */

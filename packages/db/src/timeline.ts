@@ -5,7 +5,7 @@
 import type { HealthSnapshot } from './health';
 import { bodyField, bodyValue, mismatchFields } from './health';
 import type { Judge } from './vitals';
-import { judgeBp, judgeGlucose, judgeTemp } from './vitals';
+import { bpAttentionReasons, glucoseAttentionReasons, judgeBp, judgeGlucose, judgeTemp } from './vitals';
 import { judgeLab } from './lab';
 import { startOfDay } from './time';
 import type { BowelSnapshot } from './bowel';
@@ -80,6 +80,7 @@ export function healthEntries(snap: HealthSnapshot, date: string): TimelineEntry
       name: '血壓',
       value: `${x.systolic}/${x.diastolic}${x.pulse != null ? ` · 脈搏 ${x.pulse}` : ''}`,
       judge: judgeBp(x.systolic, x.diastolic),
+      extra: bpAttentionReasons(x.systolic, x.diastolic, x.pulse).map((reason) => reason.text).join('；') || undefined,
       note: x.note,
       ref: { app: 'health', kind: 'bp', id: x.id },
     });
@@ -90,9 +91,10 @@ export function healthEntries(snap: HealthSnapshot, date: string): TimelineEntry
       key: x.id,
       time: x.time,
       icon: 'candy',
-      name: `血糖 ${x.timing}`,
+      name: `血糖 ${x.timing}${x.meal ? `・${x.meal}` : ''}`,
       value: `${x.mgdl} mg/dL`,
       judge: judgeGlucose(x.timing, x.mgdl),
+      extra: glucoseAttentionReasons(x.timing, x.mgdl).map((reason) => reason.text).join('；') || undefined,
       note: x.note,
       ref: { app: 'health', kind: 'glucose', id: x.id },
     });
@@ -106,11 +108,12 @@ export function healthEntries(snap: HealthSnapshot, date: string): TimelineEntry
       name: x.kind === '基礎' ? '基礎體溫' : `體溫${x.site ? ` ${x.site}` : ''}`,
       value: `${x.celsius.toFixed(decimalsOfTemp(x.kind))} °C`,
       judge: judgeTemp(x.kind, x.celsius),
+      extra: x.kind === '基礎' || x.celsius < 37.5 ? undefined : x.celsius >= 38 ? `體溫過高：${x.celsius.toFixed(1)} °C（38 以上，發燒）` : `體溫偏高：${x.celsius.toFixed(1)} °C（37.5 以上，微燒）`,
       note: x.note,
       ref: { app: 'health', kind: 'temp', id: x.id },
     });
   }
-  // 偶爾量測：同一個時間記的合成一列
+  // 身體尺寸：同一個時間記的合成一列
   const occ = new Map<number, HealthSnapshot['occ']>();
   for (const o of snap.occ) if (o.date === date) occ.set(o.time, [...(occ.get(o.time) ?? []), o]);
   const unit = (name: string) => snap.items.find((i) => i.name === name)?.unit ?? '';
@@ -120,7 +123,7 @@ export function healthEntries(snap: HealthSnapshot, date: string): TimelineEntry
       key: `occ-${time}`,
       time,
       icon: 'ruler',
-      name: one ? list[0].item : '偶爾量測',
+      name: one ? list[0].item : '身體尺寸',
       value: list.map((o) => `${one ? '' : `${o.item} `}${o.value}${unit(o.item) ? ` ${unit(o.item)}` : ''}`).join('、'),
       note: list.find((o) => o.note)?.note,
       ref: { app: 'health', kind: 'occ', id: list[0].id },
@@ -130,7 +133,8 @@ export function healthEntries(snap: HealthSnapshot, date: string): TimelineEntry
   for (const rep of snap.labReports) {
     if (rep.date !== date) continue;
     const results = snap.labResults.filter((r) => r.reportId === rep.id);
-    const judges = results.map((r) => judgeLab(r, snap.labItems.find((i) => i.name === r.item) ?? null));
+    const judged = results.map((r) => ({ result: r, judge: judgeLab(r, snap.labItems.find((i) => i.name === r.item) ?? null) }));
+    const judges = judged.map((item) => item.judge);
     const bad = judges.filter((j) => j && j.level !== 'ok').length;
     out.push({
       key: rep.id,
@@ -140,6 +144,7 @@ export function healthEntries(snap: HealthSnapshot, date: string): TimelineEntry
       name: rep.kind + (rep.place ? ` ${rep.place}` : ''),
       value: `${results.length} 項`,
       judge: bad ? { level: judges.some((j) => j?.level === 'bad') ? 'bad' : 'warn', label: `${bad} 項異常` } : results.length ? { level: 'ok', label: '都正常' } : null,
+      extra: judged.filter((item) => item.judge && item.judge.level !== 'ok').map((item) => `${item.result.item}：${item.judge!.label}`).join('；') || undefined,
       note: rep.note,
       ref: { app: 'health', kind: 'lab', id: rep.id },
     });

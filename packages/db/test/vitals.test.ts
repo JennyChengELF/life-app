@@ -151,11 +151,13 @@ describe('HealthStore：血壓、血糖、體溫', () => {
     await store.load();
     await store.addBp({ systolic: 125, diastolic: 82, pulse: 70 }, at('2026-11-17 07:00'));
     await store.addGlucose({ timing: '空腹', mgdl: 95 }, at('2026-11-17 07:10'));
+    await store.addGlucose({ timing: '飯後2小時', meal: '早餐', mgdl: 120 }, at('2026-11-17 09:10'));
     await store.addTemp({ kind: '基礎', site: '口溫', celsius: 36.456 }, at('2026-11-17 06:30'));
     await store.addTemp({ kind: '一般', site: null, celsius: 37.86 }, at('2026-11-17 12:00'));
     let s = await store.load();
     expect(s.bp[0]).toMatchObject({ systolic: 125, diastolic: 82, pulse: 70, date: '2026-11-17' });
-    expect(s.glucose[0]).toMatchObject({ timing: '空腹', mgdl: 95 });
+    expect(s.glucose[0]).toMatchObject({ timing: '空腹', meal: null, mgdl: 95 });
+    expect(s.glucose[1]).toMatchObject({ timing: '飯後2小時', meal: '早餐', mgdl: 120 });
     expect(s.temps.map((t) => t.celsius)).toEqual([36.46, 37.9]);
     await store.updateGlucose(s.glucose[0], { timing: '飯前', mgdl: 101 }, s.glucose[0].time, '改');
     await store.deleteVital('healthBloodPressure', s.bp[0]);

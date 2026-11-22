@@ -12,27 +12,28 @@ const decimals = (k: TempKind) => (k === '基礎' ? 2 : 1);
 export function TempView({ api, snap, nav, form }: { api: HealthApi; snap: HealthSnapshot; nav: Nav; form: VitalForm | null }) {
   // 預設看最近量的那一種
   const [kind, setKind] = useState<TempKind>(snap.temps[snap.temps.length - 1]?.kind ?? '一般');
+  const [siteFilter, setSiteFilter] = useState<TempSite | '全部'>(snap.settings.tempSite['一般'] ?? '全部');
   if (form) return <TempForm api={api} snap={snap} nav={nav} rec={form.rec as Temperature | null} initialKind={form.tempKind ?? kind} initialTime={form.initialTime} />;
-  const list = snap.temps.filter((x) => x.kind === kind);
+  const allOfKind = snap.temps.filter((x) => x.kind === kind);
+  const list = kind === '一般' && siteFilter !== '全部' ? allOfKind.filter((item) => item.site === siteFilter) : allOfKind;
+  const latest = allOfKind[allOfKind.length - 1] ?? null;
   return (
     <div className="vital">
-      <button className="primary big full" onClick={() => nav.vital('temp', { rec: null, tempKind: kind })}>
-        🌡️ 記一筆{kind === '基礎' ? '基礎' : ''}體溫
-      </button>
       <div className="chips">
         {TEMP_KINDS.map((k) => (
-          <button key={k} className={kind === k ? 'active' : ''} onClick={() => setKind(k)}>
+          <button key={k} className={kind === k ? 'active' : ''} onClick={() => { setKind(k); if (k === '一般') setSiteFilter(snap.settings.tempSite['一般'] ?? '全部'); }}>
             {k}體溫
           </button>
         ))}
       </div>
+      {kind === '一般' && <div className="chips">{(['全部', ...TEMP_SITES] as const).map((site) => <button key={site} className={siteFilter === site ? 'active' : ''} onClick={() => setSiteFilter(site)}>{site === '全部' ? '全部部位' : site}</button>)}</div>}
+      {latest && <section className="card"><h2>最近一次{kind}體溫</h2><div className="big-num">{latest.celsius.toFixed(decimals(kind))} <small>°C</small></div><p className="muted small">{latest.site ?? '未填部位'}・{fmtDateTime(latest.time)}</p></section>}
       {kind === '基礎' && <p className="muted small">基礎體溫：早上醒來、還沒起床活動前量。不標顏色，看趨勢用。</p>}
       {list.length === 0 ? (
         <p className="muted center-text">還沒有{kind}體溫紀錄</p>
       ) : (
         <>
           <TempTrend list={list} kind={kind} />
-          <TempHistory list={list} nav={nav} />
         </>
       )}
     </div>
@@ -61,48 +62,6 @@ function TempTrend({ list, kind }: { list: Temperature[]; kind: TempKind }) {
             : undefined
         }
       />
-    </section>
-  );
-}
-
-function TempHistory({ list, nav }: { list: Temperature[]; nav: Nav }) {
-  const [limit, setLimit] = useState(30);
-  const rows = [...list].reverse();
-  return (
-    <section className="card">
-      <h2>紀錄</h2>
-      <div className="table-wrap">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>時間</th>
-              <th>部位</th>
-              <th>°C</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {rows.slice(0, limit).map((x) => (
-              <tr key={x.id} onClick={() => nav.vital('temp', { rec: x })} title="點一下修改">
-                <td className="nowrap">
-                  {fmtDateTime(x.time)}
-                  {x.note && ' 📝'}
-                </td>
-                <td className="num">{x.site ?? '—'}</td>
-                <td className="num">{x.celsius.toFixed(decimals(x.kind))}</td>
-                <td className="num">
-                  <Badge judge={judgeTemp(x.kind, x.celsius)} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {rows.length > limit && (
-        <button className="link" onClick={() => setLimit(limit + 50)}>
-          顯示更多（還有 {rows.length - limit} 筆）
-        </button>
-      )}
     </section>
   );
 }

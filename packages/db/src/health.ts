@@ -6,7 +6,7 @@ import type { Backend, RowUpdate, RowValues, TableRow } from './backend';
 import { newId } from './ids';
 import type { TableName } from './schema';
 import { addDays, startOfDay, toDateKey } from './time';
-import type { BloodGlucose, BloodPressure, BpPeriods, GlucoseTiming, Temperature, TempKind, TempSite } from './vitals';
+import type { BloodGlucose, BloodPressure, BpPeriods, GlucoseMeal, GlucoseTiming, Temperature, TempKind, TempSite } from './vitals';
 import type { LabItem, LabKind, LabReport, LabResult } from './lab';
 import { DEFAULT_LAB_ITEMS, LAB_KINDS, splitOptions } from './lab';
 import {
@@ -15,6 +15,7 @@ import {
   formatRange,
   GLUCOSE_RANGE,
   GLUCOSE_TIMINGS,
+  GLUCOSE_MEALS,
   parseRange,
   rangesOverlap,
   TEMP_KINDS,
@@ -438,6 +439,7 @@ function checkGlucoseRow(r: TableRow): string[] {
   const p: string[] = [];
   checkTime(r, p);
   checkChoice(r, 'timing', '測量時機', GLUCOSE_TIMINGS, true, p);
+  checkChoice(r, 'meal', '餐別', GLUCOSE_MEALS, false, p);
   checkNum(r, 'mgdl', '血糖', GLUCOSE_RANGE, true, p);
   return p;
 }
@@ -574,11 +576,14 @@ export function cleanBp(v: BpInput): BpInput {
 
 export interface GlucoseInput {
   timing: GlucoseTiming;
+  meal?: GlucoseMeal | null;
   mgdl: number;
 }
 export function cleanGlucose(v: GlucoseInput): GlucoseInput {
   if (!GLUCOSE_TIMINGS.includes(v.timing)) throw new Error('請選測量時機');
-  return { timing: v.timing, mgdl: checkRange(v.mgdl, GLUCOSE_RANGE, '血糖') };
+  if (v.meal != null && !GLUCOSE_MEALS.includes(v.meal)) throw new Error('餐別看不懂');
+  const meal = v.timing === '飯前' || v.timing === '飯後2小時' ? (v.meal ?? null) : null;
+  return { timing: v.timing, meal, mgdl: checkRange(v.mgdl, GLUCOSE_RANGE, '血糖') };
 }
 
 export interface TempInput {
@@ -758,7 +763,7 @@ export class HealthStore {
       .map((r) => ({ ...baseOf(r), systolic: Number(r.values.systolic), diastolic: Number(r.values.diastolic), pulse: num(r.values.pulse) }))
       .sort(byTime);
     const glucose: BloodGlucose[] = gt.valid
-      .map((r) => ({ ...baseOf(r), timing: String(r.values.timing).trim() as GlucoseTiming, mgdl: Number(r.values.mgdl) }))
+      .map((r) => ({ ...baseOf(r), timing: String(r.values.timing).trim() as GlucoseTiming, meal: (str(r.values.meal)?.trim() || null) as GlucoseMeal | null, mgdl: Number(r.values.mgdl) }))
       .sort(byTime);
     const temps: Temperature[] = tt.valid
       .map((r) => ({

@@ -1,10 +1,12 @@
 import type { HealthIssue, HealthSnapshot } from '@life/db';
+import { mismatchFields } from '@life/db';
 import type { HealthApi } from '../useHealth';
+import type { Nav } from '../App';
 
 const show = (v: unknown) => (v === undefined || v === null || v === '' ? '（空白）' : String(v));
 const TABLE_NAME: Record<string, string> = {
   healthBodyMeasurements: '身體量測',
-  healthOccasionalMeasurements: '偶爾量測',
+  healthOccasionalMeasurements: '身體尺寸',
   healthBloodPressure: '血壓',
   healthBloodGlucose: '血糖',
   healthTemperature: '體溫',
@@ -12,14 +14,15 @@ const TABLE_NAME: Record<string, string> = {
   healthLabResults: '檢驗結果',
 };
 
-export function IssuesView({ api, snap, onDone }: { api: HealthApi; snap: HealthSnapshot; onDone: () => void }) {
+export function IssuesView({ api, snap, nav, onDone }: { api: HealthApi; snap: HealthSnapshot; nav: Nav; onDone: () => void }) {
   const url = api.fileUrl('health');
-  if (snap.issues.length === 0) {
+  const mismatches = snap.body.filter((measurement) => mismatchFields(measurement, snap).length > 0);
+  if (snap.issues.length === 0 && mismatches.length === 0) {
     return (
       <div className="center">
         <p>✅ 沒有需要補齊的資料</p>
         <button className="primary" onClick={onDone}>
-          回總覽
+          返回更多
         </button>
       </div>
     );
@@ -37,6 +40,7 @@ export function IssuesView({ api, snap, onDone }: { api: HealthApi; snap: Health
       {snap.issues.map((i) => (
         <IssueCard key={`${i.table}-${i.rowNumber}`} issue={i} api={api} />
       ))}
+      {mismatches.map((measurement) => <section className="card" key={measurement.id}><h2>身體量測數值需要確認</h2><p className="muted small">{measurement.date.replace(/-/g, '/')}・{measurement.timing}</p><ul className="problems">{mismatchFields(measurement, snap).map((field) => <li key={field}>{field} 的百分比、公斤數或 BMI 對不起來</li>)}</ul><button type="button" className="primary" onClick={() => nav.edit(measurement, 'issues')}>查看並處理</button></section>)}
     </div>
   );
 }

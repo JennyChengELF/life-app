@@ -33,13 +33,13 @@ export function DateNav({ date, setDate }: { date: string; setDate: (d: string) 
   );
 }
 
-/** 依時間排好的紀錄；onPick：點一列（修改那一筆） */
-export function Timeline({ entries, onPick }: { entries: TimelineEntry[]; onPick: (e: TimelineEntry) => void }) {
+/** 依時間排好的紀錄；未傳 onPick 時只顯示、不可點擊。 */
+export function Timeline({ entries, onPick }: { entries: TimelineEntry[]; onPick?: (e: TimelineEntry) => void }) {
   if (entries.length === 0) return <p className="muted center-text">這天沒有紀錄</p>;
   return (
     <ul className="timeline">
       {entries.map((e) => (
-        <li key={e.key} onClick={() => onPick(e)} title="點一下修改">
+        <li key={e.key} onClick={onPick ? () => onPick(e) : undefined} title={onPick ? '點一下查看' : undefined} className={onPick ? 'clickable' : undefined}>
           <span className="tl-time">{e.allDay ? '' : toHHmm(e.time)}</span>
           <span className="tl-icon">
             <Icon name={e.icon} size={18} />

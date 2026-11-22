@@ -7,7 +7,7 @@ const partsOf = (value: string) => {
 };
 
 /** 共用 24 小時制時間欄位，不使用可能顯示上午／下午的系統選擇器。 */
-export function TimeField({ value, onChange, label = '時間' }: { value: string; onChange: (value: string) => void; label?: string }) {
+export function TimeField({ value, onChange, label = '時間', showNow = true }: { value: string; onChange: (value: string) => void; label?: string; showNow?: boolean }) {
   const [hour, setHour] = useState(() => partsOf(value)[0]);
   const [minute, setMinute] = useState(() => partsOf(value)[1]);
 
@@ -60,7 +60,7 @@ export function TimeField({ value, onChange, label = '時間' }: { value: string
           onBlur={() => commit(hour, minute)}
         />
       </label>
-      <button type="button" className="link" onClick={() => onChange(toHHmm(Date.now()))}>現在</button>
+      {showNow && <button type="button" className="link" onClick={() => onChange(toHHmm(Date.now()))}>現在</button>}
     </fieldset>
   );
 }

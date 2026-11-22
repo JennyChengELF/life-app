@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { BodyFieldKey, BodyMeasurement, BodyTiming, BodyValueCol, BodyValues, HealthSnapshot } from '@life/db';
 import { BODY_FIELDS, BODY_TIMINGS, bmiInfo, bodyField, computeBmi, HEIGHT_CODE, heightAt, PCT_KG_PAIRS, PCT_KG_TOLERANCE, pctKgMismatches, toInputDateTime } from '@life/db';
+import { DateTimeField } from '@life/ui/date-time-field';
 import type { HealthApi } from '../useHealth';
 import type { Nav } from '../App';
 import { fieldLabel, parseNum } from '../format';
@@ -91,10 +92,7 @@ export function BodyView({ api, snap, editing, initialTime, nav }: { api: Health
       )}
       <section className="card">
         <h2>{editing ? '修改身體量測' : '記一筆身體量測'}</h2>
-        <label className="field">
-          量的時間
-          <input type="datetime-local" value={time} onChange={(e) => setTime(e.target.value)} />
-        </label>
+        <DateTimeField value={time} onChange={setTime} label="量測日期" />
         <div className="field">
           <span>量測時段</span>
           <div className="choice">

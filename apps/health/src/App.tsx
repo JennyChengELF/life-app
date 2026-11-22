@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
-import { Icon, type IconName } from '@life/ui/icon';
+import { useEffect, useState, type ReactNode } from 'react';
+import { Icon } from '@life/ui/icon';
+import { AppTabs, type AppTabItem } from '@life/ui/app-tabs';
 import { parseEditHash, startOfDay, todayKey } from '@life/db';
 import type { BloodGlucose, BloodPressure, BodyMeasurement, Temperature, TempKind } from '@life/db';
 import { useHealth } from './useHealth';
@@ -11,30 +12,31 @@ import { GlucoseView } from './components/GlucoseView';
 import { TempView } from './components/TempView';
 import { MoreView } from './components/MoreView';
 import { OccView } from './components/OccView';
-import { SettingsView } from './components/SettingsView';
+import { SettingsView, type HealthSettingSection } from './components/SettingsView';
 import { IssuesView } from './components/IssuesView';
 import { LabView } from './components/LabView';
 import { AppSwitcher } from '@life/ui/app-switcher';
+import { AddView } from './components/AddView';
+import { StatsMenu } from './components/StatsMenu';
 
 /** 綜合首頁：上線時在上一層路徑；開發時是另一個 port */
 const HOME_URL = import.meta.env.DEV ? `http://${location.hostname}:5172/` : '../';
 
-export type Tab = 'overview' | 'body' | 'bodyForm' | 'bp' | 'glucose' | 'temp' | 'lab' | 'more' | 'occ' | 'settings' | 'issues';
+export type MainTab = 'add' | 'calendar' | 'stats' | 'more';
+export type Tab = MainTab | 'body' | 'bodyForm' | 'bp' | 'glucose' | 'temp' | 'lab' | 'occ' | 'occStats' | 'settings' | 'issues';
 export type VitalTab = 'bp' | 'glucose' | 'temp';
 /** 輸入畫面存好 / 取消後回到哪裡；home = 綜合首頁（從首頁點某一筆進來的） */
 export type Back = Tab | 'home';
 export type RecordKind = 'body' | 'bp' | 'glucose' | 'temp' | 'occ' | 'lab';
 type VitalRecord = BloodPressure | BloodGlucose | Temperature;
 
-/** 下方分頁列（2026-11-17 確認）；體溫、偶爾量測、設定放在「更多」 */
-const TABS: { key: Tab; icon: IconName; label: string }[] = [
-  { key: 'overview', icon: 'stethoscope', label: '總覽' },
-  { key: 'body', icon: 'weight', label: '身體' },
-  { key: 'bp', icon: 'heartPulse', label: '血壓' },
-  { key: 'glucose', icon: 'candy', label: '血糖' },
+/** 2026-11-22 使用者決定：健康使用新增、日曆、統計、更多四個共用分頁。 */
+const TABS: AppTabItem<MainTab>[] = [
+  { key: 'add', icon: 'plus', label: '新增' },
+  { key: 'calendar', icon: 'calendar', label: '日曆' },
+  { key: 'stats', icon: 'chart', label: '統計' },
   { key: 'more', icon: 'more', label: '更多' },
 ];
-const UNDER: Partial<Record<Tab, Tab>> = { bodyForm: 'body', temp: 'more', lab: 'more', occ: 'more', settings: 'more' };
 
 function requestedDate() {
   const value = new URLSearchParams(location.search).get('date');
@@ -51,11 +53,11 @@ function fromHash(): { tab: Tab; form: boolean } {
   const h = location.hash.slice(1);
   if (h === 'new') return { tab: 'bodyForm', form: false };
   if (h === 'bp' || h === 'glucose' || h === 'temp') return { tab: h, form: true };
-  return { tab: 'overview', form: false };
+  return { tab: 'calendar', form: false };
 }
 
 /** 健檢頁：看某一份報告 / 新增或修改報告；null = 列表 */
-export type LabOpen = { mode: 'detail'; id: string } | { mode: 'form'; id: string | null } | null;
+export type LabOpen = { mode: 'detail'; id: string } | { mode: 'form'; id: string | null; date?: string } | { mode: 'items' } | { mode: 'stats' } | null;
 
 export interface VitalForm {
   /** null = 新增 */
@@ -82,11 +84,13 @@ export function App() {
   const [vitalForm, setVitalForm] = useState<VitalForm | null>(() => (fromHash().form ? { rec: null, initialTime: timeForDate(initialDate) } : null));
   /** 總覽看的日期（去修改再回來時保留） */
   const [overviewDate, setOverviewDate] = useState(initialDate);
-  /** 偶爾量測畫面要先填的項目（例：BMI 不同時按「改身高」） */
+  /** 身體尺寸畫面要先填的項目（例：BMI 不同時按「改身高」） */
   const [focusItem, setFocusItem] = useState<string | null>(null);
+  const [occInitialTime, setOccInitialTime] = useState<number | null>(null);
   /** 輸入畫面存好 / 取消後回到哪裡（從總覽打開的回總覽；沒有就回那一種的列表） */
   const [formBack, setFormBack] = useState<Back | null>(null);
   const [labOpen, setLabOpen] = useState<LabOpen>(null);
+  const [settingSection, setSettingSection] = useState<HealthSettingSection>('body');
   /** 從綜合首頁點某一筆進來：資料讀好後打開它 */
   const [pendingEdit, setPendingEdit] = useState(() => parseEditHash(location.hash));
 
@@ -128,9 +132,11 @@ export function App() {
       setFormBack(back);
     },
     closeBody: () => (formBack === 'home' ? goHome() : setTab(formBack ?? 'body')),
-    occ: (item = null) => {
+    occ: (item = null, initialTime, back = null) => {
       setTab('occ');
       setFocusItem(item);
+      setOccInitialTime(initialTime ?? null);
+      setFormBack(back);
     },
     vital: (t, form = { rec: null }, back = null) => {
       setTab(t);
@@ -171,6 +177,7 @@ export function App() {
     },
     /** 健檢：報告 / 輸入畫面 → 回去（從別處打開的回原處） */
     closeLab: (to = null) => {
+      if (to && formBack === 'calendar') return setTab('calendar');
       if (to) return setLabOpen(to);
       if (formBack === 'home') return goHome();
       if (formBack) return setTab(formBack);
@@ -187,8 +194,16 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingEdit, api.snap]);
 
-  const active = UNDER[tab] ?? tab;
+  const active: MainTab =
+    tab === 'bodyForm' || tab === 'occ' || vitalForm !== null || labOpen?.mode === 'form' ? 'add'
+    : tab === 'lab' && formBack === 'more' ? 'more'
+    : tab === 'body' || tab === 'bp' || tab === 'glucose' || tab === 'temp' || tab === 'lab' || tab === 'occStats' ? 'stats'
+    : tab === 'settings' || tab === 'issues' ? 'more'
+    : tab;
   const vitalKey = vitalForm ? (vitalForm.rec?.id ?? `new-${vitalForm.tempKind ?? ''}`) : 'list';
+  const changeAddKind = () => {
+    if (confirm('目前輸入的內容不會儲存，確定要更換項目嗎？')) setTab('add');
+  };
 
   return (
     <div className="app">
@@ -200,13 +215,7 @@ export function App() {
           confirmLeave={tab === 'bodyForm' || vitalForm !== null || labOpen?.mode === 'form' || tab === 'occ' || tab === 'settings'}
         />
         <h1>健康</h1>
-        <nav className="tabs-top">
-          {TABS.map((t) => (
-            <button key={t.key} className={active === t.key ? 'active' : ''} onClick={() => setTab(t.key)}>
-              <Icon name={t.icon} size={20} /> {t.label}
-            </button>
-          ))}
-        </nav>
+        <AppTabs items={TABS} current={active} onChange={setTab} placement="top" />
         {api.status === 'ready' && (
           <button className="icon-btn" onClick={api.refresh} disabled={api.busy} title="重新整理（讀取試算表最新資料）" aria-label="重新整理">
             <span className={api.busy ? 'spin' : ''}>
@@ -239,31 +248,25 @@ export function App() {
           </div>
         ) : api.snap ? (
           <>
-            {tab === 'overview' && <OverviewView api={api} snap={api.snap} nav={nav} date={overviewDate} setDate={setOverviewDate} />}
-            {tab === 'body' && <BodyTab api={api} snap={api.snap} nav={nav} />}
-            {tab === 'bodyForm' && <BodyView key={editing?.id ?? `new-${newBodyTime ?? ''}`} api={api} snap={api.snap} editing={editing} initialTime={newBodyTime ?? undefined} nav={nav} />}
-            {tab === 'bp' && <BpView key={vitalKey} api={api} snap={api.snap} nav={nav} form={vitalForm} />}
-            {tab === 'glucose' && <GlucoseView key={vitalKey} api={api} snap={api.snap} nav={nav} form={vitalForm} />}
-            {tab === 'temp' && <TempView key={vitalKey} api={api} snap={api.snap} nav={nav} form={vitalForm} />}
-            {tab === 'lab' && <LabView key={labOpen ? `${labOpen.mode}-${labOpen.id}` : 'list'} api={api} snap={api.snap} nav={nav} open={labOpen} />}
-            {tab === 'more' && <MoreView snap={api.snap} nav={nav} />}
-            {tab === 'occ' && <OccView key={focusItem ?? ''} api={api} snap={api.snap} focusItem={focusItem} />}
-            {tab === 'settings' && <SettingsView api={api} snap={api.snap} />}
-            {tab === 'issues' && <IssuesView api={api} snap={api.snap} onDone={() => setTab('overview')} />}
+            {tab === 'add' && <AddView snap={api.snap} nav={nav} date={overviewDate} setDate={setOverviewDate} />}
+            {tab === 'calendar' && <OverviewView api={api} snap={api.snap} nav={nav} date={overviewDate} setDate={setOverviewDate} />}
+            {tab === 'stats' && <StatsMenu nav={nav} />}
+            {tab === 'body' && <StatsSubpage onBack={() => setTab('stats')}><BodyTab api={api} snap={api.snap} /></StatsSubpage>}
+            {tab === 'bodyForm' && <>{!editing && <button type="button" className="link more-back" onClick={changeAddKind}>更換項目</button>}<BodyView key={editing?.id ?? `new-${newBodyTime ?? ''}`} api={api} snap={api.snap} editing={editing} initialTime={newBodyTime ?? undefined} nav={nav} /></>}
+            {tab === 'bp' && <>{vitalForm && !vitalForm.rec && <button type="button" className="link more-back" onClick={changeAddKind}>更換項目</button>}{vitalForm ? <BpView key={vitalKey} api={api} snap={api.snap} nav={nav} form={vitalForm} /> : <StatsSubpage onBack={() => setTab('stats')}><BpView key={vitalKey} api={api} snap={api.snap} nav={nav} form={vitalForm} /></StatsSubpage>}</>}
+            {tab === 'glucose' && <>{vitalForm && !vitalForm.rec && <button type="button" className="link more-back" onClick={changeAddKind}>更換項目</button>}{vitalForm ? <GlucoseView key={vitalKey} api={api} snap={api.snap} nav={nav} form={vitalForm} /> : <StatsSubpage onBack={() => setTab('stats')}><GlucoseView key={vitalKey} api={api} snap={api.snap} nav={nav} form={vitalForm} /></StatsSubpage>}</>}
+            {tab === 'temp' && <>{vitalForm && !vitalForm.rec && <button type="button" className="link more-back" onClick={changeAddKind}>更換項目</button>}{vitalForm ? <TempView key={vitalKey} api={api} snap={api.snap} nav={nav} form={vitalForm} /> : <StatsSubpage onBack={() => setTab('stats')}><TempView key={vitalKey} api={api} snap={api.snap} nav={nav} form={vitalForm} /></StatsSubpage>}</>}
+            {tab === 'lab' && <>{labOpen?.mode === 'form' && !labOpen.id && <button type="button" className="link more-back" onClick={changeAddKind}>更換項目</button>}<LabView key={labOpen ? `${labOpen.mode}-${'id' in labOpen ? labOpen.id ?? '' : ''}` : 'list'} api={api} snap={api.snap} nav={nav} open={labOpen} /></>}
+            {tab === 'more' && <MoreView snap={api.snap} nav={nav} onSettings={(section) => { setSettingSection(section); setTab('settings'); }} />}
+            {tab === 'occ' && <><button type="button" className="link more-back" onClick={changeAddKind}>更換項目</button><OccView key={`${focusItem ?? ''}-${occInitialTime ?? ''}`} api={api} snap={api.snap} focusItem={focusItem} initialTime={occInitialTime ?? undefined} onDone={nav.closeForm} /></>}
+            {tab === 'occStats' && <StatsSubpage onBack={() => setTab('stats')}><OccView api={api} snap={api.snap} focusItem={null} mode="stats" /></StatsSubpage>}
+            {tab === 'settings' && <SettingsView api={api} snap={api.snap} section={settingSection} onBack={() => setTab('more')} />}
+            {tab === 'issues' && <IssuesView api={api} snap={api.snap} nav={nav} onDone={() => setTab('more')} />}
           </>
         ) : null}
       </main>
 
-      <nav className="tabs-bottom">
-        {TABS.map((t) => (
-          <button key={t.key} className={active === t.key ? 'active' : ''} onClick={() => setTab(t.key)}>
-            <span className="tab-icon">
-              <Icon name={t.icon} />
-            </span>
-            {t.label}
-          </button>
-        ))}
-      </nav>
+      <AppTabs items={TABS} current={active} onChange={setTab} placement="bottom" />
 
       {api.toast && (
         <div className={`toast ${api.toast.kind}`} key={api.toast.id}>
@@ -287,13 +290,17 @@ export function App() {
   );
 }
 
+function StatsSubpage({ onBack, children }: { onBack: () => void; children: ReactNode }) {
+  return <div><button type="button" className="link more-back" onClick={onBack}><Icon name="left" size={18} /> 返回健康統計</button>{children}</div>;
+}
+
 export type Nav = {
   /** back：存好 / 取消後回到哪個分頁（預設回身體） */
   edit: (m: BodyMeasurement, back?: Back | null) => void;
   newBody: (back?: Back | null, initialTime?: number) => void;
   /** 身體量測輸入畫面 → 回去 */
   closeBody: () => void;
-  occ: (item?: string | null) => void;
+  occ: (item?: string | null, initialTime?: number, back?: Back | null) => void;
   /** 打開血壓 / 血糖 / 體溫；有 form 就直接進輸入畫面 */
   vital: (t: VitalTab, form?: VitalForm, back?: Back | null) => void;
   /** 健檢頁：打開報告 / 輸入畫面 */

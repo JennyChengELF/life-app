@@ -17,8 +17,9 @@
  * 12：新增行事曆 APP（群組、行程、設定）（2026-11-20）
  * 13：新增生理期 APP、健康共用身體狀況（2026-11-20）
  * 14：身體量測增加時段分類（起床後、日間、睡前）（2026-11-21）
+ * 15：血糖增加餐別（早餐、午餐、晚餐、其他）（2026-11-22）
  */
-export const SCHEMA_VERSION = 14;
+export const SCHEMA_VERSION = 15;
 
 export type ColType = 'datetime' | 'date' | 'number' | 'text' | 'bool' | 'any';
 
@@ -198,6 +199,7 @@ export const TABLES = {
     columns: [
       { name: 'time', type: 'datetime', label: '量的時間（必填）' },
       { name: 'timing', type: 'text', label: '測量時機（空腹、飯前、飯後2小時、睡前、隨機，必填）' },
+      { name: 'meal', type: 'text', label: '餐別（早餐、午餐、晚餐、其他；只有飯前／飯後2小時使用）' },
       { name: 'mgdl', type: 'number', label: '血糖 mg/dL（必填）' },
       { name: 'note', type: 'text', label: '備註' },
       { name: 'date', type: 'date', label: '日期（APP 依 time 自動填）' },

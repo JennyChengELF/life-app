@@ -4,6 +4,8 @@ import { BODY_FIELDS, bodyField, formatRange, HEIGHT_CODE, rangesOverlap, TEMP_K
 import type { HealthApi } from '../useHealth';
 import { fieldLabel, hasTwin } from '../format';
 import { Choice } from './vital';
+import { TimeField } from '@life/ui/time-field';
+import { Icon } from '@life/ui/icon';
 
 const toMin = (hhmm: string) => {
   const [h, m] = hhmm.split(':').map(Number);
@@ -21,18 +23,18 @@ function BpPeriodsCard({ api, snap }: { api: HealthApi; snap: HealthSnapshot }) 
   const valid = !!morning && !!evening && morning.start !== morning.end && evening.start !== evening.end;
   const overlap = valid && rangesOverlap(morning!, evening!);
   const changed = valid && (formatRange(morning!) !== formatRange(p.morning) || formatRange(evening!) !== formatRange(p.evening));
-  const time = (k: keyof typeof v) => <input type="time" value={v[k]} onChange={(e) => setV((s) => ({ ...s, [k]: e.target.value }))} />;
+  const time = (k: keyof typeof v, label: string) => <TimeField label={label} showNow={false} value={v[k]} onChange={(value) => setV((s) => ({ ...s, [k]: value }))} />;
   return (
     <section className="card">
       <h2>血壓 722 的時段</h2>
       <p className="muted small">在這兩個時段量的血壓才算進 722。晚上的時段可以跨過半夜（例：18:00–02:00，半夜量的算前一天晚上）。</p>
       <div className="row wrap">
         <span>早上</span>
-        {time('ms')}–{time('me')}
+        {time('ms', '開始')}–{time('me', '結束')}
       </div>
       <div className="row wrap" style={{ marginTop: 8 }}>
         <span>晚上</span>
-        {time('es')}–{time('ee')}
+        {time('es', '開始')}–{time('ee', '結束')}
       </div>
       {overlap && <p className="error-text small">早上和晚上的時段重疊了</p>}
       <div className="editor-actions">
@@ -67,14 +69,17 @@ function TempSiteCard({ api, snap }: { api: HealthApi; snap: HealthSnapshot }) {
   );
 }
 
-export function SettingsView({ api, snap }: { api: HealthApi; snap: HealthSnapshot }) {
+export type HealthSettingSection = 'body' | 'bp' | 'temp' | 'occ' | 'data';
+
+export function SettingsView({ api, snap, section, onBack }: { api: HealthApi; snap: HealthSnapshot; section: HealthSettingSection; onBack: () => void }) {
   return (
     <div className="settings">
-      <FieldsCard api={api} snap={snap} />
-      <BpPeriodsCard api={api} snap={snap} />
-      <TempSiteCard api={api} snap={snap} />
-      <ItemsCard api={api} snap={snap} />
-      <DataCard api={api} />
+      <button type="button" className="link more-back" onClick={onBack}><Icon name="left" size={18} /> 返回更多</button>
+      {section === 'body' && <FieldsCard api={api} snap={snap} />}
+      {section === 'bp' && <BpPeriodsCard api={api} snap={snap} />}
+      {section === 'temp' && <TempSiteCard api={api} snap={snap} />}
+      {section === 'occ' && <ItemsCard api={api} snap={snap} />}
+      {section === 'data' && <DataCard api={api} />}
       <p className="muted small center-text">數值僅供記錄參考，不能取代醫療建議。</p>
     </div>
   );
@@ -152,7 +157,7 @@ function FieldsCard({ api, snap }: { api: HealthApi; snap: HealthSnapshot }) {
   );
 }
 
-/** 偶爾量測的項目清單 */
+/** 身體尺寸的項目清單 */
 function ItemsCard({ api, snap }: { api: HealthApi; snap: HealthSnapshot }) {
   const [name, setName] = useState('');
   const [unit, setUnit] = useState('cm');
@@ -166,7 +171,7 @@ function ItemsCard({ api, snap }: { api: HealthApi; snap: HealthSnapshot }) {
 
   return (
     <section className="card">
-      <h2>偶爾量測的項目</h2>
+      <h2>身體尺寸項目</h2>
       <p className="muted small">身高、圍度等久久量一次的項目。可以自己新增（例：頸圍）。</p>
       <ul className="order-list">
         {snap.items.map((it, i) =>
@@ -254,7 +259,7 @@ function DataCard({ api }: { api: HealthApi }) {
       ) : (
         <>
           <p className="muted small">
-            資料存在你的 Google 試算表「生活APP-健康」。可以直接在試算表最下方新增：身體量測只要填 time 和 kg；血壓填 time、systolic、diastolic；血糖填 time、timing、mgdl；體溫填 time、kind、celsius；偶爾量測填 time、item（項目名稱）、value。APP 打開或重新整理時會自動補齊。
+            資料存在你的 Google 試算表「生活APP-健康」。可以直接在試算表最下方新增：身體量測只要填 time 和 kg；血壓填 time、systolic、diastolic；血糖填 time、timing、meal、mgdl；體溫填 time、kind、celsius；身體尺寸填 time、item（項目名稱）、value。APP 打開或重新整理時會自動補齊。
           </p>
           {health && (
             <a className="btn" href={health} target="_blank" rel="noreferrer">

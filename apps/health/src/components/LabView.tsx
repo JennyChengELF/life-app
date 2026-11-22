@@ -13,21 +13,23 @@ const showDate = (d: string) => d.replace(/-/g, '/');
 const showResult = (r: LabResult, item: LabItem | null) => (r.value != null ? `${r.value}${item?.unit ? ` ${item.unit}` : ''}` : (r.text ?? ''));
 
 export function LabView({ api, snap, nav, open }: { api: HealthApi; snap: HealthSnapshot; nav: Nav; open: LabOpen }) {
+  if (open?.mode === 'items') return <div><button type="button" className="link more-back" onClick={() => nav.go('more')}>返回更多</button><LabList api={api} snap={snap} nav={nav} initialView="items" /></div>;
+  if (open?.mode === 'stats') return <div><button type="button" className="link more-back" onClick={() => nav.go('stats')}>返回健康統計</button><ItemTrend snap={snap} nav={nav} /></div>;
   if (open?.mode === 'detail') {
     const report = snap.labReports.find((r) => r.id === open.id);
     if (report) return <ReportDetail api={api} snap={snap} nav={nav} report={report} />;
   }
   if (open?.mode === 'form') {
     const report = open.id ? (snap.labReports.find((r) => r.id === open.id) ?? null) : null;
-    return <ReportForm api={api} snap={snap} nav={nav} report={report} />;
+    return <ReportForm api={api} snap={snap} nav={nav} report={report} initialDate={open.date} />;
   }
   return <LabList api={api} snap={snap} nav={nav} />;
 }
 
 // ───────────── 列表 ─────────────
 
-function LabList({ api, snap, nav }: { api: HealthApi; snap: HealthSnapshot; nav: Nav }) {
-  const [view, setView] = useState<'reports' | 'trend' | 'items'>('reports');
+function LabList({ api, snap, nav, initialView = 'reports' }: { api: HealthApi; snap: HealthSnapshot; nav: Nav; initialView?: 'reports' | 'trend' | 'items' }) {
+  const [view, setView] = useState<'reports' | 'trend' | 'items'>(initialView);
   return (
     <div className="vital">
       <button className="primary big full" onClick={() => nav.lab({ mode: 'form', id: null })}>
@@ -185,9 +187,9 @@ function templateRows(snap: HealthSnapshot, kind: LabKind): Row[] {
   return snap.labItems.map((i) => newRow(i.name));
 }
 
-function ReportForm({ api, snap, nav, report }: { api: HealthApi; snap: HealthSnapshot; nav: Nav; report: LabReport | null }) {
+function ReportForm({ api, snap, nav, report, initialDate }: { api: HealthApi; snap: HealthSnapshot; nav: Nav; report: LabReport | null; initialDate?: string }) {
   const existing = report ? resultsOf(snap, report.id) : [];
-  const [date, setDate] = useState(report?.date ?? todayKey());
+  const [date, setDate] = useState(report?.date ?? initialDate ?? todayKey());
   const [kind, setKindRaw] = useState<LabKind>(report?.kind ?? '健檢');
   const [place, setPlace] = useState(report?.place ?? '');
   const [note, setNote] = useState(report?.note ?? '');
@@ -352,9 +354,18 @@ function ItemTrend({ snap, nav }: { snap: HealthSnapshot; nav: Nav }) {
   const withData = snap.labItems.filter((i) => snap.labResults.some((r) => r.item === i.name));
   const count = (name: string) => snap.labResults.filter((r) => r.item === name).length;
   const [name, setName] = useState(() => [...withData].sort((a, b) => count(b.name) - count(a.name))[0]?.name ?? '');
+  const [query, setQuery] = useState('');
+  const [attentionOnly, setAttentionOnly] = useState(false);
   if (!withData.length) return <p className="muted center-text">還沒有檢驗結果</p>;
-  const item = itemOf(snap, name);
-  const list = snap.labResults.filter((r) => r.item === name).sort((a, b) => dateOf(a).localeCompare(dateOf(b)));
+  const choices = withData.filter((entry) => !query.trim() || entry.name.includes(query.trim()));
+  const selectedName = withData.some((entry) => entry.name === name) ? name : choices[0]?.name ?? withData[0].name;
+  const item = itemOf(snap, selectedName);
+  const list = snap.labResults.filter((r) => r.item === selectedName).sort((a, b) => dateOf(a).localeCompare(dateOf(b)));
+  const shown = attentionOnly ? list.filter((result) => {
+    const level = judgeLab(result, item)?.level;
+    return level === 'warn' || level === 'bad';
+  }) : list;
+  const latest = list[list.length - 1];
   const pts = list.filter((r) => r.value != null).map((r) => ({ time: startOfDay(dateOf(r)) + 12 * 3600e3, value: r.value! }));
   const refs = [
     ...(item?.refLow != null ? [{ value: item.refLow, label: `下限 ${item.refLow}` }] : []),
@@ -362,21 +373,24 @@ function ItemTrend({ snap, nav }: { snap: HealthSnapshot; nav: Nav }) {
   ];
   return (
     <>
+      <input className="note-input" type="search" placeholder="搜尋檢驗項目" value={query} onChange={(event) => setQuery(event.target.value)} />
       <div className="chips">
-        {withData.map((i) => (
-          <button key={i.id} className={i.name === name ? 'active' : ''} onClick={() => setName(i.name)}>
+        {choices.map((i) => (
+          <button key={i.id} className={i.name === selectedName ? 'active' : ''} onClick={() => setName(i.name)}>
             {i.name}
           </button>
         ))}
       </div>
+      {latest && <section className="card"><h2>{selectedName}最近結果</h2><div className="big-num">{showResult(latest, item)} <Badge judge={judgeLab(latest, item)} /></div><p className="muted small">{showDate(dateOf(latest))}・參考範圍 {item?.type === '文字' ? '依文字判斷' : rangeText(rangeOf(latest, item).low, rangeOf(latest, item).high) || '未設定'}</p></section>}
       {item?.type === '數字' && (
         <section className="card">
-          <h2>{name}</h2>
+          <h2>{selectedName}</h2>
           <TrendChart points={pts} unit={item.unit} format={(v) => String(Number(v.toFixed(2)))} refs={refs} />
           <p className="muted small">虛線是項目清單的預設範圍；每次報告印的範圍可能不同，以下表為準。</p>
         </section>
       )}
       <section className="card">
+        <div className="chart-head"><h2>歷次結果</h2><div className="seg"><button className={!attentionOnly ? 'active' : ''} onClick={() => setAttentionOnly(false)}>全部</button><button className={attentionOnly ? 'active' : ''} onClick={() => setAttentionOnly(true)}>只看需注意</button></div></div>
         <div className="table-wrap">
           <table className="data-table">
             <thead>
@@ -388,7 +402,7 @@ function ItemTrend({ snap, nav }: { snap: HealthSnapshot; nav: Nav }) {
               </tr>
             </thead>
             <tbody>
-              {[...list].reverse().map((r) => {
+              {[...shown].reverse().map((r) => {
                 const range = rangeOf(r, item);
                 return (
                   <tr key={r.id} onClick={() => nav.lab({ mode: 'detail', id: r.reportId })} title="看這份報告">

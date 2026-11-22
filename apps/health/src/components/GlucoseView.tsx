@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import type { BloodGlucose, GlucoseTiming, HealthSnapshot } from '@life/db';
-import { GLUCOSE_TIMINGS, glucoseAttentionReasons, guessTiming, HBA1C_CODE, judgeGlucose, judgeLab } from '@life/db';
+import type { BloodGlucose, GlucoseMeal, GlucoseTiming, HealthSnapshot } from '@life/db';
+import { GLUCOSE_MEALS, GLUCOSE_TIMINGS, glucoseAttentionReasons, guessTiming, HBA1C_CODE, judgeGlucose, judgeLab } from '@life/db';
 import type { HealthApi } from '../useHealth';
 import type { Nav, VitalForm } from '../App';
 import { fmtDateTime, parseNum } from '../format';
@@ -14,13 +14,14 @@ export function GlucoseView({ api, snap, nav, form }: { api: HealthApi; snap: He
     const count = (t: GlucoseTiming) => snap.glucose.filter((x) => x.timing === t).length;
     return [...used].sort((a, b) => count(b) - count(a))[0] ?? '全部';
   });
+  const [mealFilter, setMealFilter] = useState<GlucoseMeal | '全部' | '未指定'>('全部');
+  const [selected, setSelected] = useState<BloodGlucose | null>(null);
   if (form) return <GlucoseForm api={api} nav={nav} rec={form.rec as BloodGlucose | null} initialTime={form.initialTime} />;
-  const list = timing === '全部' ? snap.glucose : snap.glucose.filter((x) => x.timing === timing);
+  if (selected) return <section className="card"><button type="button" className="link" onClick={() => setSelected(null)}>返回血糖統計</button><h2>血糖詳細內容</h2><p className="big-num">{selected.mgdl} <small>mg/dL</small></p><p>{selected.timing}{(selected.timing === '飯前' || selected.timing === '飯後2小時') && `・${selected.meal ?? '未指定'}`}</p><p className="muted">{fmtDateTime(selected.time)}</p><AttentionReasons reasons={glucoseAttentionReasons(selected.timing, selected.mgdl)} />{selected.note && <p>備註：{selected.note}</p>}<button type="button" className="primary" onClick={() => nav.vital('glucose', { rec: selected }, 'stats')}>編輯</button></section>;
+  const timingList = timing === '全部' ? snap.glucose : snap.glucose.filter((x) => x.timing === timing);
+  const list = mealFilter === '全部' || (timing !== '飯前' && timing !== '飯後2小時') ? timingList : timingList.filter((item) => mealFilter === '未指定' ? item.meal == null : item.meal === mealFilter);
   return (
     <div className="vital">
-      <button className="primary big full" onClick={() => nav.vital('glucose')}>
-        🍬 記一筆血糖
-      </button>
       <Hba1cCard snap={snap} nav={nav} />
       {snap.glucose.length === 0 ? (
         <p className="muted center-text">還沒有血糖紀錄</p>
@@ -35,8 +36,9 @@ export function GlucoseView({ api, snap, nav, form }: { api: HealthApi; snap: He
               ))}
             </div>
           )}
+          {(timing === '飯前' || timing === '飯後2小時') && <div className="chips">{(['全部', ...GLUCOSE_MEALS, '未指定'] as const).map((meal) => <button key={meal} className={mealFilter === meal ? 'active' : ''} onClick={() => setMealFilter(meal)}>{meal === '全部' ? '全部餐別' : meal}</button>)}</div>}
           <GlucoseTrend list={list} mixed={timing === '全部' && used.length > 1} />
-          <GlucoseHistory list={list} nav={nav} />
+          <GlucoseHistory list={list} onPick={setSelected} />
         </>
       )}
     </div>
@@ -61,7 +63,7 @@ function GlucoseTrend({ list, mixed }: { list: BloodGlucose[]; mixed: boolean })
   );
 }
 
-function GlucoseHistory({ list, nav }: { list: BloodGlucose[]; nav: Nav }) {
+function GlucoseHistory({ list, onPick }: { list: BloodGlucose[]; onPick: (record: BloodGlucose) => void }) {
   const [limit, setLimit] = useState(30);
   const [attentionOnly, setAttentionOnly] = useState(false);
   const allRows = [...list].reverse();
@@ -89,12 +91,12 @@ function GlucoseHistory({ list, nav }: { list: BloodGlucose[]; nav: Nav }) {
           </thead>
           <tbody>
             {rows.slice(0, limit).map((x) => (
-              <tr key={x.id} onClick={() => nav.vital('glucose', { rec: x })} title="點一下修改">
+              <tr key={x.id} onClick={() => onPick(x)} title="點一下看詳細內容">
                 <td className="nowrap">
                   {fmtDateTime(x.time)}
                   {x.note && ' 📝'}
                 </td>
-                <td className="num">{x.timing}</td>
+                <td className="num">{x.timing}{(x.timing === '飯前' || x.timing === '飯後2小時') && <small className="muted"> · {x.meal ?? '未指定'}</small>}</td>
                 <td className="num">{x.mgdl}</td>
                 <td className="num">
                   <Badge judge={judgeGlucose(x.timing, x.mgdl)} />
@@ -121,17 +123,25 @@ const STANDARD: Record<GlucoseTiming, string> = {
   隨機: '200 以上高',
 };
 
+const guessMeal = (time: number): GlucoseMeal => {
+  const hour = new Date(time).getHours();
+  return hour < 11 ? '早餐' : hour < 16 ? '午餐' : '晚餐';
+};
+
 function GlucoseForm({ api, nav, rec, initialTime }: { api: HealthApi; nav: Nav; rec: BloodGlucose | null; initialTime?: number }) {
   const [time, setTimeRaw] = useTimeInput(rec?.time ?? initialTime);
   const [note, setNote] = useState(rec?.note ?? '');
   const [mgdl, setMgdl] = useState(rec ? String(rec.mgdl) : '');
   const [timing, setTiming] = useState<GlucoseTiming>(rec?.timing ?? guessTiming(Date.now()));
+  const [meal, setMeal] = useState<GlucoseMeal | null>(rec?.meal ?? guessMeal(rec?.time ?? initialTime ?? Date.now()));
+  const [mealPicked, setMealPicked] = useState(!!rec);
   /** 使用者自己選過時機後，改時間就不再自動猜 */
   const [picked, setPicked] = useState(!!rec);
   const setTime = (t: string) => {
     setTimeRaw(t);
     const ms = new Date(t).getTime();
     if (!picked && Number.isFinite(ms)) setTiming(guessTiming(ms));
+    if (!mealPicked && Number.isFinite(ms)) setMeal(guessMeal(ms));
   };
   const v = parseNum(mgdl);
   const judge = v != null && v > 0 ? judgeGlucose(timing, v) : null;
@@ -149,9 +159,9 @@ function GlucoseForm({ api, nav, rec, initialTime }: { api: HealthApi; nav: Nav;
         setNote={setNote}
         onClose={nav.closeForm}
         onSave={async (ms, n) => {
-          const input = { timing, mgdl: parseNum(mgdl) ?? NaN };
+          const input = { timing, meal, mgdl: parseNum(mgdl) ?? NaN };
           const ok = await api.run((st) => (rec ? st.updateGlucose(rec, input, ms, n) : st.addGlucose(input, ms, n)).then(() => true));
-          if (ok) api.showToast({ kind: 'info', text: rec ? '已修改' : `已記錄血糖 ${input.mgdl}（${timing}）` });
+          if (ok) api.showToast({ kind: 'info', text: rec ? '已修改' : `已記錄血糖 ${input.mgdl}（${timing}${meal ? `・${meal}` : ''}）` });
           return !!ok;
         }}
         onDelete={async () => !!(await api.run((st) => st.deleteVital('healthBloodGlucose', rec!).then(() => true)))}
@@ -168,6 +178,13 @@ function GlucoseForm({ api, nav, rec, initialTime }: { api: HealthApi; nav: Nav;
           />
           {!picked && <span className="hint">依時間自動選的，不對可以改</span>}
         </div>
+        {(timing === '飯前' || timing === '飯後2小時') && (
+          <div className="field">
+            哪一餐（可不選）
+            <Choice options={GLUCOSE_MEALS} value={meal} onChange={(value) => { setMeal(value); setMealPicked(true); }} />
+            {meal && <button type="button" className="link" onClick={() => { setMeal(null); setMealPicked(true); }}>清除餐別</button>}
+          </div>
+        )}
         <NumField label="血糖" unit="mg/dL" value={mgdl} onChange={setMgdl} autoFocus={!rec} hint={judge && <Badge judge={judge} />} />
         <AttentionReasons reasons={reasons} />
       </VitalFormShell>
