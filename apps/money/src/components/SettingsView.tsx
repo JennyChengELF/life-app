@@ -3,6 +3,7 @@ import type { Account, AccountType, MoneySnapshot } from '@life/db';
 import { ACCOUNT_TYPES, ORG_KINDS } from '@life/db';
 import type { MoneyApi } from '../useMoney';
 import { amountText, parseAmount } from './common';
+import { Icon } from '@life/ui/icon';
 
 export type AccountDraft = Omit<Account, 'rowNumber' | 'id' | 'sort'>;
 const blankAccount = (): AccountDraft => ({
@@ -172,22 +173,15 @@ function MoneySettingsCard({ api, snap }: { api: MoneyApi; snap: MoneySnapshot }
   );
 }
 
-export function SettingsView({ api, snap, openBudgets }: { api: MoneyApi; snap: MoneySnapshot; openBudgets: () => void }) {
+export type MoneySettingSection = 'people' | 'stores' | 'settings' | 'data';
+export function SettingsView({ api, snap, section, onBack }: { api: MoneyApi; snap: MoneySnapshot; section: MoneySettingSection; onBack: () => void }) {
   const url = api.fileUrl();
   return (
     <div className="settings">
-      <p className="hint">帳戶在「帳戶」、分類在「更多 → 分類」直接修改。</p>
-      <section className="card">
-        <h2>預算</h2>
-        <p className="muted small">{snap.budgets.length} 個預算</p>
-        <button className="primary" onClick={openBudgets}>
-          預算設定 ›
-        </button>
-      </section>
+      <button type="button" className="link more-back" onClick={onBack}><Icon name="left" size={18} /> 返回更多</button>
+      {section === 'settings' && <MoneySettingsCard api={api} snap={snap} />}
 
-      <MoneySettingsCard api={api} snap={snap} />
-
-      <section className="card">
+      {section === 'people' && <section className="card">
         <h2>人物</h2>
         <p className="hint">代墊、借錢的對象。存在「生活APP-綜合」，之後其他 APP 也會用到。</p>
         {snap.people
@@ -217,9 +211,9 @@ export function SettingsView({ api, snap, openBudgets }: { api: MoneyApi; snap: 
         >
           ＋ 新增人物
         </button>
-      </section>
+      </section>}
 
-      {snap.orgs.length > 0 && (
+      {section === 'stores' && snap.orgs.length > 0 && (
         <section className="card">
           <h2>店家 / 機構</h2>
           <p className="hint">記帳的店家 / 對象、帳戶的銀行都在這裡（存在「生活APP-綜合」）。記帳時輸入新的店家會自動加進來。</p>
@@ -255,7 +249,12 @@ export function SettingsView({ api, snap, openBudgets }: { api: MoneyApi; snap: 
       </section>
       )}
 
-      <section className="card">
+      {section === 'stores' && snap.orgs.length === 0 && <section className="card">
+        <h2>店家 / 機構</h2>
+        <p className="muted">目前還沒有店家或機構。記帳時輸入新的店家後，會自動出現在這裡。</p>
+      </section>}
+
+      {section === 'data' && <section className="card">
         <h2>資料</h2>
         {api.mode === 'local' ? (
           <p className="muted">本機測試模式：資料只存在這個瀏覽器。設定好 Google 後會改存到你的 Google 試算表。</p>
@@ -277,7 +276,7 @@ export function SettingsView({ api, snap, openBudgets }: { api: MoneyApi; snap: 
             </div>
           </>
         )}
-      </section>
+      </section>}
     </div>
   );
 }

@@ -156,13 +156,17 @@ button.day-head { width: 100%; background: none; border: 0; border-bottom: 1px s
 
 /* 年統計：每月 */
 .months { list-style: none; margin: 0 0 6px; padding: 0; }
-.month-row { width: 100%; display: grid; grid-template-columns: 3em 1fr 5.5em 5.5em; gap: 8px; align-items: center; border: 0; background: none; padding: 4px 2px; border-radius: 6px; font-size: 0.88rem; color: var(--text); }
+.month-row { width: 100%; display: grid; grid-template-columns: 3em 1fr 5.5em 5.5em 5.5em; gap: 8px; align-items: center; border: 0; background: none; padding: 4px 2px; border-radius: 6px; font-size: 0.88rem; color: var(--text); }
 .month-row:hover { background: var(--bg); }
 .month-row .num { text-align: right; }
 .month-bars { display: flex; flex-direction: column; gap: 2px; }
 .month-bars i { display: block; height: 6px; min-width: 1px; border-radius: 0 3px 3px 0; }
 .month-bars i.out { background: var(--out); }
 .month-bars i.in { background: var(--in); }
+.daily-bars { list-style: none; margin: 0 0 6px; padding: 0; }
+.daily-bars li { display: grid; grid-template-columns: 3em 1fr minmax(8em, auto); gap: 8px; align-items: center; padding: 4px 2px; font-size: .85rem; }
+.daily-bars .num { text-align: right; }
+@media (max-width: 560px) { .month-row { grid-template-columns: 2.6em 1fr 4.5em 4.5em 4.5em; gap: 4px; font-size: .76rem; } }
 .budget-select { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--muted); }
 .budget-select select { flex: 1; padding: 6px 8px; }
 .budget-select.missing select { border-color: var(--warn); color: var(--warn); }
@@ -308,6 +312,19 @@ button.bt-row:hover, .bt-row.open { background: var(--bg); }
 .more-list button + button { border-top: 1px solid var(--line); }
 .more-list .grow { flex: 1; text-align: left; }
 .more-list .icon:last-child { color: var(--muted); }
+.more-list h2 { padding: 10px 16px 4px; margin: 0; font-size: .88rem; color: var(--muted); }
+.more-label { flex: 1; display: flex; align-items: center; gap: 12px; text-align: left; }
+.more-label span { display: flex; flex-direction: column; gap: 2px; }
+.more-label small { color: var(--muted); font-weight: 400; }
+.money-entry-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.money-entry-grid button { min-height: 112px; padding: 14px; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; text-align: left; background: var(--card); }
+.money-entry-grid button .icon { color: var(--accent); }
+.money-entry-grid button small { color: var(--muted); }
+.entry-when { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(190px, 1fr); gap: 12px; align-items: end; }
+.entry-when .field { display: flex; flex-direction: column; gap: 7px; }
+.entry-when strong { color: var(--text); font-size: 1rem; }
+.money-calendar > h2 { margin-top: 16px; }
+@media (max-width: 480px) { .entry-when { grid-template-columns: 1fr; } }
 
 /* 記一筆 */
 .editor { border: 1px solid var(--line); box-shadow: var(--shadow); padding: 14px 16px; }

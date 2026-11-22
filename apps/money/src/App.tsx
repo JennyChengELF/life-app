@@ -2,11 +2,10 @@ import { useEffect, useState } from 'react';
 import type { EntryForm, Txn } from '@life/db';
 import { canCopyTxn, copyTxnForm, emptyForm, parseEditHash, startOfDay, stocktakeStatus, todayKey, txnMissingCategory } from '@life/db';
 import { useMoney } from './useMoney';
-import { LedgerView } from './components/LedgerView';
 import { EntryEditor } from './components/EntryEditor';
 import { StatsView } from './components/StatsView';
 import { AccountsView } from './components/AccountsView';
-import { SettingsView } from './components/SettingsView';
+import { SettingsView, type MoneySettingSection } from './components/SettingsView';
 import { IssuesView } from './components/IssuesView';
 import { CategoriesView } from './components/CategoriesView';
 import { BudgetsView } from './components/BudgetsView';
@@ -14,25 +13,28 @@ import { BudgetsAdmin } from './components/BudgetsAdmin';
 import { AccountDetail } from './components/AccountDetail';
 import { ReconcileView } from './components/ReconcileView';
 import { StocktakeView } from './components/Stocktake';
-import { Icon, type IconName } from '@life/ui/icon';
+import { Icon } from '@life/ui/icon';
 import { AppSwitcher } from '@life/ui/app-switcher';
+import { AppTabs, type AppTabItem } from '@life/ui/app-tabs';
+import { AddMenu } from './components/AddMenu';
+import { CalendarView } from './components/CalendarView';
+import { MoreMenu, type MoreKey } from './components/MoreMenu';
 
 /** 綜合首頁：上線時在上一層路徑；開發時是另一個 port */
 const HOME_URL = import.meta.env.DEV ? `http://${location.hostname}:5172/` : '../';
 
-export type Tab = 'ledger' | 'stats' | 'budgets' | 'accounts' | 'more' | 'settings' | 'categories' | 'budgetsAdmin' | 'issues';
+type MainTab = 'add' | 'calendar' | 'stats' | 'more';
+export type Tab = MainTab | 'budgets' | 'accounts' | 'settings' | 'categories' | 'budgetsAdmin' | 'issues';
 
-/** 2026-11-19 使用者決定：「分類」「設定」合成「更多」，下方分頁剩 5 個 */
-const TABS: { key: Tab; icon: IconName; label: string }[] = [
-  { key: 'ledger', icon: 'book', label: '記帳' },
+const TABS: AppTabItem<MainTab>[] = [
+  { key: 'add', icon: 'plus', label: '新增' },
+  { key: 'calendar', icon: 'calendar', label: '日曆' },
   { key: 'stats', icon: 'chart', label: '統計' },
-  { key: 'budgets', icon: 'wallet', label: '預算' },
-  { key: 'accounts', icon: 'bank', label: '帳戶' },
   { key: 'more', icon: 'more', label: '更多' },
 ];
 
 /** 分頁按鈕亮哪一個（子頁面算在它的分頁底下） */
-const tabOf = (t: Tab): Tab => (t === 'budgetsAdmin' ? 'budgets' : t === 'categories' || t === 'settings' ? 'more' : t);
+const tabOf = (t: Tab): MainTab => t === 'add' || t === 'calendar' || t === 'stats' || t === 'more' ? t : 'more';
 
 function requestedDate() {
   const value = new URLSearchParams(location.search).get('date');
@@ -61,10 +63,10 @@ export type AccPage = { view: 'detail'; account: string } | { view: 'reconcile';
 
 export function App() {
   const api = useMoney();
-  const [tab, setTabState] = useState<Tab>('ledger');
+  const [tab, setTabState] = useState<Tab>('calendar');
   const [date, setDate] = useState(requestedDate);
-  const [view, setView] = useState<'day' | 'month'>('day');
   const [editing, setEditing] = useState<Editing | null>(null);
+  const [settingSection, setSettingSection] = useState<MoneySettingSection>('settings');
   const [accPage, setAccPageState] = useState<AccPage>(null);
   const setAccPage = (p: AccPage) => {
     setAccPageState(p);
@@ -79,13 +81,20 @@ export function App() {
   const [fromHome, setFromHome] = useState(false);
 
   const setTab = (t: Tab) => {
+    setFromHome(false);
     setTabState(t);
     if (t === 'accounts') setAccPageState(null);
     window.scrollTo(0, 0);
   };
+  /** 2026-11-22 使用者決定：新增表單尚未儲存時，切換分頁前要先提醒。 */
+  const changeMainTab = (t: MainTab) => {
+    if (editing && t !== 'add' && !window.confirm('這筆資料還沒儲存，確定要離開嗎？')) return;
+    if (editing && t !== 'add') setEditing(null);
+    setTab(t);
+  };
   const edit = (e: Editing) => {
     setEditing(e);
-    setTabState('ledger');
+    setTabState('add');
     window.scrollTo(0, 0);
   };
 
@@ -113,6 +122,13 @@ export function App() {
       setTabState(back.tab);
       window.scrollTo(0, 0);
     } else if (fromHome) location.href = HOME_URL + location.search;
+    else setTabState('calendar');
+  };
+
+  const openMore = (key: MoreKey) => {
+    if (key === 'budgets' || key === 'accounts' || key === 'categories' || key === 'issues') return setTab(key);
+    setSettingSection(key);
+    setTab('settings');
   };
 
   return (
@@ -120,13 +136,7 @@ export function App() {
       <header className="topbar">
         <AppSwitcher current="money" homeUrl={HOME_URL} date={date} confirmLeave={editing !== null || tab === 'settings' || tab === 'budgetsAdmin'} />
         <h1>記帳</h1>
-        <nav className="tabs-top">
-          {TABS.map((t) => (
-            <button key={t.key} className={tabOf(tab) === t.key ? 'active' : ''} onClick={() => setTab(t.key)}>
-              <Icon name={t.icon} size={20} /> {t.label}
-            </button>
-          ))}
-        </nav>
+        <AppTabs items={TABS} current={tabOf(tab)} onChange={changeMainTab} placement="top" />
         {api.status === 'ready' && (
           <button className="icon-btn" onClick={api.refresh} disabled={api.busy} title="重新整理（讀取試算表最新資料）" aria-label="重新整理">
             <span className={api.busy ? 'spin' : ''}>
@@ -159,7 +169,7 @@ export function App() {
           </div>
         ) : api.snap ? (
           <>
-            {tab === 'ledger' && !editing && stocktakeStatus(api.snap, todayKey())?.pending.length ? (
+            {tab === 'calendar' && stocktakeStatus(api.snap, todayKey())?.pending.length ? (
               <div className="messages">
                 <button className="msg warn" onClick={() => (setTabState('accounts'), setAccPage({ view: 'stocktake' }))}>
                   🧮 月底盤點：還有 {stocktakeStatus(api.snap, todayKey())!.pending.length} 個帳戶沒盤點，點這裡
@@ -167,7 +177,7 @@ export function App() {
               </div>
             ) : null}
             {/* 2026-11-19：整批補齊、試算表輸入時可以先不選分類 → 提醒回來補，點一下打開最早的那一筆 */}
-            {tab === 'ledger' && !editing && api.snap.txns.some(txnMissingCategory) && (
+            {tab === 'calendar' && api.snap.txns.some(txnMissingCategory) && (
               <div className="messages">
                 <button className="msg warn" onClick={() => edit({ form: emptyForm(), txn: api.snap!.txns.filter(txnMissingCategory).sort((a, b) => a.time - b.time)[0] })}>
                   ⚠️ 有 {api.snap.txns.filter(txnMissingCategory).length} 筆還沒選分類，點這裡補
@@ -181,49 +191,35 @@ export function App() {
                 </button>
               </div>
             )}
-            {tab === 'ledger' && (
-              <>
-                {editing && (
-                  <EntryEditor
-                    key={editing.txn?.id ?? `new-${editing.form.mode}-${editing.form.person ?? ''}`}
-                    api={api}
-                    snap={api.snap}
-                    editing={editing}
-                    onClose={closeEditor}
-                    onCopy={editing.txn && canCopyTxn(editing.txn) ? () => {
-                      edit({ form: copyTxnForm(editing.txn!, timeForDate(date)), copied: true });
-                      api.showToast({ kind: 'info', text: '已複製成新交易，確認或修改後再儲存' });
-                    } : undefined}
-                  />
-                )}
-                <LedgerView snap={api.snap} date={date} setDate={setDate} view={view} setView={setView} onEdit={edit} editing={!!editing} />
-              </>
-            )}
+            {tab === 'add' && (editing ? <><button type="button" className="link more-back" onClick={() => {
+              if (window.confirm('這筆資料還沒儲存，確定要更換記帳項目嗎？')) setEditing(null);
+            }}><Icon name="left" size={18} /> 更換項目</button><EntryEditor
+              key={editing.txn?.id ?? `new-${editing.form.mode}-${editing.form.person ?? ''}`}
+              api={api}
+              snap={api.snap}
+              editing={editing}
+              onClose={closeEditor}
+              hideModeSwitch
+              onCopy={editing.txn && canCopyTxn(editing.txn) ? () => {
+                edit({ form: copyTxnForm(editing.txn!, timeForDate(date)), copied: true });
+                api.showToast({ kind: 'info', text: '已複製成新交易，確認或修改後再儲存' });
+              } : undefined}
+            /></> : <AddMenu date={date} setDate={setDate} open={(mode) => edit({ form: emptyForm(mode, timeForDate(date)) })} />)}
+            {tab === 'calendar' && <CalendarView snap={api.snap} date={date} setDate={setDate} onEdit={(value) => edit(value)} onAdd={() => setTab('add')} />}
             {tab === 'stats' && <StatsView snap={api.snap} initialMonth={date.slice(0, 7)} />}
-            {tab === 'accounts' && <AccountsTab api={api} snap={api.snap} page={accPage} setPage={setAccPage} onEdit={edit} />}
+            {tab === 'accounts' && <AccountsTab api={api} snap={api.snap} page={accPage} setPage={setAccPage} onEdit={edit} onBack={() => setTab('more')} />}
             {tab === 'budgets' && (
-              <BudgetsView api={api} snap={api.snap} onEdit={edit} goAccounts={() => setTab('accounts')} goAdmin={() => setTab('budgetsAdmin')} />
+              <><MoreBack onClick={() => setTab('more')} /><BudgetsView api={api} snap={api.snap} onEdit={edit} goAccounts={() => setTab('accounts')} goAdmin={() => setTab('budgetsAdmin')} /></>
             )}
             {tab === 'budgetsAdmin' && <BudgetsAdmin api={api} snap={api.snap} onBack={() => setTab('budgets')} />}
-            {tab === 'settings' && (
-              <SettingsView api={api} snap={api.snap} openBudgets={() => setTab('budgetsAdmin')} />
-            )}
-            {tab === 'categories' && <CategoriesView api={api} snap={api.snap} />}
-            {tab === 'more' && (
-              <section className="card more-list">
-                <button onClick={() => setTab('categories')}>
-                  <Icon name="tag" /> <span className="grow">分類</span> <Icon name="right" size={18} />
-                </button>
-                <button onClick={() => setTab('settings')}>
-                  <Icon name="settings" /> <span className="grow">設定</span> <Icon name="right" size={18} />
-                </button>
-              </section>
-            )}
+            {tab === 'settings' && <SettingsView api={api} snap={api.snap} section={settingSection} onBack={() => setTab('more')} />}
+            {tab === 'categories' && <><MoreBack onClick={() => setTab('more')} /><CategoriesView api={api} snap={api.snap} /></>}
+            {tab === 'more' && <MoreMenu issues={api.snap.issues.length} open={openMore} />}
             {tab === 'issues' && (
               <IssuesView
                 api={api}
                 snap={api.snap}
-                onDone={() => setTab('ledger')}
+                onDone={() => setTab('more')}
                 onFix={(i) => i.draft && i.id && edit({ form: i.draft, target: { rowNumber: i.rowNumber, id: i.id } })}
               />
             )}
@@ -231,16 +227,7 @@ export function App() {
         ) : null}
       </main>
 
-      <nav className="tabs-bottom">
-        {TABS.map((t) => (
-          <button key={t.key} className={tabOf(tab) === t.key ? 'active' : ''} onClick={() => setTab(t.key)}>
-            <span className="tab-icon">
-              <Icon name={t.icon} />
-            </span>
-            {t.label}
-          </button>
-        ))}
-      </nav>
+      <AppTabs items={TABS} current={tabOf(tab)} onChange={changeMainTab} placement="bottom" />
 
       {api.toast && (
         <div className={`toast ${api.toast.kind}`} key={api.toast.id}>
@@ -254,6 +241,10 @@ export function App() {
   );
 }
 
+function MoreBack({ onClick }: { onClick: () => void }) {
+  return <button type="button" className="link more-back" onClick={onClick}><Icon name="left" size={18} /> 返回更多</button>;
+}
+
 /** 帳戶分頁：總覽 / 帳戶明細 / 對帳 / 月底盤點 */
 function AccountsTab({
   api,
@@ -261,12 +252,14 @@ function AccountsTab({
   page,
   setPage,
   onEdit,
+  onBack,
 }: {
   api: ReturnType<typeof useMoney>;
   snap: NonNullable<ReturnType<typeof useMoney>['snap']>;
   page: AccPage;
   setPage: (p: AccPage) => void;
   onEdit: (e: Editing) => void;
+  onBack: () => void;
 }) {
   const acc = page && page.view !== 'stocktake' ? snap.accounts.find((a) => a.name === page.account) : null;
   if (page?.view === 'stocktake') return <StocktakeView api={api} snap={snap} onBack={() => setPage(null)} onOpen={(name) => setPage({ view: 'detail', account: name })} />;
@@ -295,5 +288,5 @@ function AccountsTab({
       />
     );
   }
-  return <AccountsView api={api} snap={snap} onEdit={onEdit} onOpen={(name) => setPage({ view: 'detail', account: name })} onStocktake={() => setPage({ view: 'stocktake' })} />;
+  return <><MoreBack onClick={onBack} /><AccountsView api={api} snap={snap} onEdit={onEdit} onOpen={(name) => setPage({ view: 'detail', account: name })} onStocktake={() => setPage({ view: 'stocktake' })} /></>;
 }

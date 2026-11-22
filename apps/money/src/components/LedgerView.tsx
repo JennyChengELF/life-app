@@ -101,7 +101,7 @@ export function subText(t: Txn, withBadges = true) {
   return parts.join('・');
 }
 
-function TxList({ list, snap, onEdit }: { list: Txn[]; snap: MoneySnapshot; onEdit: (e: Editing) => void }) {
+export function TxList({ list, snap, onEdit }: { list: Txn[]; snap: MoneySnapshot; onEdit: (e: Editing) => void }) {
   return (
     <ul className="tx-list">
       {list.map((t) => (
@@ -124,7 +124,7 @@ function TxList({ list, snap, onEdit }: { list: Txn[]; snap: MoneySnapshot; onEd
  * 上方的總計卡（2026-11-19 改版）：一天 → 這天支出（大字）、收入、本月支出；整月 → 本月支出、收入。
  * 只算新台幣；外幣另外一行。
  */
-function SummaryCard({ snap, date, view }: { snap: MoneySnapshot; date: string; view: 'day' | 'month' }) {
+export function SummaryCard({ snap, date, view }: { snap: MoneySnapshot; date: string; view: 'day' | 'month' }) {
   const twdOf = (prefix: string) => monthStats(snap.txns, snap.categories, snap.accounts, prefix).find((s) => s.currency === 'TWD');
   const month = date.slice(0, 7);
   const m = twdOf(month);

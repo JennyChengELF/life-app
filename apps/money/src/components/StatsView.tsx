@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { MoneySnapshot } from '@life/db';
-import { categoryBreakdown, fmtMoney, monthlyTotals, monthStats } from '@life/db';
+import { categoryBreakdown, fmtMoney, monthlyTotals, monthStats, txnCurrency, txnMyNet } from '@life/db';
 import { MonthNav } from './common';
 
 const pct = (x: number) => `${(x * 100).toFixed(x >= 0.1 ? 0 : 1)}%`;
@@ -52,6 +52,16 @@ function YearNav({ year, setYear }: { year: string; setYear: (y: string) => void
   );
 }
 
+function DailyBars({ snap, month, currency }: { snap: MoneySnapshot; month: string; currency: string }) {
+  const rows = [...new Set(snap.txns.filter((txn) => txn.date.startsWith(month) && txnCurrency(txn, snap.accounts) === currency).map((txn) => txn.date))].sort().map((date) => {
+    const txns = snap.txns.filter((txn) => txn.date === date && txnCurrency(txn, snap.accounts) === currency);
+    return { date, expense: txns.reduce((sum, txn) => sum + txnMyNet(txn).expense, 0), income: txns.reduce((sum, txn) => sum + txnMyNet(txn).income, 0) };
+  });
+  const max = Math.max(1, ...rows.flatMap((row) => [row.expense, row.income]));
+  if (!rows.length) return null;
+  return <><h2>每日收支</h2><ul className="daily-bars">{rows.map((row) => <li key={row.date}><span>{Number(row.date.slice(8))} 日</span><span className="month-bars"><i className="out" style={{ width: `${row.expense / max * 100}%` }} /><i className="in" style={{ width: `${row.income / max * 100}%` }} /></span><span className="num">{fmtMoney(row.expense, currency, false)} / {fmtMoney(row.income, currency, false)}</span></li>)}</ul><p className="hint">上排是支出，下排是收入。</p></>;
+}
+
 export function StatsView({ snap, initialMonth }: { snap: MoneySnapshot; initialMonth: string }) {
   const [mode, setMode] = useState<'month' | 'year'>('month');
   const [month, setMonth] = useState(initialMonth);
@@ -93,6 +103,10 @@ export function StatsView({ snap, initialMonth }: { snap: MoneySnapshot; initial
               <div className="stat-label">總收入</div>
               <div className="stat-value amt-in">{fmtMoney(s.income, s.currency)}</div>
             </div>
+            <div className="stat-tile">
+              <div className="stat-label">差額</div>
+              <div className={`stat-value ${s.income - s.expense < 0 ? 'amt-out' : 'amt-in'}`}>{fmtMoney(s.income - s.expense, s.currency)}</div>
+            </div>
             {hasInvest && (
               <>
                 <div className="stat-tile">
@@ -106,6 +120,8 @@ export function StatsView({ snap, initialMonth }: { snap: MoneySnapshot; initial
               </>
             )}
           </div>
+
+          {mode === 'month' && <DailyBars snap={snap} month={month} currency={s.currency} />}
 
           {s.currency === 'TWD' && mode === 'year' && (
             <>
@@ -128,6 +144,7 @@ export function StatsView({ snap, initialMonth }: { snap: MoneySnapshot; initial
                       </span>
                       <span className="num amt-out">{fmtMoney(m.expense, 'TWD', false)}</span>
                       <span className="num amt-in">{fmtMoney(m.income, 'TWD', false)}</span>
+                      <span className={`num ${m.income - m.expense < 0 ? 'amt-out' : 'amt-in'}`}>{fmtMoney(m.income - m.expense, 'TWD', false)}</span>
                     </button>
                   </li>
                 ))}

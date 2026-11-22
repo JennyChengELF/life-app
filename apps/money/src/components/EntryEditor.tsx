@@ -13,7 +13,9 @@ import {
   personBalances,
   splitEven,
   splitTags,
-  toInputDateTime,
+  startOfDay,
+  toDateKey,
+  toHHmm,
   txnCurrency,
   defaultBudgetFor,
   estimateFee,
@@ -32,6 +34,7 @@ import { CategoryPicker } from './CategoryPicker';
 import { StorePicker } from './StorePicker';
 import { Icon } from '@life/ui/icon';
 import { BudgetSelect } from './BudgetSelect';
+import { TimeField } from '@life/ui/time-field';
 
 /** 金額輸入：自己記住打到一半的文字（例：「12.」） */
 export function AmountInput({
@@ -83,7 +86,7 @@ export function AmountInput({
 const PAID_BY = '\u0000paidBy';
 const MODE_TITLE: Record<string, string> = { 不用還了: '不用還了', 調整: '盤點調整', 其他: '交易' };
 
-export function EntryEditor({ api, snap, editing, onClose, onCopy }: { api: MoneyApi; snap: MoneySnapshot; editing: Editing; onClose: () => void; onCopy?: () => void }) {
+export function EntryEditor({ api, snap, editing, onClose, onCopy, hideModeSwitch = false }: { api: MoneyApi; snap: MoneySnapshot; editing: Editing; onClose: () => void; onCopy?: () => void; hideModeSwitch?: boolean }) {
   const txn = editing.txn;
   const [f, setF] = useState<EntryForm>(() => {
     const form = txn ? txnToForm(txn) : editing.form;
@@ -428,7 +431,7 @@ export function EntryEditor({ api, snap, editing, onClose, onCopy }: { api: Mone
         </button>
       </h2>
 
-      {!txn && ENTRY_MODES.includes(f.mode as (typeof ENTRY_MODES)[number]) && (
+      {!hideModeSwitch && !txn && ENTRY_MODES.includes(f.mode as (typeof ENTRY_MODES)[number]) && (
         <div className="seg modes">
           {ENTRY_MODES.map((m) => (
             <button key={m} className={f.mode === m ? 'active' : ''} onClick={() => switchMode(m)}>
@@ -477,17 +480,15 @@ export function EntryEditor({ api, snap, editing, onClose, onCopy }: { api: Mone
         </div>
       ) : (
         <>
-          <label className="field">
-            時間
-            <input
-              type="datetime-local"
-              value={toInputDateTime(f.time)}
-              onChange={(e) => {
-                const t = new Date(e.target.value).getTime();
-                if (Number.isFinite(t)) set({ time: t });
-              }}
-            />
-          </label>
+          <div className="entry-when">
+            <span className="field">記帳日期<strong>{toDateKey(f.time).replace(/-/g, '/')}</strong></span>
+            <TimeField value={toHHmm(f.time)} onChange={(value) => {
+              const [hour, minute] = value.split(':').map(Number);
+              const next = new Date(startOfDay(toDateKey(f.time)));
+              next.setHours(hour, minute, 0, 0);
+              set({ time: next.getTime() });
+            }} label="時間（24 小時制）" />
+          </div>
 
           {f.mode === '支出' && (
             <>
