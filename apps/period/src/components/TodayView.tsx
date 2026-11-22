@@ -14,21 +14,19 @@ import {
   toHHmm,
 } from '@life/db';
 import { Icon } from '@life/ui/icon';
+import { WeekDateStrip } from '@life/ui/week-date-strip';
+import { TimeField } from '@life/ui/time-field';
 import type { PeriodApi } from '../usePeriod';
-import { CalendarView } from './CalendarView';
-import { DaySummary, periodDateContext } from './DaySummary';
+import { periodDateContext } from './DaySummary';
 
 interface DraftCondition extends ConditionLogDraft {
   key: string;
   expanded: boolean;
 }
 
-export function TodayView({ api, snap, conditions, date, setDate, goSettings, editRequest, onEditRequestHandled }: { api: PeriodApi; snap: PeriodSnapshot; conditions: ConditionSnapshot; date: string; setDate: (d: string) => void; goSettings: () => void; editRequest: number | null; onEditRequestHandled: () => void }) {
+export function TodayView({ api, snap, conditions, date, setDate, goSettings, onDirtyChange, onDone }: { api: PeriodApi; snap: PeriodSnapshot; conditions: ConditionSnapshot; date: string; setDate: (d: string) => void; goSettings: () => void; onDirtyChange: (value: boolean) => void; onDone: () => void }) {
   const today = todayKey();
   const prediction = predictPeriod(snap);
-  const sortedCycles = [...snap.cycles].sort((a, b) => a.startDate.localeCompare(b.startDate));
-  const lastCycle = sortedCycles.at(-1) ?? null;
-  const ongoing = lastCycle && !lastCycle.endDate ? lastCycle : null;
   const { cycle: selectedCycle, predictionLabel } = periodDateContext(snap, date);
   const latest = snap.cycles[snap.cycles.length - 1] ?? null;
   const [editorDirty, setEditorDirty] = useState(false);
@@ -44,12 +42,15 @@ export function TodayView({ api, snap, conditions, date, setDate, goSettings, ed
   if (cd) messages.push(`這次和你平常不同，時間比平均週期 ${cd.average} 天${cd.direction === 'longer' ? '長' : '短'} ${cd.difference} 天`);
   if (dd) messages.push(`這次和你平常不同，經期比平均 ${dd.average} 天${dd.direction === 'longer' ? '長' : '短'} ${dd.difference} 天`);
 
-  let status = '還沒有足夠資料預測';
-  if (ongoing && today >= ongoing.startDate) status = `經期第 ${dateDiff(ongoing.startDate, today) + 1} 天`;
+  let status = '非經期';
+  if (selectedCycle) status = `經期第 ${dateDiff(selectedCycle.startDate, date) + 1} 天${selectedCycle.endDate ? '' : '・待確認結束日'}`;
+  else if (predictionLabel) status = predictionLabel;
   else if (prediction) {
-    const diff = dateDiff(today, prediction.nextStart);
+    const diff = dateDiff(date, prediction.nextStart);
     status = diff > 0 ? `預計 ${diff} 天後開始` : diff === 0 ? '預計今天開始' : `原預測 ${prediction.nextStart.replaceAll('-', '/')}，目前晚 ${Math.abs(diff)} 天`;
   }
+
+  useEffect(() => onDirtyChange(editorDirty), [editorDirty, onDirtyChange]);
 
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
@@ -66,23 +67,15 @@ export function TodayView({ api, snap, conditions, date, setDate, goSettings, ed
     if (editorDirty && !confirm('這天的紀錄尚未儲存，確定要離開嗎？')) return;
     setDate(next);
   };
-  const startToday = async () => {
-    if (date !== today && editorDirty && !confirm('這天的紀錄尚未儲存，確定要改記今天嗎？')) return;
-    setDate(today);
-    const ok = await api.run(async (p) => { await p.addCycle(today); return true; });
-    if (ok) api.showToast('已將今天設為經期開始日');
-  };
-
   return <>
     {messages.length > 0 && <div className="messages">{messages.map((m) => <div className="msg info" key={m}>{m}</div>)}</div>}
-    <CalendarView snap={snap} selected={date} openDate={changeDate} />
+    <WeekDateStrip selected={date} setDate={changeDate} maxDate={today} />
     <section className="card status-card compact-status">
-      <div className="status-label">目前狀態</div><div className="status-value">{status}</div>
+      <div className="status-label">{date.replaceAll('-', '/')} 狀態</div><div className="status-value">{status}</div>
       {!prediction && <button className="link" onClick={goSettings}>設定週期與經期天數</button>}
-      {!ongoing && <button className="primary status-action" disabled={api.busy} onClick={() => void startToday()}>今天經期開始</button>}
     </section>
     <PeriodControlCard api={api} date={date} cycle={selectedCycle} cycles={snap.cycles} settings={snap.settings} />
-    <DailyDetails api={api} conditions={conditions} date={date} cycle={selectedCycle} predictionLabel={predictionLabel} day={snap.days.find((x) => x.date === date) ?? null} onDirtyChange={setEditorDirty} editRequest={editRequest} onEditRequestHandled={onEditRequestHandled} />
+    <DailyDetails api={api} conditions={conditions} date={date} day={snap.days.find((x) => x.date === date) ?? null} onDirtyChange={setEditorDirty} onSaved={onDone} />
   </>;
 }
 
@@ -126,11 +119,10 @@ function PeriodControlCard({ api, date, cycle, cycles, settings }: { api: Period
   </section>;
 }
 
-function DailyDetails({ api, conditions, date, cycle, predictionLabel, day, onDirtyChange, editRequest, onEditRequestHandled }: { api: PeriodApi; conditions: ConditionSnapshot; date: string; cycle: PeriodCycle | null; predictionLabel: string | null; day: PeriodDay | null; onDirtyChange: (value: boolean) => void; editRequest: number | null; onEditRequestHandled: () => void }) {
+function DailyDetails({ api, conditions, date, day, onDirtyChange, onSaved }: { api: PeriodApi; conditions: ConditionSnapshot; date: string; day: PeriodDay | null; onDirtyChange: (value: boolean) => void; onSaved: () => void }) {
   const items = conditions.items.filter((x) => x.showInPeriod && !x.archived);
   const currentLogs = conditions.logs.filter((x) => x.date === date && conditions.items.find((i) => i.name === x.symptom)?.showInPeriod);
   const toDraft = (): DraftCondition[] => currentLogs.map((x) => ({ key: x.id, id: x.id, rowNumber: x.rowNumber, symptom: x.symptom, severity: x.severity, note: x.note, time: x.time, expanded: false }));
-  const [editing, setEditing] = useState(false);
   const [flow, setFlow] = useState<PeriodDay['flow']>(day?.flow ?? null);
   const [colors, setColors] = useState<PeriodDay['colors']>(day?.colors ?? []);
   const [clotSize, setClot] = useState<PeriodDay['clotSize']>(day?.clotSize ?? null);
@@ -145,25 +137,17 @@ function DailyDetails({ api, conditions, date, cycle, predictionLabel, day, onDi
     setDrafts(toDraft());
   };
   useEffect(() => {
-    setEditing(false);
     reset();
   }, [date, day?.id, day?.flow, day?.clotSize, day?.note, day?.colors.join('、'), conditions.loadedAt]);
-  useEffect(() => {
-    if (editRequest == null) return;
-    setEditing(true);
-    onEditRequestHandled();
-  }, [editRequest, onEditRequestHandled]);
 
   const originalDay = JSON.stringify({ flow: day?.flow ?? null, colors: day?.colors ?? [], clotSize: day?.clotSize ?? null, note: day?.note ?? '' });
   const editedDay = JSON.stringify({ flow, colors, clotSize, note });
   const logValues = (rows: DraftCondition[]) => rows.map(({ key: _key, expanded: _expanded, ...x }) => x);
   const originalConditions = JSON.stringify(logValues(toDraft()));
   const editedConditions = JSON.stringify(logValues(drafts));
-  const dirty = editing && (originalDay !== editedDay || originalConditions !== editedConditions);
+  const dirty = originalDay !== editedDay || originalConditions !== editedConditions;
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
   useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
-
-  if (!editing) return <DaySummary conditions={conditions} date={date} cycle={cycle} predictionLabel={predictionLabel} day={day} onEdit={() => setEditing(true)} />;
 
   const toggleColor = (x: (typeof PERIOD_COLORS)[number]) => setColors(colors.includes(x) ? colors.filter((c) => c !== x) : [...colors, x]);
   const addCondition = (symptom: string) => setDrafts((rows) => [...rows, { key: `new-${Date.now()}-${rows.length}`, symptom, severity: null, note: null, time: null, expanded: false }]);
@@ -178,14 +162,14 @@ function DailyDetails({ api, conditions, date, cycle, predictionLabel, day, onDi
       return true;
     });
     if (ok) {
-      setEditing(false);
       api.showToast('這天的紀錄已儲存');
+      onSaved();
     }
   };
   const cancel = () => {
     if (dirty && !confirm('放棄尚未儲存的修改嗎？')) return;
     reset();
-    setEditing(false);
+    onSaved();
   };
 
   return <>
@@ -210,7 +194,7 @@ function ConditionDraftRow({ date, draft, update, remove }: { date: string; draf
   const hasMore = draft.time != null || !!draft.note?.trim();
   return <div className="condition-draft">
     <div className="condition-main-row"><strong>{draft.symptom}</strong><div className="choice condition-severity">{CONDITION_SEVERITIES.map((x) => <button key={x} className={draft.severity === x ? 'active' : ''} onClick={() => update({ severity: draft.severity === x ? null : x as ConditionSeverity })}>{x}</button>)}</div><button className="link more-toggle" onClick={() => update({ expanded: !draft.expanded })}>{draft.expanded ? '收合' : `更多${hasMore ? '・已填' : ''}`}</button><button className="link danger-text" onClick={remove}>移除</button></div>
-    {draft.expanded && <div className="condition-more"><label className="field">時間（選填）<span className="time-row"><input type="time" value={localTime} onChange={(e) => setTime(e.target.value)} />{date === todayKey() && <button onClick={() => setTime(toHHmm(Date.now()))}>現在</button>}</span></label><label className="field">備註（選填）<input value={draft.note ?? ''} onChange={(e) => update({ note: e.target.value })} /></label></div>}
+    {draft.expanded && <div className="condition-more"><TimeField label="時間（選填）" value={localTime} onChange={setTime} showNow={date === todayKey()} /><label className="field">備註（選填）<input value={draft.note ?? ''} onChange={(e) => update({ note: e.target.value })} /></label></div>}
   </div>;
 }
 

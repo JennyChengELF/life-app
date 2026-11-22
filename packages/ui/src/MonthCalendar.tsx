@@ -13,6 +13,8 @@ export interface MonthCalendarMark {
   progress?: number;
   /** bar 內的短文字，例如喝水達標的 ✓。 */
   text?: string;
+  /** 虛線標記，例如生理期的預測日期。 */
+  dashed?: boolean;
 }
 
 export interface MonthCalendarDayInfo {
@@ -102,7 +104,7 @@ export function MonthCalendar({
                 {marks.map((mark, index) => (
                   <i
                     key={`${mark.label ?? mark.color ?? 'mark'}-${index}`}
-                    className={mark.kind === 'bar' ? 'bar' : mark.kind === 'text' ? 'text' : mark.kind === 'badge' ? 'badge' : mark.kind === 'ring' ? 'ring' : 'dot'}
+                    className={`${mark.kind === 'bar' ? 'bar' : mark.kind === 'text' ? 'text' : mark.kind === 'badge' ? 'badge' : mark.kind === 'ring' ? 'ring' : 'dot'}${mark.dashed ? ' dashed' : ''}`}
                     style={{
                       '--mark-color': mark.color ?? 'var(--accent)',
                       ...(mark.progress == null ? {} : { width: `${Math.max(8, Math.min(100, mark.progress * 100))}%` }),

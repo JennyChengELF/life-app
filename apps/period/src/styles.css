@@ -78,6 +78,11 @@
 .bleed-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #9b3e58; }
 .cal-legend { display: flex; flex-wrap: wrap; gap: 7px 14px; margin-top: 12px; font-size: .78rem; color: var(--muted); }
 .cal-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.period-calendar-view .date-calendar-marks .bar { height: 6px; border-radius: 6px; }
+.period-calendar-view .date-calendar-marks .bar.dashed { border-width: 2px; }
+.legend-bar { width: 20px; height: 6px; border-radius: 6px; display: inline-block; }
+.legend-bar.actual { background: linear-gradient(90deg, #f8cbd5, #a92349); }
+.legend-bar.predicted { background: transparent; border: 2px dashed #e79ab7; }
 .legend-box { width: 13px; height: 13px; border-radius: 4px; display: inline-block; }
 .legend-box.actual { background: linear-gradient(90deg, #dceaff, #1f5fae); }
 .legend-box.predicted { background: var(--accent-soft); border: 1px dashed var(--accent); }
@@ -102,6 +107,16 @@
 .history-exclude { margin-top: 2px; white-space: nowrap; }
 .calendar-day-details { margin-top: 12px; }
 .history-more { width: 100%; margin-top: 10px; color: var(--accent); background: var(--accent-soft); border-color: transparent; justify-content: center; }
+.history-year { border-top: 1px solid var(--line); padding: 9px 0; }
+.history-year summary { display: flex; justify-content: space-between; align-items: center; cursor: pointer; color: var(--accent-strong); }
+.history-year summary span { color: var(--muted); font-size: .82rem; font-weight: 400; }
+.history-year .cycle-list { margin-top: 8px; }
+.more-menu { display: grid; gap: 8px; max-width: 640px; }
+.more-menu > h2 { margin: 4px 2px; }
+.more-menu-item { width: 100%; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; padding: 14px; text-align: left; background: var(--card); }
+.more-menu-item > span { display: grid; gap: 2px; }
+.more-menu-item small { color: var(--muted); font-weight: 400; }
+.more-back { margin-bottom: 10px; }
 .check.compact { font-size: .8rem; color: var(--muted); padding-left: 4px; }
 .issue-row { border-top: 1px solid var(--line); padding-top: 8px; }
 
