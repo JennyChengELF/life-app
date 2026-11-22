@@ -1,5 +1,9 @@
-import { useState, type CSSProperties } from 'react';
-import { Icon, type IconName } from '@life/ui/icon';
+import { useState } from 'react';
+import { Icon } from '@life/ui/icon';
+import { AppTabs, type AppTabItem } from '@life/ui/app-tabs';
+import { MonthCalendar, type MonthCalendarMark } from '@life/ui/month-calendar';
+import { WeekDateStrip } from '@life/ui/week-date-strip';
+import { TimeField } from '@life/ui/time-field';
 import {
   addDateDays,
   dateDiffDays,
@@ -17,13 +21,15 @@ import { useCalendar, type CalendarApi } from './useCalendar';
 import { AppSwitcher } from '@life/ui/app-switcher';
 
 const HOME_URL = import.meta.env.DEV ? `http://${location.hostname}:5172/` : '../';
-type Tab = 'month' | 'agenda' | 'groups';
+type MainTab = 'add' | 'calendar' | 'more';
+type Tab = MainTab | 'agenda' | 'groups' | 'data' | 'issues';
 type AgendaMode = 'upcoming' | 'history' | 'month';
-const TABS: { key: Tab; icon: IconName; label: string }[] = [
-  { key: 'month', icon: 'calendar', label: '月曆' },
-  { key: 'agenda', icon: 'clipboard', label: '行程表' },
-  { key: 'groups', icon: 'settings', label: '群組' },
+const TABS: AppTabItem<MainTab>[] = [
+  { key: 'add', icon: 'plus', label: '新增' },
+  { key: 'calendar', icon: 'calendar', label: '日曆' },
+  { key: 'more', icon: 'more', label: '更多' },
 ];
+const tabOf = (tab: Tab): MainTab => tab === 'add' || tab === 'calendar' || tab === 'more' ? tab : 'more';
 type Open =
   | { kind: 'detail'; id: string }
   | { kind: 'form'; eventId: string | null; date: string; parentId: string | null }
@@ -49,12 +55,6 @@ const shiftMonth = (month: string, delta: number) => {
   const [y, m] = month.split('-').map(Number);
   const d = new Date(y, m - 1 + delta, 1);
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
-};
-const monthDays = (month: string) => {
-  const [y, m] = month.split('-').map(Number);
-  const first = new Date(y, m - 1, 1);
-  const start = addDateDays(`${y}-${pad(m)}-01`, -first.getDay());
-  return Array.from({ length: 42 }, (_, i) => addDateDays(start, i));
 };
 const groupOf = (snap: CalendarSnapshot, e: CalendarEvent) => snap.groups.find((g) => g.id === e.groupId);
 const timeText = (e: CalendarEvent) => e.timeType === 'allDay' ? '全天' : e.timeType === 'point' ? e.startTime! : `${e.startTime}～${e.endTime}`;
@@ -87,24 +87,25 @@ function requestedDate() {
 export function App() {
   const api = useCalendar();
   const initialDate = requestedDate();
-  const [tab, setTab] = useState<Tab>(() => location.hash === '#agenda' ? 'agenda' : location.hash === '#groups' ? 'groups' : 'month');
+  const [tab, setTab] = useState<Tab>(() => location.hash === '#agenda' ? 'agenda' : location.hash === '#groups' ? 'groups' : location.hash === '#new' ? 'add' : 'calendar');
   const [selectedDate, setSelectedDate] = useState(initialDate);
-  const [month, setMonth] = useState(() => initialDate.slice(0, 7));
   const [open, setOpen] = useState<Open | null>(() => {
     if (location.hash === '#new') return { kind: 'form', eventId: null, date: initialDate, parentId: null };
     if (location.hash.startsWith('#event/')) return { kind: 'detail', id: decodeURIComponent(location.hash.slice(7)) };
     return null;
   });
 
-  const goTab = (next: Tab) => {
+  const goTab = (next: MainTab) => {
+    if (tab === 'add' && next === 'add') return;
+    if ((open?.kind === 'form' || open?.kind === 'trip-change') && !confirm('這筆行程尚未儲存，確定要離開嗎？')) return;
     setTab(next);
-    setOpen(null);
+    if (next === 'add') setOpen({ kind: 'form', eventId: null, date: selectedDate, parentId: null });
+    else setOpen(null);
     window.scrollTo(0, 0);
   };
 
   const setDate = (date: string) => {
     setSelectedDate(date);
-    setMonth(date.slice(0, 7));
   };
 
   if (api.status === 'starting' || (api.status === 'loading' && !api.snap)) return <Shell api={api}><div className="center muted">讀取中⋯⋯</div></Shell>;
@@ -136,72 +137,107 @@ export function App() {
       return !!ok;
     }
     const id = await api.run((s) => s.addEvent(input));
-    if (id) setOpen({ kind: 'detail', id });
+    if (id) {
+      setSelectedDate(input.startDate);
+      setTab('calendar');
+      setOpen(null);
+    }
     return !!id;
   };
 
   return (
     <Shell api={api} tab={tab} goTab={goTab} date={selectedDate} confirmLeave={open?.kind === 'form' || open?.kind === 'trip-change'}>
       {open?.kind === 'form' ? (
-        <EventForm snap={snap} event={openedEvent} initialDate={open.date} parentId={open.parentId} busy={api.busy} onCancel={() => setOpen(open.eventId ? { kind: 'detail', id: open.eventId } : null)} onSave={saveEvent} />
+        <>{tab === 'add' && !open.eventId && !open.parentId && <WeekDateStrip selected={open.date} setDate={(value) => {
+          if (value !== open.date && !confirm('更換日期會清除目前尚未儲存的表單，確定要更換嗎？')) return;
+          setSelectedDate(value);
+          setOpen({ ...open, date: value });
+        }} />}
+        <EventForm key={`${open.eventId ?? 'new'}-${open.date}`} snap={snap} event={openedEvent} initialDate={open.date} parentId={open.parentId} busy={api.busy} hideStartDate={tab === 'add' && !open.eventId && !open.parentId} onCancel={() => {
+          if (open.eventId) setOpen({ kind: 'detail', id: open.eventId });
+          else { setOpen(null); setTab('calendar'); }
+        }} onSave={saveEvent} /></>
       ) : open?.kind === 'detail' && openedEvent ? (
         <EventDetail api={api} snap={snap} event={openedEvent} onBack={() => setOpen(null)} onEdit={() => setOpen({ kind: 'form', eventId: openedEvent.id, date: openedEvent.startDate, parentId: openedEvent.parentEventId })} onOpen={(id) => setOpen({ kind: 'detail', id })} onAddChild={() => setOpen({ kind: 'form', eventId: null, date: openedEvent.startDate, parentId: openedEvent.id })} />
       ) : open?.kind === 'trip-change' ? (
         <TripChangeView api={api} data={open} onChange={setOpen} onDone={() => setOpen({ kind: 'detail', id: open.event.id })} />
       ) : (
         <>
-          {tab === 'month' && <MonthView snap={snap} events={visibleEvents} month={month} selected={selectedDate} setMonth={setMonth} setDate={setDate} openEvent={(id) => setOpen({ kind: 'detail', id })} />}
-          {tab === 'agenda' && <AgendaView snap={snap} events={visibleEvents} selectedMonth={month} openEvent={(id) => setOpen({ kind: 'detail', id })} />}
-          {tab === 'groups' && <GroupsView api={api} snap={snap} />}
-          {tab !== 'groups' && <button className="fab" onClick={() => setOpen({ kind: 'form', eventId: null, date: selectedDate, parentId: null })} aria-label="新增行程"><Icon name="plus" size={28} /></button>}
+          {tab === 'calendar' && <MonthView snap={snap} events={visibleEvents} selected={selectedDate} setDate={setDate} openEvent={(id) => setOpen({ kind: 'detail', id })} />}
+          {tab === 'more' && <MoreView issues={snap.issues.length} open={(next) => { setTab(next); window.scrollTo(0, 0); }} />}
+          {tab === 'agenda' && <><MoreBack onClick={() => setTab('more')} /><AgendaView snap={snap} events={visibleEvents} selectedMonth={selectedDate.slice(0, 7)} openEvent={(id) => setOpen({ kind: 'detail', id })} /></>}
+          {tab === 'groups' && <><MoreBack onClick={() => setTab('more')} /><GroupsView api={api} snap={snap} /></>}
+          {tab === 'data' && <><MoreBack onClick={() => setTab('more')} /><DataView api={api} /></>}
+          {tab === 'issues' && <><MoreBack onClick={() => setTab('more')} /><IssuesView snap={snap} /></>}
+          {tab === 'calendar' && <button className="fab" onClick={() => goTab('add')} aria-label="新增行程"><Icon name="plus" size={28} /></button>}
         </>
       )}
-      {api.toast && <button className={`toast ${api.toast.kind}`} onClick={api.dismissToast}>{api.toast.text}</button>}
     </Shell>
   );
 }
 
-function Shell({ api, tab, goTab, date, confirmLeave = false, children }: { api: CalendarApi; tab?: Tab; goTab?: (t: Tab) => void; date?: string; confirmLeave?: boolean; children: React.ReactNode }) {
+function Shell({ api, tab, goTab, date, confirmLeave = false, children }: { api: CalendarApi; tab?: Tab; goTab?: (tab: MainTab) => void; date?: string; confirmLeave?: boolean; children: React.ReactNode }) {
   return (
     <div className="app calendar-app">
       <header className="topbar">
         <AppSwitcher current="calendar" homeUrl={HOME_URL} date={date} confirmLeave={confirmLeave} />
         <h1>行事曆</h1>
-        {tab && goTab && <nav className="tabs-top">{TABS.map((t) => <button key={t.key} className={tab === t.key ? 'active' : ''} onClick={() => goTab(t.key)}><Icon name={t.icon} size={20} /> {t.label}</button>)}</nav>}
+        {tab && goTab && <AppTabs items={TABS} current={tabOf(tab)} onChange={goTab} placement="top" />}
         {api.status === 'ready' && <button className="icon-btn" onClick={api.refresh} disabled={api.busy} title="重新整理" aria-label="重新整理"><span className={api.busy ? 'spin' : ''}><Icon name="refresh" /></span></button>}
       </header>
       {api.mode === 'local' && <div className="mode-banner">本機測試模式：資料只存在這個瀏覽器，還沒接上 Google 試算表</div>}
       <main>{children}</main>
       {api.toast && <button className={`toast ${api.toast.kind === 'error' ? 'error' : ''}`} onClick={api.dismissToast}>{api.toast.text}</button>}
-      {tab && goTab && <nav className="tabs-bottom">{TABS.map((t) => <button key={t.key} className={tab === t.key ? 'active' : ''} onClick={() => goTab(t.key)}><span className="tab-icon"><Icon name={t.icon} /></span>{t.label}</button>)}</nav>}
+      {tab && goTab && <AppTabs items={TABS} current={tabOf(tab)} onChange={goTab} placement="bottom" />}
     </div>
   );
 }
 
-function MonthView({ snap, events, month, selected, setMonth, setDate, openEvent }: { snap: CalendarSnapshot; events: CalendarEvent[]; month: string; selected: string; setMonth: (m: string) => void; setDate: (d: string) => void; openEvent: (id: string) => void }) {
-  const days = monthDays(month);
+function MonthView({ snap, events, selected, setDate, openEvent }: { snap: CalendarSnapshot; events: CalendarEvent[]; selected: string; setDate: (date: string) => void; openEvent: (id: string) => void }) {
   const selectedEvents = sortCalendarEvents(events.filter((e) => eventOnDate(e, selected)));
-  const goMonth = (delta: number) => {
-    const next = shiftMonth(month, delta);
-    setMonth(next);
-    setDate(`${next}-01`);
-  };
-  const today = todayKey();
   const unnamed = events.filter((e) => e.titleMissing).length;
+  const info = (date: string) => {
+    const rows = sortCalendarEvents(events.filter((event) => eventOnDate(event, date)));
+    if (!rows.length) return null;
+    const shown = rows.slice(0, rows.length > 2 ? 2 : 3);
+    const marks: MonthCalendarMark[] = shown.map((event) => ({
+      kind: event.startDate === event.endDate ? 'dot' : 'bar',
+      color: groupOf(snap, event)?.color ?? 'var(--accent)',
+      label: event.title,
+    }));
+    if (rows.length > 2) marks.push({ kind: 'text', text: `+${rows.length - 2}`, color: 'var(--muted)', label: `另有 ${rows.length - 2} 筆` });
+    return { marks, label: `${rows.length} 筆行程：${rows.map((event) => event.title).join('、')}` };
+  };
   return (
     <>
       {unnamed > 0 && <div className="msg warn">有 {unnamed} 筆未命名行程，之後可以點開補上標題。</div>}
-      <section className="card month-card">
-        <div className="month-nav"><button className="icon-btn" onClick={() => goMonth(-1)} aria-label="上個月"><Icon name="left" /></button><button className="month-title" onClick={() => setDate(today)}>{monthTitle(month)}<small>回到今天</small></button><button className="icon-btn" onClick={() => goMonth(1)} aria-label="下個月"><Icon name="right" /></button></div>
-        <div className="month-grid">{['日', '一', '二', '三', '四', '五', '六'].map((w) => <div className="weekday" key={w}>{w}</div>)}{days.map((date) => {
-          const dayEvents = events.filter((e) => eventOnDate(e, date));
-          const inMonth = date.startsWith(month);
-          return <button key={date} className={`month-day ${selected === date ? 'selected' : ''} ${today === date ? 'today' : ''} ${inMonth ? '' : 'outside'}`} onClick={() => setDate(date)}><span>{Number(date.slice(8))}</span><span className="day-marks">{dayEvents.slice(0, 2).map((e) => { const g = groupOf(snap, e); return <i key={e.id} style={{ '--event-color': g?.color ?? '#1f6fd1' } as CSSProperties} title={e.title}>{e.startDate !== e.endDate ? '━' : '•'}</i>; })}{dayEvents.length > 2 && <em>+{dayEvents.length - 2}</em>}</span></button>;
-        })}</div>
-      </section>
+      <MonthCalendar selected={selected} setDate={setDate} dayInfo={info} />
       <section className="card day-list"><h2>{dateLabel(selected)}</h2>{selectedEvents.length ? selectedEvents.map((e) => <EventRow key={e.id} snap={snap} event={e} onClick={() => openEvent(e.id)} />) : <p className="muted empty">這天沒有行程</p>}</section>
     </>
   );
+}
+
+function MoreBack({ onClick }: { onClick: () => void }) {
+  return <button type="button" className="link more-back" onClick={onClick}><Icon name="left" size={18} /> 返回更多</button>;
+}
+
+function MoreView({ issues, open }: { issues: number; open: (tab: Exclude<Tab, MainTab>) => void }) {
+  const rows: { tab: Exclude<Tab, MainTab>; icon: 'clipboard' | 'settings' | 'book' | 'alert'; label: string; note: string }[] = [
+    { tab: 'agenda', icon: 'clipboard', label: '行程表', note: '近期、歷史與指定月份' },
+    { tab: 'groups', icon: 'settings', label: '群組設定', note: '名稱、顏色、排序、隱藏與停用' },
+    { tab: 'data', icon: 'book', label: '資料與試算表', note: '行事曆資料與 Google 連線' },
+  ];
+  if (issues) rows.push({ tab: 'issues', icon: 'alert', label: '需要處理的資料', note: `${issues} 列需要修正` });
+  return <div className="more-menu"><h2>行事曆功能</h2>{rows.map((row) => <button className="more-menu-item" key={row.tab} onClick={() => open(row.tab)}><Icon name={row.icon} /><span><strong>{row.label}</strong><small>{row.note}</small></span><Icon name="right" size={18} /></button>)}</div>;
+}
+
+function DataView({ api }: { api: CalendarApi }) {
+  const url = api.fileUrl();
+  return <section className="card"><h2>資料與試算表</h2>{api.mode === 'local' ? <p className="muted">本機測試模式：資料只存在這個瀏覽器。</p> : url ? <a className="btn" href={url} target="_blank" rel="noreferrer">開啟行事曆試算表 ↗</a> : <p className="muted">目前沒有可開啟的試算表。</p>}</section>;
+}
+
+function IssuesView({ snap }: { snap: CalendarSnapshot }) {
+  return <section className="card"><h2>需要處理的資料</h2>{snap.issues.length ? snap.issues.map((issue) => <div className="issue-row" key={`${issue.table}-${issue.rowNumber}-${issue.text}`}><strong>{issue.table} 第 {issue.rowNumber} 列</strong><p>{issue.text}</p></div>) : <p className="muted">目前沒有需要處理的資料。</p>}</section>;
 }
 
 function EventRow({ snap, event, onClick, nested = false }: { snap: CalendarSnapshot; event: CalendarEvent; onClick: () => void; nested?: boolean }) {
@@ -270,7 +306,7 @@ function AgendaItem({ snap, events, event, collapsed, toggle, openEvent }: { sna
   return <section className="card trip-card"><button className="trip-head" onClick={toggle} aria-expanded={!collapsed}><span className="event-color" style={{ background: groupOf(snap, event)?.color ?? '#1f6fd1' }} /><span><b>{event.title}</b><small>{rangeText(event)}・{dateDiffDays(event.startDate, event.endDate) + 1} 天</small></span><Icon name={collapsed ? 'right' : 'left'} className={collapsed ? '' : 'chevron-down'} size={18} /></button>{!collapsed && <div className="trip-days">{[...groups.entries()].map(([date, list]) => <div className="trip-day" key={date}><h3>第 {dateDiffDays(event.startDate, date) + 1} 天・{dateLabel(date)}</h3>{list.map((child) => <EventRow key={child.id} snap={snap} event={child} nested onClick={() => openEvent(child.id)} />)}</div>)}</div>}<button className="trip-open" onClick={() => openEvent(event.id)}>查看主行程</button></section>;
 }
 
-function EventForm({ snap, event, initialDate, parentId, busy, onCancel, onSave }: { snap: CalendarSnapshot; event: CalendarEvent | null; initialDate: string; parentId: string | null; busy: boolean; onCancel: () => void; onSave: (input: CalendarEventInput, event: CalendarEvent | null) => Promise<boolean> }) {
+function EventForm({ snap, event, initialDate, parentId, busy, hideStartDate = false, onCancel, onSave }: { snap: CalendarSnapshot; event: CalendarEvent | null; initialDate: string; parentId: string | null; busy: boolean; hideStartDate?: boolean; onCancel: () => void; onSave: (input: CalendarEventInput, event: CalendarEvent | null) => Promise<boolean> }) {
   const initialParent = parentId ? snap.events.find((e) => e.id === parentId) : null;
   const [form, setForm] = useState<CalendarEventInput>(() => event ? eventInput(event) : {
     title: '', groupId: initialParent?.groupId ?? snap.defaultGroupId, parentEventId: parentId, timeType: 'point', startDate: initialDate, startTime: '09:00', startTimeZone: 'Asia/Taipei', endDate: initialDate, endTime: null, endTimeZone: 'Asia/Taipei', timeMode: 'fixedZone', locationType: null, startPlace: null, endPlace: null, url: null, note: null, status: 'scheduled',
@@ -306,7 +342,8 @@ function EventForm({ snap, event, initialDate, parentId, busy, onCancel, onSave 
     {parentError && <p className="form-error">{parentError}</p>}
     <label className="field">標題<input value={form.title} onChange={(e) => set('title', e.target.value)} placeholder="可以先留空，會顯示未命名行程" /></label>
     <div className="type-choice">{([['range', '時段'], ['point', '時間點'], ['allDay', '全天']] as const).map(([value, label]) => <button type="button" key={value} className={form.timeType === value ? 'active' : ''} onClick={() => setForm((current) => ({ ...current, timeType: value, startTime: value === 'allDay' ? null : current.startTime ?? '09:00', endDate: value === 'point' ? current.startDate : current.endDate, endTime: value === 'range' ? current.endTime ?? '10:00' : null }))}>{label}</button>)}</div>
-    <div className="form-grid"><label className="field">開始日期<input type="date" value={form.startDate} onChange={(e) => setStartDate(e.target.value)} required /></label>{form.timeType !== 'allDay' && <label className="field">開始時間<input type="time" value={form.startTime ?? ''} onChange={(e) => set('startTime', e.target.value)} required /></label>}{form.timeType !== 'point' && <label className="field">結束日期<input type="date" value={form.endDate} onChange={(e) => set('endDate', e.target.value)} required /></label>}{form.timeType === 'range' && <label className="field">結束時間<input type="time" value={form.endTime ?? ''} onChange={(e) => set('endTime', e.target.value)} required /></label>}</div>
+    {hideStartDate && <div className="selected-start-date"><span>開始日期</span><strong>{slashDateLabel(form.startDate)}</strong></div>}
+    <div className="form-grid">{!hideStartDate && <label className="field">開始日期<input type="date" value={form.startDate} onChange={(e) => setStartDate(e.target.value)} required /></label>}{form.timeType !== 'allDay' && <TimeField label="開始時間" value={form.startTime ?? ''} onChange={(value) => set('startTime', value)} />}{form.timeType !== 'point' && <label className="field">結束日期<input type="date" value={form.endDate} onChange={(e) => set('endDate', e.target.value)} required /></label>}{form.timeType === 'range' && <TimeField label="結束時間" value={form.endTime ?? ''} onChange={(value) => set('endTime', value)} />}</div>
     <label className="field">行事曆群組<select value={form.groupId} onChange={(e) => set('groupId', e.target.value)}>{snap.groups.filter((group) => !group.archived).map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
     <button type="button" className="more-toggle" onClick={() => setMore(!more)}>{more ? '收起更多設定' : '更多設定'}</button>
     {more && <div className="more-fields"><label className="field">地點類型<select value={form.locationType ?? ''} onChange={(e) => set('locationType', (e.target.value || null) as CalendarEventInput['locationType'])}><option value="">不填</option><option value="place">一般地點</option><option value="route">起點與終點</option><option value="online">線上</option></select></label>{form.locationType && form.locationType !== 'online' && <label className="field">{form.locationType === 'route' ? '起點' : '地點'}<input value={form.startPlace ?? ''} onChange={(e) => set('startPlace', e.target.value || null)} /></label>}{form.locationType === 'route' && <label className="field">終點<input value={form.endPlace ?? ''} onChange={(e) => set('endPlace', e.target.value || null)} /></label>}{form.locationType === 'online' && <label className="field">網址<input type="url" value={form.url ?? ''} onChange={(e) => set('url', e.target.value || null)} placeholder="https://" /></label>}<label className="field">備註<textarea value={form.note ?? ''} onChange={(e) => set('note', e.target.value || null)} rows={4} /></label><p className="muted small">完整時區、重複、提醒、人物與標籤會在第二輪加入；資料欄位已先保留。</p></div>}

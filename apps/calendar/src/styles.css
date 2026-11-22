@@ -91,6 +91,9 @@ select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset:
 .type-choice { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 12px; }
 .type-choice button.active { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 700; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 10px; }
+.form-grid .time-field { margin: 0 0 11px; }
+.selected-start-date { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 12px; margin-bottom: 11px; color: var(--muted); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; }
+.selected-start-date strong { color: var(--text); }
 .more-toggle { border: 0; background: none; color: var(--accent); padding-left: 0; margin-bottom: 8px; }
 .more-fields { border-top: 1px solid var(--line); padding-top: 12px; }
 .form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
@@ -127,6 +130,16 @@ input[type='color'] { width: 44px; height: 42px; padding: 3px; border: 1px solid
 .group-row > input[type='text'] { flex: 1; }
 .switch { display: inline-flex; gap: 4px; align-items: center; font-size: .83rem; color: var(--muted); }
 .icon-small { padding: 5px 9px; }
+
+/* 更多 */
+.more-menu { display: grid; gap: 8px; max-width: 680px; }
+.more-menu > h2 { margin: 4px 2px; }
+.more-menu-item { width: 100%; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; padding: 14px; text-align: left; background: var(--card); }
+.more-menu-item > span { display: grid; gap: 2px; }
+.more-menu-item small { color: var(--muted); font-weight: 400; }
+.more-back { margin-bottom: 10px; }
+.issue-row { padding: 10px 0; border-top: 1px solid var(--line); }
+.issue-row p { margin: 3px 0 0; color: var(--muted); }
 
 .fab {
   position: fixed; right: max(20px, calc((100vw - 820px) / 2 + 20px)); bottom: calc(76px + env(safe-area-inset-bottom));
