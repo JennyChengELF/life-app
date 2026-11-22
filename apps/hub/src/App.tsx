@@ -1,9 +1,8 @@
 import { useState } from 'react';
-import { Icon, type IconName } from '@life/ui/icon';
-import { MonthCalendar } from '@life/ui/month-calendar';
+import { Icon } from '@life/ui/icon';
 import type { TimelineEntry } from '@life/db';
-import { bowelEntries, bowelHomeMessage, editHash, fmtMoney, depositsDue, healthEntries, loanReminders, moneyDayTotals, moneyEntries, resolvePinned, stocktakeStatus, sortEntries, todayKey, waterEntries, waterSummary } from '@life/db';
-import { dateLabel, Timeline } from '@life/ui/timeline';
+import { bowelEntries, bowelHomeMessage, editHash, fmtMoney, depositsDue, healthEntries, loanReminders, moneyDayTotals, moneyEntries, stocktakeStatus, sortEntries, todayKey, waterEntries, waterSummary } from '@life/db';
+import { DateNav, Timeline } from '@life/ui/timeline';
 import { AppSwitcher } from '@life/ui/app-switcher';
 import { useHub } from './useHub';
 
@@ -24,172 +23,9 @@ function appUrl(app: AppKey, hash = '', date?: string) {
   return import.meta.env.DEV ? `http://${location.hostname}:${DEV_PORTS[app]}/${q}${hash}` : `${app}/${q}${hash}`;
 }
 
-interface Tile {
-  key: string;
-  app: AppKey;
-  hash: string;
-  icon: IconName;
-  label: string;
-}
-
-/** 所有按鈕（key 存在設定裡，不要改） */
-const TILES: Tile[] = [
-  { key: 'water', app: 'water', hash: '', icon: 'droplet', label: '喝水' },
-  // 一鍵記錄：打開排便 APP 就記一筆、展開詳細欄位，填完回首頁（2026-11-18 確認）
-  { key: 'bowelNew', app: 'bowel', hash: '#new', icon: 'toilet', label: '記排便' },
-  { key: 'body', app: 'health', hash: '#new', icon: 'weight', label: '記體重' },
-  { key: 'bp', app: 'health', hash: '#bp', icon: 'heartPulse', label: '記血壓' },
-  { key: 'glucose', app: 'health', hash: '#glucose', icon: 'candy', label: '記血糖' },
-  { key: 'temp', app: 'health', hash: '#temp', icon: 'thermometer', label: '記體溫' },
-  { key: 'health', app: 'health', hash: '', icon: 'stethoscope', label: '健康' },
-  { key: 'bowel', app: 'bowel', hash: '', icon: 'calendar', label: '廁所大事' },
-  { key: 'period', app: 'period', hash: '', icon: 'calendar', label: '生理期' },
-  { key: 'moneyNew', app: 'money', hash: '#new', icon: 'pencil', label: '記一筆' },
-  { key: 'money', app: 'money', hash: '', icon: 'wallet', label: '記帳' },
-  { key: 'calendar', app: 'calendar', hash: '', icon: 'calendar', label: '行事曆' },
-];
-const tileOf = (k: string) => TILES.find((t) => t.key === k)!;
-
-/**
- * 類別（2026-11-18 確認：首頁上面是自己勾的「常用」，下面是類別資料夾，所有功能都找得到）。
- * 💡 目前有健康、記帳；子彈筆記等做好再加
- */
-const GROUPS: { key: string; icon: IconName; label: string; tiles: string[] }[] = [
-  { key: 'health', icon: 'stethoscope', label: '健康', tiles: ['water', 'bowelNew', 'body', 'bp', 'glucose', 'temp', 'health', 'bowel', 'period'] },
-  { key: 'money', icon: 'wallet', label: '記帳', tiles: ['moneyNew', 'money'] },
-  { key: 'calendar', icon: 'calendar', label: '行程', tiles: ['calendar'] },
-];
-
-/** 💡 還沒設定過時的常用（和原本首頁一樣） */
-const DEFAULT_PINNED = ['water', 'bowelNew', 'body', 'bp', 'glucose'];
-
 function requestedDate() {
   const value = new URLSearchParams(location.search).get('date');
   return value && /^\d{4}-\d{2}-\d{2}$/.test(value) && value <= todayKey() ? value : todayKey();
-}
-
-function TileLink({ t, date }: { t: Tile; date: string }) {
-  return (
-    <a className="tile" href={appUrl(t.app, t.hash, date)}>
-      <span className="tile-icon">
-        <Icon name={t.icon} size={26} />
-      </span>
-      {t.label}
-    </a>
-  );
-}
-
-function Launcher({ hub, date }: { hub: ReturnType<typeof useHub>; date: string }) {
-  const pinned = resolvePinned(
-    hub.hubSnap?.settings.pinned ?? null,
-    TILES.map((t) => t.key),
-    DEFAULT_PINNED,
-  );
-  const [open, setOpen] = useState<string | null>(null);
-  const [editing, setEditing] = useState<string[] | null>(null);
-  // 還沒連上試算表時不能存設定
-  const canEdit = hub.status === 'ready' && !!hub.hubSnap;
-
-  if (editing) return <PinEditor initial={editing} hub={hub} onClose={() => setEditing(null)} />;
-
-  const group = GROUPS.find((g) => g.key === open);
-  return (
-    <>
-      <div className="launch-head">
-        <span className="muted small">常用</span>
-        {canEdit && (
-          <button className="link small" onClick={() => setEditing(pinned)}>
-            <Icon name="pencil" size={16} /> 編輯
-          </button>
-        )}
-      </div>
-      {pinned.length > 0 ? (
-        <nav className="launcher">
-          {pinned.map((k) => (
-            <TileLink key={k} t={tileOf(k)} date={date} />
-          ))}
-        </nav>
-      ) : (
-        <p className="muted small">還沒有常用的按鈕，按「編輯」勾選。</p>
-      )}
-      <nav className="groups">
-        {GROUPS.map((g) => (
-          <button key={g.key} className={open === g.key ? 'active' : ''} aria-expanded={open === g.key} onClick={() => setOpen(open === g.key ? null : g.key)}>
-            <Icon name={g.icon} size={18} /> {g.label} {open === g.key ? '▴' : '▾'}
-          </button>
-        ))}
-      </nav>
-      {group && (
-        <nav className="launcher group-tiles">
-          {group.tiles.map((k) => (
-            <TileLink key={k} t={tileOf(k)} date={date} />
-          ))}
-        </nav>
-      )}
-    </>
-  );
-}
-
-/** 勾選常用的按鈕、調整順序 */
-function PinEditor({ initial, hub, onClose }: { initial: string[]; hub: ReturnType<typeof useHub>; onClose: () => void }) {
-  const [keys, setKeys] = useState(initial);
-  const move = (k: string, d: -1 | 1) => {
-    const i = keys.indexOf(k);
-    const j = i + d;
-    if (j < 0 || j >= keys.length) return;
-    const next = [...keys];
-    [next[i], next[j]] = [next[j], next[i]];
-    setKeys(next);
-  };
-  const toggle = (k: string) => setKeys(keys.includes(k) ? keys.filter((x) => x !== k) : [...keys, k]);
-  // 勾選的依順序在前，沒勾的照原本順序在後
-  const rows = [...keys.map(tileOf), ...TILES.filter((t) => !keys.includes(t.key))];
-  return (
-    <section className="card pin-editor">
-      <h2>首頁常用的按鈕</h2>
-      <p className="muted small">勾選的會顯示在首頁上面，用 ↑↓ 調整順序。沒勾的在下面的類別裡還是找得到。</p>
-      <ul className="order-list">
-        {rows.map((t) => {
-          const on = keys.includes(t.key);
-          const i = keys.indexOf(t.key);
-          return (
-            <li key={t.key} className={on ? '' : 'off'}>
-              <label className="check">
-                <input type="checkbox" checked={on} onChange={() => toggle(t.key)} />
-                <Icon name={t.icon} size={18} /> {t.label}
-              </label>
-              {on && (
-                <>
-                  <button className="icon-small" onClick={() => move(t.key, -1)} disabled={i === 0} aria-label={`${t.label} 往前`}>
-                    ↑
-                  </button>
-                  <button className="icon-small" onClick={() => move(t.key, 1)} disabled={i === keys.length - 1} aria-label={`${t.label} 往後`}>
-                    ↓
-                  </button>
-                </>
-              )}
-            </li>
-          );
-        })}
-      </ul>
-      {hub.error && <p className="error-text small">{hub.error}</p>}
-      <div className="editor-actions">
-        <button
-          className="primary"
-          disabled={hub.busy}
-          onClick={async () => {
-            if (await hub.savePinned(keys)) onClose();
-          }}
-        >
-          儲存
-        </button>
-        <button onClick={onClose}>取消</button>
-        <button className="link" onClick={() => setKeys(DEFAULT_PINNED)}>
-          恢復預設
-        </button>
-      </div>
-    </section>
-  );
 }
 
 export function App() {
@@ -221,28 +57,22 @@ function Day({ hub, date, setDate }: { hub: ReturnType<typeof useHub>; date: str
   if (hub.status === 'starting' || (hub.status === 'loading' && !hub.waterSnap)) return <div className="center muted">讀取中⋯⋯</div>;
   if (hub.status === 'need-connect')
     return (
-      <>
-        <Launcher hub={hub} date={date} />
-        <div className="center connect">
-          <p>連上 Google 試算表，就能在這裡看每天的紀錄。</p>
-          <button className="primary big" onClick={hub.connect}>
-            連線 Google
-          </button>
-          {hub.error && <p className="error-text">{hub.error}</p>}
-        </div>
-      </>
+      <div className="center connect">
+        <p>連上 Google 試算表，就能在這裡看每天的紀錄。</p>
+        <button className="primary big" onClick={hub.connect}>
+          連線 Google
+        </button>
+        {hub.error && <p className="error-text">{hub.error}</p>}
+      </div>
     );
   if (hub.status === 'error' || !hub.waterSnap || !hub.healthSnap || !hub.bowelSnap || !hub.moneySnap)
     return (
-      <>
-        <Launcher hub={hub} date={date} />
-        <div className="center">
-          <p className="error-text">{hub.error ?? '讀取失敗'}</p>
-          <button className="primary" onClick={() => location.reload()}>
-            重新載入
-          </button>
-        </div>
-      </>
+      <div className="center">
+        <p className="error-text">{hub.error ?? '讀取失敗'}</p>
+        <button className="primary" onClick={() => location.reload()}>
+          重新載入
+        </button>
+      </div>
     );
 
   const w = waterSummary(hub.waterSnap, date);
@@ -252,16 +82,6 @@ function Day({ hub, date, setDate }: { hub: ReturnType<typeof useHub>; date: str
     ...bowelEntries(hub.bowelSnap, date),
     ...moneyEntries(hub.moneySnap, date),
   ]);
-  const calendarInfo = (calendarDate: string) => {
-    const dayEntries = [
-      ...healthEntries(hub.healthSnap!, calendarDate),
-      ...waterEntries(hub.waterSnap!, calendarDate),
-      ...bowelEntries(hub.bowelSnap!, calendarDate),
-      ...moneyEntries(hub.moneySnap!, calendarDate),
-    ];
-    if (dayEntries.length === 0) return null;
-    return { marks: [{ color: 'var(--accent)', kind: 'dot' as const }], label: `${dayEntries.length} 筆生活紀錄` };
-  };
   const money = moneyDayTotals(hub.moneySnap, date);
   // 借出太久沒還（天數在記帳 APP 設定，2026-11-18）
   const loans = loanReminders(hub.moneySnap);
@@ -316,10 +136,9 @@ function Day({ hub, date, setDate }: { hub: ReturnType<typeof useHub>; date: str
           </div>
         </div>
       )}
-      <MonthCalendar selected={date} setDate={setDate} dayInfo={calendarInfo} maxDate={todayKey()} />
-      <Launcher hub={hub} date={date} />
       <section className="card">
-        <h2>{dateLabel(date)}生活紀錄</h2>
+        {/* 2026-11-22 使用者決定：綜合首頁尚在規劃，暫時只用日期列，不顯示月曆與快速按鈕。 */}
+        <DateNav date={date} setDate={setDate} />
         <a className="water-sum" href={appUrl('water', '', date)}>
           <span className="sum-icon">
             <Icon name="droplet" size={18} />
