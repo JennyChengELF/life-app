@@ -60,6 +60,29 @@ main { padding-top: 8px; }
 /* ── 上方列 ── */
 .topbar { display: flex; align-items: center; gap: 12px; padding: 14px 0 8px; position: sticky; top: 0; background: var(--bg); z-index: 5; }
 .topbar h1 { flex: 1; }
+body:has(.app-switcher-layer) .topbar { z-index: 30; }
+.app-switcher-trigger { flex: none; }
+.app-switcher-layer {
+  position: fixed; inset: 0; z-index: 40; background: rgba(13, 25, 40, .28);
+  padding: calc(62px + env(safe-area-inset-top)) 12px calc(78px + env(safe-area-inset-bottom));
+}
+.app-switcher-panel {
+  width: min(320px, calc(100vw - 24px)); max-height: 100%; overflow: auto;
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: 0 12px 36px rgba(20, 30, 60, .2); padding: 12px;
+}
+.app-switcher-head { display: flex; align-items: center; justify-content: space-between; padding: 0 2px 8px 8px; border-bottom: 1px solid var(--line); }
+.app-switcher-head h2 { margin: 0; }
+.app-switcher-list { display: grid; gap: 4px; padding-top: 8px; }
+.app-switcher-list > button {
+  width: 100%; border: 1px solid transparent; background: transparent; border-radius: 12px;
+  padding: 9px 10px; display: grid; grid-template-columns: 36px 1fr auto; gap: 9px; align-items: center;
+  text-align: left; cursor: pointer;
+}
+.app-switcher-list > button:hover { background: var(--accent-soft); }
+.app-switcher-list > button.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-strong); font-weight: 700; }
+.app-switcher-icon { width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; border-radius: 10px; background: var(--bg); color: var(--accent); }
+.app-switcher-list small { color: var(--accent); font-weight: 700; }
 .tabs-top { display: none; gap: 4px; }
 .tabs-top button { border: 0; background: none; padding: 6px 12px; border-radius: 999px; cursor: pointer; color: var(--muted); }
 .tabs-top button.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
@@ -79,6 +102,7 @@ main { padding-top: 8px; }
   .tabs-top { display: flex; }
   .tabs-bottom { display: none; }
   .app { padding-bottom: 32px; }
+  .app-switcher-layer { padding-bottom: 12px; }
 }
 
 .mode-banner { background: var(--warn-soft); color: var(--warn); font-size: 0.85rem; padding: 6px 12px; border-radius: 10px; margin-bottom: 8px; }

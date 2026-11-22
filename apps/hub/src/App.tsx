@@ -4,7 +4,10 @@ import { MonthCalendar } from '@life/ui/month-calendar';
 import type { TimelineEntry } from '@life/db';
 import { bowelEntries, bowelHomeMessage, editHash, fmtMoney, depositsDue, healthEntries, loanReminders, moneyDayTotals, moneyEntries, resolvePinned, stocktakeStatus, sortEntries, todayKey, waterEntries, waterSummary } from '@life/db';
 import { dateLabel, Timeline } from '@life/ui/timeline';
+import { AppSwitcher } from '@life/ui/app-switcher';
 import { useHub } from './useHub';
+
+const HOME_URL = import.meta.env.DEV ? `http://${location.hostname}:5172/` : './';
 
 type AppKey = 'water' | 'health' | 'bowel' | 'money' | 'calendar' | 'period';
 
@@ -196,6 +199,7 @@ export function App() {
   return (
     <div className="app hub">
       <header className="topbar">
+        <AppSwitcher current="hub" homeUrl={HOME_URL} date={date} />
         <h1>生活</h1>
         {hub.status === 'ready' && (
           <button className="icon-btn" onClick={hub.refresh} disabled={hub.busy} title="重新整理（讀取試算表最新資料）" aria-label="重新整理">

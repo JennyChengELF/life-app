@@ -14,6 +14,7 @@ import {
   type TripChildAction,
 } from '@life/db';
 import { useCalendar, type CalendarApi } from './useCalendar';
+import { AppSwitcher } from '@life/ui/app-switcher';
 
 const HOME_URL = import.meta.env.DEV ? `http://${location.hostname}:5172/` : '../';
 type Tab = 'month' | 'agenda' | 'groups';
@@ -140,7 +141,7 @@ export function App() {
   };
 
   return (
-    <Shell api={api} tab={tab} goTab={goTab}>
+    <Shell api={api} tab={tab} goTab={goTab} date={selectedDate} confirmLeave={open?.kind === 'form' || open?.kind === 'trip-change'}>
       {open?.kind === 'form' ? (
         <EventForm snap={snap} event={openedEvent} initialDate={open.date} parentId={open.parentId} busy={api.busy} onCancel={() => setOpen(open.eventId ? { kind: 'detail', id: open.eventId } : null)} onSave={saveEvent} />
       ) : open?.kind === 'detail' && openedEvent ? (
@@ -160,11 +161,11 @@ export function App() {
   );
 }
 
-function Shell({ api, tab, goTab, children }: { api: CalendarApi; tab?: Tab; goTab?: (t: Tab) => void; children: React.ReactNode }) {
+function Shell({ api, tab, goTab, date, confirmLeave = false, children }: { api: CalendarApi; tab?: Tab; goTab?: (t: Tab) => void; date?: string; confirmLeave?: boolean; children: React.ReactNode }) {
   return (
     <div className="app calendar-app">
       <header className="topbar">
-        <a className="icon-btn home-link" href={HOME_URL + location.search} title="回首頁" aria-label="回首頁"><Icon name="home" /></a>
+        <AppSwitcher current="calendar" homeUrl={HOME_URL} date={date} confirmLeave={confirmLeave} />
         <h1>行事曆</h1>
         {tab && goTab && <nav className="tabs-top">{TABS.map((t) => <button key={t.key} className={tab === t.key ? 'active' : ''} onClick={() => goTab(t.key)}><Icon name={t.icon} size={20} /> {t.label}</button>)}</nav>}
         {api.status === 'ready' && <button className="icon-btn" onClick={api.refresh} disabled={api.busy} title="重新整理" aria-label="重新整理"><span className={api.busy ? 'spin' : ''}><Icon name="refresh" /></span></button>}

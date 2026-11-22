@@ -6,6 +6,7 @@ import { TodayView } from './components/TodayView';
 import { CalendarView } from './components/CalendarView';
 import { StatsView } from './components/StatsView';
 import { SettingsView } from './components/SettingsView';
+import { AppSwitcher } from '@life/ui/app-switcher';
 
 const HOME_URL = import.meta.env.DEV ? `http://${location.hostname}:5172/` : '../';
 export type Tab = 'today' | 'calendar' | 'stats' | 'settings';
@@ -23,7 +24,7 @@ function requestedDate() {
 
 export function App() {
   const api = usePeriod();
-  const [tab, setTab] = useState<Tab>('today');
+  const [tab, setTab] = useState<Tab>(() => location.hash === '#calendar' ? 'calendar' : 'today');
   const [date, setDate] = useState(requestedDate);
   const [editRequest, setEditRequest] = useState<number | null>(null);
   const openDate = (d: string) => {
@@ -42,7 +43,7 @@ export function App() {
   return (
     <div className="app period-app">
       <header className="topbar">
-        <a className="icon-btn home-link" href={HOME_URL + location.search} title="回首頁" aria-label="回首頁"><Icon name="home" /></a>
+        <AppSwitcher current="period" homeUrl={HOME_URL} date={date} confirmLeave={tab === 'settings'} />
         <h1>生理期</h1>
         <nav className="tabs-top">
           {TABS.map((t) => <button key={t.key} className={tab === t.key ? 'active' : ''} onClick={() => setTab(t.key)}><Icon name={t.icon} size={20} /> {t.label}</button>)}
@@ -56,7 +57,7 @@ export function App() {
           : api.status === 'error' ? <div className="center"><p className="error-text">{api.error}</p><button className="primary" onClick={() => location.reload()}>重新載入</button></div>
           : api.snap && api.conditions ? <>
               {tab === 'today' && <TodayView api={api} snap={api.snap} conditions={api.conditions} date={date} setDate={setDate} goSettings={() => setTab('settings')} editRequest={editRequest} onEditRequestHandled={() => setEditRequest(null)} />}
-              {tab === 'calendar' && <CalendarView snap={api.snap} conditions={api.conditions} editDate={editDate} />}
+              {tab === 'calendar' && <CalendarView snap={api.snap} selected={date} conditions={api.conditions} editDate={editDate} />}
               {tab === 'stats' && <StatsView api={api} snap={api.snap} openDate={openDate} />}
               {tab === 'settings' && <SettingsView api={api} snap={api.snap} conditions={api.conditions} />}
             </> : null}

@@ -14,6 +14,7 @@ import { OccView } from './components/OccView';
 import { SettingsView } from './components/SettingsView';
 import { IssuesView } from './components/IssuesView';
 import { LabView } from './components/LabView';
+import { AppSwitcher } from '@life/ui/app-switcher';
 
 /** 綜合首頁：上線時在上一層路徑；開發時是另一個 port */
 const HOME_URL = import.meta.env.DEV ? `http://${location.hostname}:5172/` : '../';
@@ -192,9 +193,12 @@ export function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <a className="icon-btn home-link" href={HOME_URL + location.search} title="回首頁" aria-label="回首頁">
-          <Icon name="home" />
-        </a>
+        <AppSwitcher
+          current="health"
+          homeUrl={HOME_URL}
+          date={overviewDate}
+          confirmLeave={tab === 'bodyForm' || vitalForm !== null || labOpen?.mode === 'form' || tab === 'occ' || tab === 'settings'}
+        />
         <h1>健康</h1>
         <nav className="tabs-top">
           {TABS.map((t) => (
