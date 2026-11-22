@@ -10,7 +10,7 @@ export function IssuesView({ api, snap, onDone }: { api: BowelApi; snap: BowelSn
       <div className="center">
         <p>✅ 沒有需要補齊的資料</p>
         <button className="primary" onClick={onDone}>
-          回今天
+          返回更多
         </button>
       </div>
     );

@@ -8,7 +8,7 @@ export interface MonthCalendarMark {
   /** CSS 顏色；可使用 var(--ok) 等共用色彩變數。 */
   color?: string;
   label?: string;
-  kind?: 'dot' | 'bar' | 'text';
+  kind?: 'dot' | 'bar' | 'text' | 'badge' | 'ring';
   /** bar 的完成比例（0～1）；未提供時維持固定寬度。 */
   progress?: number;
   /** bar 內的短文字，例如喝水達標的 ✓。 */
@@ -102,7 +102,7 @@ export function MonthCalendar({
                 {marks.map((mark, index) => (
                   <i
                     key={`${mark.label ?? mark.color ?? 'mark'}-${index}`}
-                    className={mark.kind === 'bar' ? 'bar' : mark.kind === 'text' ? 'text' : 'dot'}
+                    className={mark.kind === 'bar' ? 'bar' : mark.kind === 'text' ? 'text' : mark.kind === 'badge' ? 'badge' : mark.kind === 'ring' ? 'ring' : 'dot'}
                     style={{
                       '--mark-color': mark.color ?? 'var(--accent)',
                       ...(mark.progress == null ? {} : { width: `${Math.max(8, Math.min(100, mark.progress * 100))}%` }),

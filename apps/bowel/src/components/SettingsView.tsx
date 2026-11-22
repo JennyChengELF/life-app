@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import type { BowelSnapshot } from '@life/db';
 import type { BowelApi } from '../useBowel';
+import { Icon } from '@life/ui/icon';
 
-export function SettingsView({ api, snap }: { api: BowelApi; snap: BowelSnapshot }) {
+export function SettingsView({ api, snap, section, onBack }: { api: BowelApi; snap: BowelSnapshot; section: 'settings' | 'data'; onBack: () => void }) {
   const [days, setDays] = useState(String(snap.settings.constipationDays));
   const [gain, setGain] = useState(String(snap.settings.weightGainKg));
   const changed = days !== String(snap.settings.constipationDays) || gain !== String(snap.settings.weightGainKg);
@@ -10,7 +11,8 @@ export function SettingsView({ api, snap }: { api: BowelApi; snap: BowelSnapshot
 
   return (
     <div className="settings">
-      <section className="card">
+      <button type="button" className="link more-back" onClick={onBack}><Icon name="left" size={18} /> 返回更多</button>
+      {section === 'settings' && <section className="card">
         <h2>提醒</h2>
         <label className="field">
           幾天沒排便算便秘（1–14 天）
@@ -32,9 +34,9 @@ export function SettingsView({ api, snap }: { api: BowelApi; snap: BowelSnapshot
             儲存
           </button>
         </div>
-      </section>
+      </section>}
 
-      <section className="card">
+      {section === 'data' && <section className="card">
         <h2>資料</h2>
         {api.mode === 'local' ? (
           <p className="muted">本機測試模式：資料只存在這個瀏覽器。設定好 Google 後會改存到你的 Google 試算表。</p>
@@ -56,7 +58,7 @@ export function SettingsView({ api, snap }: { api: BowelApi; snap: BowelSnapshot
             </div>
           </>
         )}
-      </section>
+      </section>}
     </div>
   );
 }

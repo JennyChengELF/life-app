@@ -3,6 +3,7 @@ import type { BowelInput, BowelLog, BowelType, SingleField, Symptom } from '@lif
 import { BOWEL_TYPES, judgeBowel, parseDateTimeText, SINGLE_FIELDS, SYMPTOMS, toDateKey, toInputDateTime, typeLabel } from '@life/db';
 import type { BowelApi } from '../useBowel';
 import { COLOR_SWATCH, TypeIcon } from './icons';
+import { DateTimeField } from '@life/ui/date-time-field';
 
 type Patch = Partial<BowelInput> & { time?: number };
 
@@ -121,7 +122,7 @@ export function LogEditor(props: { api: BowelApi; log: BowelLog; onClose: () => 
   return (
     <div className="editor bowel-editor">
       <div className="ed-head">
-        <input type="datetime-local" value={time} onChange={(e) => saveTime(e.target.value)} aria-label="時間" />
+        <DateTimeField value={time} onChange={saveTime} label="排便日期" maxDate={toDateKey(Date.now())} />
         <span className="ed-kind">{d.passed ? '💩 有排出' : '尚未選型態（沒排出）'}</span>
         {judge && <span className={`lv ${judge.level}`}>{judge.label}</span>}
       </div>

@@ -33,7 +33,7 @@
 /* 詳細欄位 */
 .editor { background: var(--bg); border-radius: 10px; padding: 12px; margin: 6px 0; }
 .ed-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
-.ed-head input { flex: 1 1 200px; width: auto; }
+.ed-head .date-time-field { flex: 1 1 100%; }
 .ed-kind { font-weight: 600; }
 .field { display: block; margin-bottom: 10px; font-size: 0.9rem; color: var(--muted); }
 .field input { margin-top: 4px; color: var(--text); }
@@ -91,3 +91,15 @@ h2.sub { margin-top: 16px; }
 .dist-bar i { display: block; height: 100%; min-width: 2px; background: var(--accent); border-radius: 0 4px 4px 0; }
 .dist-num { text-align: right; font-variant-numeric: tabular-nums; font-size: 0.88rem; }
 .add-row .primary .icon { vertical-align: -4px; }
+
+/* 日曆唯讀紀錄與快速新增 */
+.fab { position: fixed; right: max(18px, calc((100vw - 720px) / 2 + 18px)); bottom: calc(82px + env(safe-area-inset-bottom)); width: 56px; height: 56px; border: 0; border-radius: 18px; color: #fff; background: var(--accent); box-shadow: 0 6px 18px rgb(20 55 95 / 25%); z-index: 6; padding: 0; display: grid; place-items: center; }
+.readonly-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.readonly-head h2 { margin: 0; }
+.bowel-readonly dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin: 12px 0; }
+.bowel-readonly dl div { background: var(--bg); border-radius: 8px; padding: 7px 9px; }
+.bowel-readonly dt { color: var(--muted); font-size: .75rem; }
+.bowel-readonly dd { margin: 2px 0 0; font-weight: 600; }
+.attention-box { background: var(--warn-soft); border-radius: 10px; padding: 10px 12px; margin: 10px 0; }
+.attention-box.bad { background: var(--danger-soft); }
+.attention-box ul { margin: 5px 0; padding-left: 1.3em; }

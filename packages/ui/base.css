@@ -217,6 +217,8 @@ button.link { border: 0; background: none; color: var(--accent); padding: 4px 6p
 .date-calendar-marks { min-height: 7px; display: flex; align-items: center; justify-content: center; gap: 3px; width: 100%; }
 .date-calendar-marks i { display: block; background: var(--mark-color); flex: none; }
 .date-calendar-marks .dot { width: 6px; height: 6px; border-radius: 50%; }
+.date-calendar-marks .badge, .date-calendar-marks .ring { width: 14px; height: 14px; border-radius: 50%; color: #fff; font-size: 8px; line-height: 14px; font-style: normal; font-weight: 800; }
+.date-calendar-marks .ring { background: transparent; border: 2px solid var(--mark-color); }
 .date-calendar-marks .text { width: auto; height: auto; background: none; color: var(--mark-color); font-size: 9px; line-height: 1; font-style: normal; font-weight: 700; }
 .date-calendar-marks .bar { position: static; inset: auto; display: block; flex-direction: initial; overflow: visible; width: 16px; height: 4px; border-radius: 4px; opacity: 1; }
 .date-calendar-marks .bar:not(:empty) { height: 9px; color: #fff; font-size: 8px; line-height: 9px; font-style: normal; font-weight: 800; }
