@@ -3,10 +3,10 @@ import type { WaterSnapshot } from '@life/db';
 import { addDays, drinkOf, todayKey } from '@life/db';
 import { drinkColor, totalsByDrink } from '../drinkColors';
 
-const RANGES = [14, 30, 90];
+const RANGES = [7, 30];
 
 export function StatsView({ snap, onPickDate }: { snap: WaterSnapshot; onPickDate: (d: string) => void }) {
-  const [range, setRange] = useState(14);
+  const [range, setRange] = useState(7);
   const today = todayKey();
 
   const dates = Array.from({ length: range }, (_, i) => addDays(today, i - range + 1));
@@ -15,7 +15,7 @@ export function StatsView({ snap, onPickDate }: { snap: WaterSnapshot; onPickDat
   const rows = dates.map((d) => {
     const day = snap.days.get(d);
     const parts = totalsByDrink(items.filter((it) => it.date === d), snap.drinks);
-    return { date: d, total: day?.total ?? 0, goal: day?.goal ?? null, achieved: day?.achieved ?? false, parts };
+    return { date: d, total: parts.reduce((sum, part) => sum + part.ml, 0), goal: day?.goal ?? null, achieved: day?.achieved ?? false, parts };
   });
   const rangeByDrink = totalsByDrink(items, snap.drinks);
   const rangeTotal = rangeByDrink.reduce((s, b) => s + b.ml, 0);
@@ -25,20 +25,17 @@ export function StatsView({ snap, onPickDate }: { snap: WaterSnapshot; onPickDat
   const tracked = rows.filter((r) => r.goal != null);
   const achievedDays = tracked.filter((r) => r.achieved).length;
   const avg = tracked.length ? Math.round(tracked.reduce((s, r) => s + r.total, 0) / tracked.length) : 0;
-
-  const month = today.slice(0, 7);
-  const monthDays = [...snap.days.values()].filter((d) => d.date.startsWith(month) && d.date <= today);
-  const monthAchieved = monthDays.filter((d) => d.achieved).length;
+  const achievedRate = tracked.length ? Math.round((achievedDays / tracked.length) * 100) : 0;
 
   return (
     <div className="stats">
       <div className="summary">
         <div className="card stat">
           <div className="stat-num">
-            {monthAchieved}
-            <small> / {monthDays.length} 天</small>
+            {rangeTotal.toLocaleString()}
+            <small> ml</small>
           </div>
-          <div className="muted small">本月達標</div>
+          <div className="muted small">總飲用量</div>
         </div>
         <div className="card stat">
           <div className="stat-num">
@@ -54,6 +51,7 @@ export function StatsView({ snap, onPickDate }: { snap: WaterSnapshot; onPickDat
           </div>
           <div className="muted small">近 {range} 天平均</div>
         </div>
+        <div className="card stat"><div className="stat-num">{achievedRate}<small>%</small></div><div className="muted small">達標率</div></div>
       </div>
 
       <section className="card">

@@ -4,18 +4,32 @@ import type { Cup, WaterSnapshot } from '@life/db';
 import { computeGoal, FACTOR_MAX, FACTOR_MIN, goalWeight, latestWeight, toDateKey, todayKey, toHHmm } from '@life/db';
 import type { WaterApi } from '../useWater';
 import { drinkColor } from '../drinkColors';
+import { IssuesView } from './IssuesView';
+
+type MorePage = 'menu' | 'goal' | 'drinks' | 'cups' | 'data' | 'issues';
 
 export function SettingsView({ api, snap }: { api: WaterApi; snap: WaterSnapshot }) {
+  const [page, setPage] = useState<MorePage>('menu');
+  const issueCount = snap.waterIssues.length + snap.weightIssues.length;
+  if (page === 'issues') return <SubPage title="需要處理的資料" onBack={() => setPage('menu')}><IssuesView api={api} snap={snap} onDone={() => setPage('menu')} /></SubPage>;
+  if (page === 'goal') return <SubPage title="每日目標" onBack={() => setPage('menu')}><WeightCard api={api} snap={snap} /><GoalCard api={api} snap={snap} /><p className="muted small center-text">喝水目標僅供參考，不能取代醫療建議；有醫囑限水請依醫師指示。</p></SubPage>;
+  if (page === 'drinks') return <SubPage title="飲品清單" onBack={() => setPage('menu')}><DrinksCard api={api} snap={snap} /></SubPage>;
+  if (page === 'cups') return <SubPage title="常用杯子" onBack={() => setPage('menu')}><CupsCard api={api} snap={snap} /></SubPage>;
+  if (page === 'data') return <SubPage title="資料與試算表" onBack={() => setPage('menu')}><DataCard api={api} /></SubPage>;
   return (
-    <div className="settings">
-      <WeightCard api={api} snap={snap} />
-      <GoalCard api={api} snap={snap} />
-      <DrinksCard api={api} snap={snap} />
-      <CupsCard api={api} snap={snap} />
-      <DataCard api={api} />
-      <p className="muted small center-text">喝水目標僅供參考，不能取代醫療建議；有醫囑限水請依醫師指示。</p>
+    <div className="settings more-menu">
+      <h2>更多</h2>
+      <button type="button" className="more-row" onClick={() => setPage('goal')}><Icon name="droplet" /><span><b>每日目標</b><small>體重、每公斤係數與額外加量</small></span><Icon name="right" /></button>
+      <button type="button" className="more-row" onClick={() => setPage('drinks')}><Icon name="book" /><span><b>飲品清單</b><small>新增、改名與預設飲品</small></span><Icon name="right" /></button>
+      <button type="button" className="more-row" onClick={() => setPage('cups')}><Icon name="cup" /><span><b>常用杯子</b><small>管理杯子名稱與容量</small></span><Icon name="right" /></button>
+      <button type="button" className="more-row" onClick={() => setPage('data')}><Icon name="clipboard" /><span><b>資料與試算表</b><small>開啟資料或中斷 Google 連線</small></span><Icon name="right" /></button>
+      {issueCount > 0 && <button type="button" className="more-row warn" onClick={() => setPage('issues')}><Icon name="alert" /><span><b>需要處理的資料</b><small>{issueCount} 筆資料需要補齊</small></span><Icon name="right" /></button>}
     </div>
   );
+}
+
+function SubPage({ title, onBack, children }: { title: string; onBack: () => void; children: React.ReactNode }) {
+  return <div className="settings more-subpage"><button type="button" className="link more-back" onClick={onBack}><Icon name="left" size={18} /> 返回更多</button><h2>{title}</h2>{children}</div>;
 }
 
 function WeightCard({ api, snap }: { api: WaterApi; snap: WaterSnapshot }) {
@@ -278,7 +292,7 @@ function DataCard({ api }: { api: WaterApi }) {
   const health = api.fileUrl('health');
   return (
     <section className="card">
-      <h2>資料</h2>
+      <h2>資料與試算表</h2>
       {api.mode === 'local' ? (
         <p className="muted">本機測試模式：資料只存在這個瀏覽器。設定好 Google 後會改存到你的 Google 試算表。</p>
       ) : (

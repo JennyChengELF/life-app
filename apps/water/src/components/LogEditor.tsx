@@ -1,9 +1,12 @@
 import { useState } from 'react';
-import { parseDateTimeText, toInputDateTime } from '@life/db';
+import { startOfDay, toDateKey, toHHmm } from '@life/db';
+import { TimeField } from '@life/ui/time-field';
 
 /** 修改一筆紀錄的時間與數量（喝水 ml / 體重 kg 共用） */
 export function LogEditor(props: {
   time: number | null;
+  /** 有日期時改用共用 24 小時欄位，不顯示系統上午／下午選擇器。 */
+  date?: string;
   amount: number | null;
   unit: 'ml' | 'kg';
   /** 有給 drinks 才顯示「喝什麼」 */
@@ -17,7 +20,9 @@ export function LogEditor(props: {
   onDelete?: () => void;
   deleteLabel?: string;
 }) {
-  const [time, setTime] = useState(props.time != null ? toInputDateTime(props.time) : toInputDateTime(Date.now()));
+  const initialTime = props.time ?? Date.now();
+  const [date, setDate] = useState(props.date ?? toDateKey(initialTime));
+  const [time, setTime] = useState(toHHmm(initialTime));
   const [amount, setAmount] = useState(props.amount != null ? String(props.amount) : '');
   const [err, setErr] = useState('');
   const [drink, setDrink] = useState(props.drink ?? props.drinks?.[0] ?? '');
@@ -27,7 +32,13 @@ export function LogEditor(props: {
   const options = props.drinks && drink && !props.drinks.includes(drink) ? [...props.drinks, drink] : props.drinks;
 
   const save = () => {
-    const t = parseDateTimeText(time);
+    const t = (() => {
+      const [hour, minute] = time.split(':').map(Number);
+      if (!Number.isInteger(hour) || !Number.isInteger(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+      const value = new Date(startOfDay(date));
+      value.setHours(hour, minute, 0, 0);
+      return value.getTime();
+    })();
     const a = Number(amount);
     if (t == null) return setErr('請選擇時間');
     if (!Number.isFinite(a) || a <= 0) return setErr(`請輸入 ${props.unit}`);
@@ -37,7 +48,8 @@ export function LogEditor(props: {
   return (
     <div className="editor">
       <div className="editor-fields">
-        <input type="datetime-local" value={time} onChange={(e) => setTime(e.target.value)} />
+        {!props.date && <input type="date" value={date} onChange={(event) => setDate(event.target.value)} aria-label="日期" />}
+        <TimeField value={time} onChange={setTime} />
         {options && (
           <select value={drink} onChange={(e) => setDrink(e.target.value)} aria-label="喝什麼">
             {options.map((d) => (

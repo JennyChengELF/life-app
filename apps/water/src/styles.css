@@ -1,10 +1,7 @@
 @import '@life/ui/base.css';
 
-/* ── 今天 ── */
-.date-nav { display: flex; align-items: center; gap: 4px; margin-bottom: 10px; }
-.date-label { font-weight: 600; min-width: 130px; text-align: center; }
-.today-grid { display: grid; gap: 0 12px; }
-@media (min-width: 760px) { .today-grid { grid-template-columns: 1fr 1fr; align-items: start; } }
+/* ── 新增／日曆 ── */
+.add-view, .calendar-view { padding-bottom: 72px; }
 
 .ring { position: relative; width: 200px; margin: 4px auto 12px; }
 .ring svg { width: 100%; display: block; }
@@ -34,12 +31,12 @@
 
 .editor { background: var(--bg); border-radius: 10px; padding: 10px; margin: 6px 0; list-style: none; }
 .editor-fields { display: flex; gap: 8px; flex-wrap: wrap; }
-.editor-fields input[type='datetime-local'] { flex: 1 1 200px; }
+.editor-fields input[type='date'] { flex: 1 1 150px; }
 .amount { display: flex; align-items: center; gap: 6px; flex: 0 1 140px; }
 .editor-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
 
 /* ── 統計 ── */
-.summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.summary { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
 .stat { text-align: center; padding: 12px 6px; }
 .stat-num { font-size: 1.4rem; font-weight: 700; }
 .stat-num small { font-size: 0.75rem; font-weight: 400; color: var(--muted); }
@@ -86,3 +83,18 @@
 .home-link { text-decoration: none; padding: 2px 4px; }
 .cup-btn .icon, .cup-name .icon { color: var(--accent); }
 .cup-name { display: inline-flex; align-items: center; gap: 6px; }
+
+/* ── 更多 ── */
+.more-menu > h2, .more-subpage > h2 { margin: 4px 2px 12px; }
+.more-row { width: 100%; display: grid; grid-template-columns: 34px 1fr 24px; gap: 8px; align-items: center; text-align: left; background: var(--card); border-color: var(--line); padding: 13px 12px; margin-bottom: 8px; }
+.more-row > .icon:first-child { color: var(--accent); }
+.more-row > .icon:last-child { color: var(--muted); }
+.more-row span { display: flex; flex-direction: column; gap: 2px; }
+.more-row small { color: var(--muted); font-size: .78rem; }
+.more-row.warn > .icon:first-child, .more-row.warn b { color: var(--warn); }
+.more-back { margin-bottom: 8px; }
+.more-back .icon { vertical-align: -4px; }
+
+/* 日曆右下角快速新增 */
+.fab { position: fixed; right: max(18px, calc((100vw - 640px) / 2 + 18px)); bottom: calc(82px + env(safe-area-inset-bottom)); width: 56px; height: 56px; border: 0; border-radius: 18px; color: #fff; background: var(--accent); box-shadow: 0 6px 18px rgb(20 55 95 / 25%); z-index: 6; padding: 0; display: grid; place-items: center; }
+@media (min-width: 760px) { .fab { bottom: 28px; } }

@@ -8,6 +8,9 @@
     "./timeline": "./src/Timeline.tsx",
     "./month-calendar": "./src/MonthCalendar.tsx",
     "./app-switcher": "./src/AppSwitcher.tsx",
+    "./app-tabs": "./src/AppTabs.tsx",
+    "./week-date-strip": "./src/WeekDateStrip.tsx",
+    "./time-field": "./src/TimeField.tsx",
     "./icon": "./src/Icon.tsx"
   },
   "peerDependencies": {

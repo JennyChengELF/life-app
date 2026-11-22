@@ -1,22 +1,24 @@
 import { useEffect, useState } from 'react';
-import { Icon, type IconName } from '@life/ui/icon';
+import { Icon } from '@life/ui/icon';
+import { AppTabs, type AppTabItem } from '@life/ui/app-tabs';
 import { parseEditHash, todayKey } from '@life/db';
 import { useWater } from './useWater';
-import { TodayView } from './components/TodayView';
+import { AddView } from './components/AddView';
+import { CalendarView } from './components/CalendarView';
 import { StatsView } from './components/StatsView';
 import { SettingsView } from './components/SettingsView';
-import { IssuesView } from './components/IssuesView';
 import { AppSwitcher } from '@life/ui/app-switcher';
 
 /** 綜合首頁：上線時在上一層路徑；開發時是另一個 port */
 const HOME_URL = import.meta.env.DEV ? `http://${location.hostname}:5172/` : "../";
 
-export type Tab = 'today' | 'stats' | 'settings' | 'issues';
+export type Tab = 'add' | 'calendar' | 'stats' | 'more';
 
-const TABS: { key: Tab; icon: IconName; label: string }[] = [
-  { key: 'today', icon: 'droplet', label: '今天' },
+const TABS: AppTabItem<Tab>[] = [
+  { key: 'add', icon: 'plus', label: '新增' },
+  { key: 'calendar', icon: 'calendar', label: '日曆' },
   { key: 'stats', icon: 'chart', label: '統計' },
-  { key: 'settings', icon: 'settings', label: '設定' },
+  { key: 'more', icon: 'more', label: '更多' },
 ];
 
 function requestedDate() {
@@ -26,11 +28,20 @@ function requestedDate() {
 
 export function App() {
   const api = useWater();
-  const [tab, setTab] = useState<Tab>('today');
+  const [tab, setTab] = useState<Tab>(() => location.hash === '#new' ? 'add' : 'calendar');
   const [date, setDate] = useState(requestedDate);
   /** 從綜合首頁點某一筆喝水進來（#edit/water/id）：資料讀好後打開它，改完回首頁 */
   const [pendingEdit, setPendingEdit] = useState(() => parseEditHash(location.hash));
   const [editFromHome, setEditFromHome] = useState<string | null>(null);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [addDirty, setAddDirty] = useState(false);
+
+  const goTo = (next: Tab) => {
+    if (next === tab) return;
+    if (tab === 'add' && addDirty && !confirm('目前有尚未儲存的內容，確定要離開新增頁嗎？')) return;
+    if (next !== 'add') setEditId(null);
+    setTab(next);
+  };
 
   useEffect(() => {
     if (!pendingEdit || !api.snap) return;
@@ -38,23 +49,18 @@ export function App() {
     history.replaceState(null, '', location.pathname + location.search);
     const log = api.snap.logs.find((l) => l.id === pendingEdit.id);
     if (!log) return api.showToast({ kind: 'error', text: '找不到這一筆（可能已經刪除）' });
-    setTab('today');
+    setTab('add');
     setDate(log.date);
     setEditFromHome(log.id);
+    setEditId(log.id);
   }, [pendingEdit, api.snap, api]);
 
   return (
     <div className="app">
       <header className="topbar">
-        <AppSwitcher current="water" homeUrl={HOME_URL} date={date} confirmLeave={tab === 'settings'} />
+        <AppSwitcher current="water" homeUrl={HOME_URL} date={date} confirmLeave={(tab === 'add' && addDirty) || tab === 'more'} />
         <h1>喝水</h1>
-        <nav className="tabs-top">
-          {TABS.map((t) => (
-            <button key={t.key} className={tab === t.key ? 'active' : ''} onClick={() => setTab(t.key)}>
-              <Icon name={t.icon} size={20} /> {t.label}
-            </button>
-          ))}
-        </nav>
+        <AppTabs items={TABS} current={tab} onChange={goTo} placement="top" />
         {api.status === 'ready' && (
           <button className="icon-btn" onClick={api.refresh} disabled={api.busy} title="重新整理（讀取試算表最新資料）" aria-label="重新整理">
             <span className={api.busy ? 'spin' : ''}>
@@ -89,40 +95,28 @@ export function App() {
           </div>
         ) : api.snap ? (
           <>
-            {tab === 'today' && <TodayView
-                api={api}
-                snap={api.snap}
-                date={date}
-                setDate={setDate}
-                goTo={setTab}
-                editId={editFromHome}
-                onEditDone={editFromHome ? () => (location.href = HOME_URL + location.search) : undefined}
-              />}
+            {tab === 'add' && <AddView api={api} snap={api.snap} date={date} setDate={setDate} editId={editId} onDirtyChange={setAddDirty} onDone={() => {
+              setEditId(null);
+              setAddDirty(false);
+              if (editFromHome) location.href = HOME_URL + location.search;
+              else setTab('calendar');
+            }} />}
+            {tab === 'calendar' && <CalendarView snap={api.snap} date={date} setDate={setDate} onAdd={() => { setEditId(null); setTab('add'); }} onEdit={(id) => { setEditId(id); setTab('add'); }} />}
             {tab === 'stats' && (
               <StatsView
                 snap={api.snap}
                 onPickDate={(d) => {
                   setDate(d);
-                  setTab('today');
+                  setTab('calendar');
                 }}
               />
             )}
-            {tab === 'settings' && <SettingsView api={api} snap={api.snap} />}
-            {tab === 'issues' && <IssuesView api={api} snap={api.snap} onDone={() => setTab('today')} />}
+            {tab === 'more' && <SettingsView api={api} snap={api.snap} />}
           </>
         ) : null}
       </main>
 
-      <nav className="tabs-bottom">
-        {TABS.map((t) => (
-          <button key={t.key} className={tab === t.key ? 'active' : ''} onClick={() => setTab(t.key)}>
-            <span className="tab-icon">
-              <Icon name={t.icon} />
-            </span>
-            {t.label}
-          </button>
-        ))}
-      </nav>
+      <AppTabs items={TABS} current={tab} onChange={goTo} placement="bottom" />
 
       {api.toast && (
         <div className={`toast ${api.toast.kind}`} key={api.toast.id}>

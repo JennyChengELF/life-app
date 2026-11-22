@@ -217,7 +217,27 @@ button.link { border: 0; background: none; color: var(--accent); padding: 4px 6p
 .date-calendar-marks { min-height: 7px; display: flex; align-items: center; justify-content: center; gap: 3px; width: 100%; }
 .date-calendar-marks i { display: block; background: var(--mark-color); flex: none; }
 .date-calendar-marks .dot { width: 6px; height: 6px; border-radius: 50%; }
-.date-calendar-marks .bar { width: 16px; height: 4px; border-radius: 4px; }
+.date-calendar-marks .bar { position: static; inset: auto; display: block; flex-direction: initial; overflow: visible; width: 16px; height: 4px; border-radius: 4px; opacity: 1; }
+.date-calendar-marks .bar:not(:empty) { height: 9px; color: #fff; font-size: 8px; line-height: 9px; font-style: normal; font-weight: 800; }
+
+/* ── 新增頁共用一週日期列（2026-11-22 使用者決定） ── */
+.week-strip-card { background: var(--card); border-bottom: 1px solid var(--line); padding: 8px 10px 10px; margin: -12px -12px 12px; }
+.week-strip-head { display: grid; grid-template-columns: 40px 1fr 40px; align-items: center; text-align: center; margin-bottom: 4px; }
+.week-strip-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
+.week-strip-days button { border: 1px solid transparent; background: none; padding: 5px 1px; border-radius: 10px; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.week-strip-days button small { color: var(--muted); font-size: .72rem; }
+.week-strip-days button span { font-weight: 650; }
+.week-strip-days button.today span { color: var(--accent); }
+.week-strip-days button.selected { background: var(--accent); border-color: var(--accent); color: #fff; }
+.week-strip-days button.selected small, .week-strip-days button.selected span { color: #fff; }
+.week-strip-today { display: block; margin: 5px auto -4px; }
+
+/* ── 共用 24 小時時間欄位（2026-11-22 使用者決定） ── */
+.time-field { border: 0; padding: 0; margin: 0 0 10px; display: flex; align-items: center; gap: 5px; }
+.time-field legend { font-size: .82rem; color: var(--muted); padding: 0; margin-bottom: 3px; width: 100%; }
+.time-field input { width: 3.2em; padding: 8px 5px; text-align: center; font-variant-numeric: tabular-nums; }
+.time-field b { font-size: 1.2rem; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 @media (min-width: 760px) {
   .date-calendar-day { min-height: 57px; }
