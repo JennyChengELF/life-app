@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { HealthSnapshot, LabItem, LabItemInput, LabKind, LabReport, LabResult, LabResultInput } from '@life/db';
-import { judgeLab, LAB_KINDS, rangeOf, rangeText, startOfDay, todayKey } from '@life/db';
+import { judgeLab, LAB_KINDS, labOrganizationOptions, rangeOf, rangeText, startOfDay, todayKey } from '@life/db';
 import type { HealthApi } from '../useHealth';
 import type { LabOpen, Nav } from '../App';
 import { parseNum } from '../format';
@@ -200,6 +200,8 @@ function ReportForm({ api, snap, nav, report, initialDate }: { api: HealthApi; s
   );
   const [touched, setTouched] = useState(!!report);
   const [adding, setAdding] = useState('');
+  const placeOptions = labOrganizationOptions(snap.organizations);
+  const currentPlaceOutsideOptions = !!place && !placeOptions.some((organization) => organization.name === place);
 
   // 新增時換種類：還沒填東西的話，換成那個種類上一次的項目
   const setKind = (k: LabKind) => {
@@ -244,7 +246,12 @@ function ReportForm({ api, snap, nav, report, initialDate }: { api: HealthApi; s
           </label>
           <label className="field">
             醫院 / 診所
-            <input value={place} onChange={(e) => setPlace(e.target.value)} />
+            <select value={place} onChange={(e) => setPlace(e.target.value)}>
+              <option value="">未選擇</option>
+              {currentPlaceOutsideOptions && <option value={place}>原有資料：{place}</option>}
+              {placeOptions.map((organization) => <option key={`${organization.rowNumber}-${organization.name}`} value={organization.name}>{organization.name}{organization.kind ? `（${organization.kind}）` : '（未分類）'}</option>)}
+            </select>
+            <small className="field-help">選項來自共用店家／機構，只顯示「醫療」或未分類。沒有選項時，請先到記帳 APP 的「更多 → 店家／機構」新增。</small>
           </label>
         </div>
         <div className="field">

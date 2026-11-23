@@ -182,6 +182,22 @@ export interface HealthIssue {
   problems: string[];
 }
 
+/** 綜合 APP 共用的店家／機構；健康 APP 只讀取供健檢醫院選擇。 */
+export interface HealthOrganization {
+  rowNumber: number;
+  name: string;
+  kind: string | null;
+  archived: boolean;
+  sort: number | null;
+}
+
+/** 2026-11-23 使用者決定：健檢醫院只顯示醫療或尚未分類的啟用機構。 */
+export function labOrganizationOptions(organizations: HealthOrganization[]): HealthOrganization[] {
+  return organizations
+    .filter((organization) => !organization.archived && (!organization.kind || organization.kind === '醫療'))
+    .sort((a, b) => (a.sort ?? 1e9) - (b.sort ?? 1e9) || a.rowNumber - b.rowNumber);
+}
+
 export interface HealthSnapshot {
   loadedAt: number;
   /** 依時間排序（舊 → 新） */
@@ -198,6 +214,8 @@ export interface HealthSnapshot {
   labReports: LabReport[];
   labItems: LabItem[];
   labResults: LabResult[];
+  /** 綜合 APP 的共用店家／機構（健檢表單會再篩選醫療或未分類）。 */
+  organizations: HealthOrganization[];
   settings: HealthSettings;
   issues: HealthIssue[];
 }
@@ -708,7 +726,7 @@ export class HealthStore {
   }
 
   private async loadNow(now: number): Promise<HealthSnapshot> {
-    const [bodyRows, itemRows, occRows, setRows, bpRows, gluRows, tempRows, repRows, labItemRows, resRows] = await Promise.all([
+    const [bodyRows, itemRows, occRows, setRows, bpRows, gluRows, tempRows, repRows, labItemRows, resRows, organizationRows] = await Promise.all([
       this.b.read('healthBodyMeasurements'),
       this.b.read('healthOccasionalItems'),
       this.b.read('healthOccasionalMeasurements'),
@@ -719,6 +737,7 @@ export class HealthStore {
       this.b.read('healthLabReports'),
       this.b.read('healthLabItems'),
       this.b.read('healthLabResults'),
+      this.b.read('hubOrganizations'),
     ]);
     const lab = await this.loadLab(repRows, labItemRows, resRows, now);
 
@@ -787,6 +806,17 @@ export class HealthStore {
       }))
       .sort((a, b) => a.time - b.time);
 
+    const organizations: HealthOrganization[] = organizationRows
+      .filter(isLive)
+      .map((row) => ({
+        rowNumber: row.rowNumber,
+        name: str(row.values.name)?.trim() ?? '',
+        kind: str(row.values.kind)?.trim() || null,
+        archived: row.values.archived === true,
+        sort: num(row.values.sort),
+      }))
+      .filter((organization) => !!organization.name);
+
     return {
       loadedAt: now,
       body,
@@ -798,6 +828,7 @@ export class HealthStore {
       labReports: lab.reports,
       labItems: lab.items,
       labResults: lab.results,
+      organizations,
       settings: parseSettings(setRows),
       issues: [...bt.issues, ...ot.issues, ...pt.issues, ...gt.issues, ...tt.issues, ...lab.issues],
     };

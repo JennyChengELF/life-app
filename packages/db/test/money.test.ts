@@ -535,6 +535,7 @@ describe('店家 / 對象', () => {
     const id = snap.txns[0].id;
     await backend.appendRaw('moneyTransactions', { time: at('2026-11-18 13:00'), direction: '出', account: '錢包', amount: 20, store: '全聯', id: 'T2' });
     await backend.appendRaw('moneyLines', { transaction: 'T2', kind: '支出', amount: 20, category: '住 / 日用品', id: 'L2' });
+    await backend.appendRaw('healthLabReports', { date: '2026-11-18', kind: '健檢', place: '八方雲集', id: 'R1' });
     snap = await store.load();
     expect(snap.orgs.map((o) => o.name).sort()).toEqual(['八方雲集', '全聯'].sort());
 
@@ -545,6 +546,7 @@ describe('店家 / 對象', () => {
     expect(snap.orgs.find((o) => o.name === '八方雲集鍋貼')).toMatchObject({ kind: '餐飲', foreign: true });
     expect(snap.orgs.find((o) => o.name === 'LYSN')?.foreign).toBe(true);
     expect(snap.orgs.find((o) => o.name === '全聯')?.foreign).toBe(false);
+    expect((await backend.read('healthLabReports'))[0]?.values.place).toBe('八方雲集鍋貼');
   });
 });
 

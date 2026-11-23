@@ -2158,7 +2158,7 @@ export class MoneyStore {
     await this.b.append('hubOrganizations', [{ name: n, kind, foreign: foreign || null, sort, id: newId(now), createdAt: now, updatedAt: now }]);
   }
 
-  /** 修改機構：改名時帳戶、交易的店家一起改 */
+  /** 修改機構：改名時帳戶、交易店家與健檢醫院一起改（2026-11-23 使用者決定：健檢醫院使用共用機構） */
   async updateOrg(o: Org, patch: { name?: string; kind?: string | null; foreign?: boolean }) {
     const snap = await this.fresh();
     const now = Date.now();
@@ -2177,6 +2177,11 @@ export class MoneyStore {
     if (accs.length) await this.b.update('moneyAccounts', accs);
     const txs = snap.txns.filter((t) => t.store === o.name).map((t) => ({ rowNumber: t.rowNumber, values: { store: to, updatedAt: now }, expectId: t.id }));
     if (txs.length) await this.b.update('moneyTransactions', txs);
+    const labRows = await this.b.read('healthLabReports');
+    const reports = labRows
+      .filter((r) => !r.empty && !r.values.deletedAt && r.values.place === o.name)
+      .map((r) => ({ rowNumber: r.rowNumber, values: { place: to, updatedAt: now }, expectId: String(r.values.id ?? '') }));
+    if (reports.length) await this.b.update('healthLabReports', reports);
   }
 
   // ── 定存單（2026-11-18 確認：每個幣別一個定存帳戶，裡面放多張定存單） ──

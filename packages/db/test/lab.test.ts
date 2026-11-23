@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { LabItem } from '../src';
-import { HBA1C_CODE, HealthStore, healthEntries, judgeLab, LocalBackend, memoryStorage, parseEditHash, rangeOf, sortEntries } from '../src';
+import { HBA1C_CODE, HealthStore, healthEntries, judgeLab, labOrganizationOptions, LocalBackend, memoryStorage, parseEditHash, rangeOf, sortEntries } from '../src';
 
 const setup = () => {
   const b = new LocalBackend(memoryStorage());
@@ -38,6 +38,16 @@ describe('健檢：顏色標示', () => {
 });
 
 describe('HealthStore：健檢', () => {
+  it('健檢醫院只列出醫療或未分類的啟用機構', async () => {
+    const { b, store } = setup();
+    await b.appendRaw('hubOrganizations', { name: '甲醫院', kind: '醫療', sort: 2 });
+    await b.appendRaw('hubOrganizations', { name: '乙診所', kind: '', sort: 1 });
+    await b.appendRaw('hubOrganizations', { name: '早餐店', kind: '餐飲', sort: 0 });
+    await b.appendRaw('hubOrganizations', { name: '舊醫院', kind: '醫療', archived: true, sort: 0 });
+    const snap = await store.load();
+    expect(labOrganizationOptions(snap.organizations).map((organization) => organization.name)).toEqual(['乙診所', '甲醫院']);
+  });
+
   it('第一次使用建立預設檢驗項目（含 HbA1c）', async () => {
     const { store } = setup();
     const s = await store.load();
