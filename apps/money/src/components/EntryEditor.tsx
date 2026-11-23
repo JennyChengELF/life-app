@@ -112,6 +112,14 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
   /** 修改前的金額：改了金額要提醒手續費那筆也要改 */
   const [initTotal] = useState(() => formTotal(f));
   const set = (patch: Partial<EntryForm>) => setF((x) => ({ ...x, ...patch }));
+  /** 2026-11-23 使用者決定：新增與編輯都能改日期、可選未來；只換日期並保留原本時間。 */
+  const setEntryDate = (value: string) => {
+    if (!value) return;
+    const [hour, minute] = toHHmm(f.time).split(':').map(Number);
+    const next = new Date(startOfDay(value));
+    next.setHours(hour, minute, 0, 0);
+    set({ time: next.getTime() });
+  };
 
   const editable = ENTRY_MODES.includes(f.mode as (typeof ENTRY_MODES)[number]) || f.mode === '不用還了';
   const currency = txnCurrency({ account: f.account, currency: f.currency }, snap.accounts);
@@ -483,14 +491,11 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
       ) : (
         <>
           {/* （2026-11-23 使用者決定：新增與編輯都可用週日期列改成未來日期，儲存後才生效。） */}
-          <WeekDateStrip selected={toDateKey(f.time)} setDate={(value) => {
-            const [hour, minute] = toHHmm(f.time).split(':').map(Number);
-            const next = new Date(startOfDay(value));
-            next.setHours(hour, minute, 0, 0);
-            set({ time: next.getTime() });
-          }} />
+          <WeekDateStrip selected={toDateKey(f.time)} setDate={setEntryDate} />
           <div className="entry-when">
-            <span className="field">記帳日期<strong>{toDateKey(f.time).replace(/-/g, '/')}</strong></span>
+            <label className="field">記帳日期
+              <input type="date" value={toDateKey(f.time)} onChange={(event) => setEntryDate(event.target.value)} />
+            </label>
             <TimeField value={toHHmm(f.time)} onChange={(value) => {
               const [hour, minute] = value.split(':').map(Number);
               const next = new Date(startOfDay(toDateKey(f.time)));
