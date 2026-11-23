@@ -35,6 +35,7 @@ import { StorePicker } from './StorePicker';
 import { Icon } from '@life/ui/icon';
 import { BudgetSelect } from './BudgetSelect';
 import { TimeField } from '@life/ui/time-field';
+import { WeekDateStrip } from '@life/ui/week-date-strip';
 
 /** 金額輸入：自己記住打到一半的文字（例：「12.」） */
 export function AmountInput({
@@ -86,7 +87,7 @@ export function AmountInput({
 const PAID_BY = '\u0000paidBy';
 const MODE_TITLE: Record<string, string> = { 不用還了: '不用還了', 調整: '盤點調整', 其他: '交易' };
 
-export function EntryEditor({ api, snap, editing, onClose, onCopy, hideModeSwitch = false }: { api: MoneyApi; snap: MoneySnapshot; editing: Editing; onClose: () => void; onCopy?: () => void; hideModeSwitch?: boolean }) {
+export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, hideModeSwitch = false }: { api: MoneyApi; snap: MoneySnapshot; editing: Editing; onClose: () => void; onSavedDate?: (date: string) => void; onCopy?: () => void; hideModeSwitch?: boolean }) {
   const txn = editing.txn;
   const [f, setF] = useState<EntryForm>(() => {
     const form = txn ? txnToForm(txn) : editing.form;
@@ -182,6 +183,7 @@ export function EntryEditor({ api, snap, editing, onClose, onCopy, hideModeSwitc
         kind: 'info',
         text: backfill.length ? `${savedText}；這筆早於最新期初，只會重算舊月份，不會改動已整理的新預算` : savedText,
       });
+      onSavedDate?.(toDateKey(f.time));
       onClose();
     }
   };
@@ -480,6 +482,13 @@ export function EntryEditor({ api, snap, editing, onClose, onCopy, hideModeSwitc
         </div>
       ) : (
         <>
+          {/* （2026-11-23 使用者決定：新增與編輯都可用週日期列改成未來日期，儲存後才生效。） */}
+          <WeekDateStrip selected={toDateKey(f.time)} setDate={(value) => {
+            const [hour, minute] = toHHmm(f.time).split(':').map(Number);
+            const next = new Date(startOfDay(value));
+            next.setHours(hour, minute, 0, 0);
+            set({ time: next.getTime() });
+          }} />
           <div className="entry-when">
             <span className="field">記帳日期<strong>{toDateKey(f.time).replace(/-/g, '/')}</strong></span>
             <TimeField value={toHHmm(f.time)} onChange={(value) => {

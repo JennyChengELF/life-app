@@ -1,7 +1,6 @@
 import type { EntryForm } from '@life/db';
 import { WeekDateStrip } from '@life/ui/week-date-strip';
 import { Icon, type IconName } from '@life/ui/icon';
-import { todayKey } from '@life/db';
 
 const ENTRIES: { mode: EntryForm['mode']; icon: IconName; title: string; detail: string }[] = [
   { mode: '支出', icon: 'wallet', title: '支出', detail: '可加入折抵或收入項目' },
@@ -11,5 +10,5 @@ const ENTRIES: { mode: EntryForm['mode']; icon: IconName; title: string; detail:
 ];
 
 export function AddMenu({ date, setDate, open }: { date: string; setDate: (date: string) => void; open: (mode: EntryForm['mode']) => void }) {
-  return <div className="money-add"><WeekDateStrip selected={date} setDate={setDate} maxDate={todayKey()} /><h2>新增記帳</h2><div className="money-entry-grid">{ENTRIES.map((entry) => <button key={entry.mode} type="button" onClick={() => open(entry.mode)}><Icon name={entry.icon} /><b>{entry.title}</b><small>{entry.detail}</small></button>)}</div></div>;
+  return <div className="money-add"><WeekDateStrip selected={date} setDate={setDate} /><h2>新增記帳</h2><div className="money-entry-grid">{ENTRIES.map((entry) => <button key={entry.mode} type="button" onClick={() => open(entry.mode)}><Icon name={entry.icon} /><b>{entry.title}</b><small>{entry.detail}</small></button>)}</div></div>;
 }

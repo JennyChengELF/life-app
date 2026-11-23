@@ -199,6 +199,7 @@ export function App() {
               snap={api.snap}
               editing={editing}
               onClose={closeEditor}
+              onSavedDate={setDate}
               hideModeSwitch
               onCopy={editing.txn && canCopyTxn(editing.txn) ? () => {
                 edit({ form: copyTxnForm(editing.txn!, timeForDate(date)), copied: true });
