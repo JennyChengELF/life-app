@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CalendarStore, LocalBackend, memoryStorage, taiwanDayInfo } from '../src';
+import { CalendarStore, expandCalendarEvents, LocalBackend, memoryStorage, taiwanDayInfo } from '../src';
 
 const base = (groupId: string) => ({
   title: '台南旅遊',
@@ -177,5 +177,89 @@ describe('行事曆資料', () => {
     expect(snap.events.find((item) => item.startDate === '2026-10-09')).toMatchObject({ title: '國慶日補假', systemSource: 'taiwanOfficeCalendar' });
     expect(snap.events.find((item) => item.startDate === '2025-02-08')).toMatchObject({ title: '補班日', systemSource: 'taiwanOfficeCalendar' });
     expect(snap.events.some((item) => item.startDate === '2026-11-22')).toBe(false);
+  });
+
+  it('重複主規則只存一列，畫面需要時才展開發生項目', async () => {
+    const s = new CalendarStore(new LocalBackend(memoryStorage()));
+    const group = (await s.load()).defaultGroupId;
+    await s.addEvent({ ...base(group), title: '瑜珈', startDate: '2026-11-23', endDate: '2026-11-23', recurrence: { frequency: 'weekly', interval: 1, weekDays: [1, 3], end: 'count', count: 4 } }, 'REPEAT');
+    const snap = await s.load();
+    expect(snap.recurrenceMasters).toHaveLength(1);
+    expect(snap.events.some((item) => item.id === 'REPEAT')).toBe(false);
+    expect(expandCalendarEvents(snap, '2026-11-23', '2026-12-10').filter((item) => item.recurrenceParentId === 'REPEAT').map((item) => item.startDate)).toEqual(['2026-11-23', '2026-11-25', '2026-11-30', '2026-12-02']);
+  });
+
+  it('重複行程不能同時作為主行程或細項', async () => {
+    const s = new CalendarStore(new LocalBackend(memoryStorage()));
+    const group = (await s.load()).defaultGroupId;
+    await s.addEvent(base(group), 'TRIP');
+    await expect(s.addEvent({ ...base(group), parentEventId: 'TRIP', startDate: '2026-11-22', endDate: '2026-11-22', recurrence: { frequency: 'daily', interval: 1, end: 'never' } }, 'INVALID')).rejects.toThrow('不能同時屬於主行程');
+  });
+
+  it('重複固定時間遇到夏令時間不存在的那次會略過', async () => {
+    const s = new CalendarStore(new LocalBackend(memoryStorage()));
+    const group = (await s.load()).defaultGroupId;
+    await s.addEvent({ ...base(group), title: '半夜工作', timeType: 'point', startDate: '2026-03-07', endDate: '2026-03-07', startTime: '02:30', startTimeZone: 'America/New_York', endTimeZone: 'America/New_York', recurrence: { frequency: 'daily', interval: 1, end: 'count', count: 3 } }, 'DST');
+    const snap = await s.load();
+    expect(expandCalendarEvents(snap, '2026-03-07', '2026-03-10').filter((item) => item.recurrenceParentId === 'DST').map((item) => item.startDate)).toEqual(['2026-03-07', '2026-03-09']);
+  });
+
+  it('可只修改或取消一次重複行程，其他次維持原規則', async () => {
+    const s = new CalendarStore(new LocalBackend(memoryStorage()));
+    const group = (await s.load()).defaultGroupId;
+    await s.addEvent({ ...base(group), title: '復健', startDate: '2026-12-01', endDate: '2026-12-01', recurrence: { frequency: 'daily', interval: 1, end: 'count', count: 3 } }, 'THERAPY');
+    let snap = await s.load();
+    let rows = expandCalendarEvents(snap, '2026-12-01', '2026-12-03').filter((item) => item.recurrenceParentId === 'THERAPY');
+    await s.updateRecurringEvent(rows[1], { ...rows[1], title: '改到下午復健' }, 'single');
+    snap = await s.load();
+    rows = expandCalendarEvents(snap, '2026-12-01', '2026-12-03').filter((item) => item.recurrenceParentId === 'THERAPY');
+    expect(rows.map((item) => item.title)).toEqual(['復健', '改到下午復健', '復健']);
+    await s.setRecurringEventStatus(rows[2], 'cancelled', 'single');
+    snap = await s.load();
+    rows = expandCalendarEvents(snap, '2026-12-01', '2026-12-03').filter((item) => item.recurrenceParentId === 'THERAPY');
+    expect(rows.map((item) => item.status)).toEqual(['scheduled', 'scheduled', 'cancelled']);
+  });
+
+  it('修改這次及之後會把規則切成前後兩段', async () => {
+    const s = new CalendarStore(new LocalBackend(memoryStorage()));
+    const group = (await s.load()).defaultGroupId;
+    await s.addEvent({ ...base(group), title: '課程', startDate: '2026-12-01', endDate: '2026-12-01', recurrence: { frequency: 'daily', interval: 1, end: 'count', count: 5 } }, 'CLASS');
+    let snap = await s.load();
+    let rows = expandCalendarEvents(snap, '2026-12-01', '2026-12-05').filter((item) => item.recurrenceParentId);
+    await s.updateRecurringEvent(rows[2], { ...rows[2], title: '新課程' }, 'future');
+    snap = await s.load();
+    rows = expandCalendarEvents(snap, '2026-12-01', '2026-12-05').filter((item) => item.title === '課程' || item.title === '新課程');
+    expect(rows.map((item) => item.title)).toEqual(['課程', '課程', '新課程', '新課程', '新課程']);
+    expect(snap.recurrenceMasters).toHaveLength(2);
+  });
+
+  it('修改全部會保留同一套規則，並套用到每一次', async () => {
+    const s = new CalendarStore(new LocalBackend(memoryStorage()));
+    const group = (await s.load()).defaultGroupId;
+    await s.addEvent({ ...base(group), title: '晨間散步', startDate: '2026-12-01', endDate: '2026-12-01', recurrence: { frequency: 'daily', interval: 1, end: 'count', count: 3 } }, 'WALK');
+    let snap = await s.load();
+    const selected = expandCalendarEvents(snap, '2026-12-01', '2026-12-03').find((item) => item.startDate === '2026-12-02' && item.recurrenceParentId === 'WALK')!;
+    await s.updateRecurringEvent(selected, { ...selected, title: '晚間散步' }, 'all');
+    snap = await s.load();
+    const rows = expandCalendarEvents(snap, '2026-12-01', '2026-12-03').filter((item) => item.recurrenceParentId === 'WALK');
+    expect(rows.map((item) => item.title)).toEqual(['晚間散步', '晚間散步', '晚間散步']);
+    expect(snap.recurrenceMasters).toHaveLength(1);
+  });
+
+  it('刪除這次及之後會保留先前項目；刪除全部會移除整套規則', async () => {
+    const s = new CalendarStore(new LocalBackend(memoryStorage()));
+    const group = (await s.load()).defaultGroupId;
+    await s.addEvent({ ...base(group), title: '每日記錄', startDate: '2026-12-01', endDate: '2026-12-01', recurrence: { frequency: 'daily', interval: 1, end: 'count', count: 5 } }, 'LOG');
+    let snap = await s.load();
+    let rows = expandCalendarEvents(snap, '2026-12-01', '2026-12-05').filter((item) => item.recurrenceParentId === 'LOG');
+    await s.deleteRecurringEvent(rows[2], 'future');
+    snap = await s.load();
+    rows = expandCalendarEvents(snap, '2026-12-01', '2026-12-05').filter((item) => item.recurrenceParentId === 'LOG');
+    expect(rows.map((item) => item.startDate)).toEqual(['2026-12-01', '2026-12-02']);
+
+    await s.deleteRecurringEvent(rows[0], 'all');
+    snap = await s.load();
+    expect(snap.recurrenceMasters).toHaveLength(0);
+    expect(expandCalendarEvents(snap, '2026-12-01', '2026-12-05').some((item) => item.title === '每日記錄')).toBe(false);
   });
 });

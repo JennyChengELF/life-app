@@ -7,12 +7,15 @@ import { TimeField } from '@life/ui/time-field';
 import {
   addDateDays,
   analyzeCalendarLocalTime,
+  calendarRecurrenceEndText,
+  calendarRecurrenceText,
   calendarDurationMinutes,
   convertCalendarInstant,
   currentDeviceTimeZone,
   dateDiffDays,
   dateInRange,
   eventOnDate,
+  expandCalendarEvents,
   formatConvertedCalendarTime,
   isValidTimeZone,
   resolveCalendarLocalTime,
@@ -24,6 +27,8 @@ import {
   type CalendarEvent,
   type CalendarEventInput,
   type CalendarGroup,
+  type CalendarRecurrence,
+  type CalendarRecurrenceScope,
   type CalendarSnapshot,
   type TripChildAction,
   type TripAttachAction,
@@ -46,6 +51,7 @@ type Open =
   | { kind: 'form'; eventId: string | null; date: string; parentId: string | null }
   | { kind: 'join-trip'; parentId: string }
   | { kind: 'move-child'; eventId: string }
+  | { kind: 'recurrence-scope'; event: CalendarEvent; action: 'edit' | 'cancel' | 'restore' | 'delete'; input?: CalendarEventInput }
   | { kind: 'trip-change'; event: CalendarEvent; input: CalendarEventInput; step: 'scope' | 'children'; choices: Record<string, ChildChoice> };
 type ChildChoice = { action: 'move' | 'detach' | 'cancel'; startDate: string; endDate: string };
 
@@ -95,6 +101,10 @@ const eventInput = (e: CalendarEvent): CalendarEventInput => ({
   url: e.url,
   note: e.note,
   status: e.status,
+  recurrence: e.recurrence,
+  recurrenceParentId: e.recurrenceParentId,
+  recurrenceInstanceKey: e.recurrenceInstanceKey,
+  recurrenceExceptions: e.recurrenceExceptions,
 });
 
 function requestedDate() {
@@ -115,7 +125,7 @@ export function App() {
 
   const goTab = (next: MainTab) => {
     if (tab === 'add' && next === 'add') return;
-    if ((open?.kind === 'form' || open?.kind === 'trip-change') && !confirm('這筆行程尚未儲存，確定要離開嗎？')) return;
+    if ((open?.kind === 'form' || open?.kind === 'trip-change' || (open?.kind === 'recurrence-scope' && open.action === 'edit')) && !confirm('這筆行程尚未儲存，確定要離開嗎？')) return;
     setTab(next);
     if (next === 'add') setOpen({ kind: 'form', eventId: null, date: selectedDate, parentId: null });
     else setOpen(null);
@@ -130,10 +140,14 @@ export function App() {
   if (api.status === 'need-connect') return <Shell api={api}><div className="center connect"><p>行程存在你的 Google 試算表，需要先連線。</p><button className="primary big" onClick={api.connect}>連線 Google</button>{api.error && <p className="error-text">{api.error}</p>}<p className="muted small">APP 只能存取它自己建立的試算表。</p></div></Shell>;
   if (api.status === 'error' || !api.snap) return <Shell api={api}><div className="center"><p className="error-text">{api.error}</p><button className="primary" onClick={() => location.reload()}>重新載入</button></div></Shell>;
   const snap = api.snap;
+  const recurrenceStart = snap.recurrenceMasters.map((event) => event.startDate).sort()[0] ?? selectedDate;
+  const selectedMonthEnd = addDateDays(`${shiftMonth(selectedDate.slice(0, 7), 1)}-01`, -1);
+  const recurrenceEnd = [addDateDays(todayKey(), 370), selectedMonthEnd].sort().at(-1)!;
+  const expandedEvents = expandCalendarEvents(snap, recurrenceStart, recurrenceEnd);
   const activeGroups = new Set(snap.groups.filter((g) => !g.hidden).map((g) => g.id));
-  const visibleEvents = snap.events.filter((e) => activeGroups.has(e.groupId));
+  const visibleEvents = expandedEvents.filter((e) => activeGroups.has(e.groupId));
   const openedId = open?.kind === 'detail' ? open.id : open?.kind === 'form' ? open.eventId : open?.kind === 'move-child' ? open.eventId : open?.kind === 'join-trip' ? open.parentId : null;
-  const openedEvent = openedId ? snap.events.find((e) => e.id === openedId) ?? null : null;
+  const openedEvent = openedId ? expandedEvents.find((e) => e.id === openedId) ?? null : null;
 
   const saveEvent = async (input: CalendarEventInput, current: CalendarEvent | null) => {
     if (input.timeType === 'point') input = { ...input, endDate: input.startDate, endTime: null };
@@ -143,6 +157,10 @@ export function App() {
       return false;
     }
     if (current) {
+      if (current.isRecurrenceInstance) {
+        setOpen({ kind: 'recurrence-scope', event: current, action: 'edit', input });
+        return false;
+      }
       const children = snap.events.filter((e) => e.parentEventId === current.id);
       if (children.length && (current.startDate !== input.startDate || current.endDate !== input.endDate)) {
         const delta = dateDiffDays(current.startDate, input.startDate);
@@ -164,7 +182,7 @@ export function App() {
   };
 
   return (
-    <Shell api={api} tab={tab} goTab={goTab} date={selectedDate} confirmLeave={open?.kind === 'form' || open?.kind === 'trip-change'}>
+    <Shell api={api} tab={tab} goTab={goTab} date={selectedDate} confirmLeave={open?.kind === 'form' || open?.kind === 'trip-change' || (open?.kind === 'recurrence-scope' && open.action === 'edit')}>
       <TimeZoneNotice api={api} snap={snap} />
       {snap.timeZoneRulesUpdated > 0 && <div className="msg warn">有 {snap.timeZoneRulesUpdated} 個未來時間因所在地規則更新，已保留原本鐘面時間並重新計算換算結果。</div>}
       {open?.kind === 'form' ? (
@@ -178,13 +196,15 @@ export function App() {
           else { setOpen(null); setTab('calendar'); }
         }} onSave={saveEvent} /></>
       ) : open?.kind === 'detail' && openedEvent ? (
-        <EventDetail api={api} snap={snap} event={openedEvent} onBack={() => setOpen(null)} onEdit={() => setOpen({ kind: 'form', eventId: openedEvent.id, date: openedEvent.startDate, parentId: openedEvent.parentEventId })} onOpen={(id) => setOpen({ kind: 'detail', id })} onAddChild={() => setOpen({ kind: 'form', eventId: null, date: openedEvent.startDate, parentId: openedEvent.id })} onJoinExisting={() => setOpen({ kind: 'join-trip', parentId: openedEvent.id })} onMoveChild={() => setOpen({ kind: 'move-child', eventId: openedEvent.id })} />
+        <EventDetail api={api} snap={snap} event={openedEvent} onBack={() => setOpen(null)} onEdit={() => setOpen({ kind: 'form', eventId: openedEvent.id, date: openedEvent.startDate, parentId: openedEvent.parentEventId })} onOpen={(id) => setOpen({ kind: 'detail', id })} onAddChild={() => setOpen({ kind: 'form', eventId: null, date: openedEvent.startDate, parentId: openedEvent.id })} onJoinExisting={() => setOpen({ kind: 'join-trip', parentId: openedEvent.id })} onMoveChild={() => setOpen({ kind: 'move-child', eventId: openedEvent.id })} onRecurrenceAction={(action) => setOpen({ kind: 'recurrence-scope', event: openedEvent, action })} />
       ) : open?.kind === 'join-trip' && openedEvent ? (
         <JoinTripView api={api} snap={snap} parent={openedEvent} onCancel={() => setOpen({ kind: 'detail', id: openedEvent.id })} onDone={() => setOpen({ kind: 'detail', id: openedEvent.id })} />
       ) : open?.kind === 'move-child' && openedEvent ? (
         <MoveChildView api={api} snap={snap} event={openedEvent} onCancel={() => setOpen({ kind: 'detail', id: openedEvent.id })} onDone={() => setOpen({ kind: 'detail', id: openedEvent.id })} />
       ) : open?.kind === 'trip-change' ? (
         <TripChangeView api={api} data={open} onChange={setOpen} onDone={() => setOpen({ kind: 'detail', id: open.event.id })} />
+      ) : open?.kind === 'recurrence-scope' ? (
+        <RecurrenceScopeView api={api} data={open} onCancel={() => setOpen({ kind: 'detail', id: open.event.id })} onDone={(date) => { setSelectedDate(date); setTab('calendar'); setOpen(null); }} />
       ) : (
         <>
           {tab === 'calendar' && <MonthView snap={snap} events={visibleEvents} selected={selectedDate} setDate={setDate} openEvent={(id) => setOpen({ kind: 'detail', id })} />}
@@ -315,7 +335,7 @@ function currentZoneText(snap: CalendarSnapshot, event: CalendarEvent) {
 function EventRow({ snap, event, onClick, nested = false }: { snap: CalendarSnapshot; event: CalendarEvent; onClick: () => void; nested?: boolean }) {
   const group = groupOf(snap, event);
   const converted = currentZoneText(snap, event);
-  return <button className={`event-row ${event.status === 'cancelled' ? 'cancelled' : ''} ${nested ? 'nested' : ''}`} onClick={onClick}><span className="event-color" style={{ background: group?.color ?? '#1f6fd1' }} /><span className="event-time">{timeText(event)}</span><span className="event-main"><b>{event.title}</b>{event.startPlace && <small>{event.startPlace}{event.endPlace ? ` → ${event.endPlace}` : ''}</small>}{converted && <small className="converted-time">{converted}</small>}</span><Icon name="right" size={17} /></button>;
+  return <button className={`event-row ${event.status === 'cancelled' ? 'cancelled' : ''} ${nested ? 'nested' : ''}`} onClick={onClick}><span className="event-color" style={{ background: group?.color ?? '#1f6fd1' }} /><span className="event-time">{timeText(event)}</span><span className="event-main"><b>{event.title}</b>{event.recurrence && <small className="recurrence-row-label">重複{event.recurrenceOverride ? '・本次已修改' : ''}</small>}{event.startPlace && <small>{event.startPlace}{event.endPlace ? ` → ${event.endPlace}` : ''}</small>}{converted && <small className="converted-time">{converted}</small>}</span><Icon name="right" size={17} /></button>;
 }
 
 function AgendaView({ snap, events, selectedMonth, openEvent }: { snap: CalendarSnapshot; events: CalendarEvent[]; selectedMonth: string; openEvent: (id: string) => void }) {
@@ -384,12 +404,31 @@ function localTimeAnalysis(date: string, time: string | null, zone: string | nul
   try { return analyzeCalendarLocalTime(date, time, zone); } catch { return null; }
 }
 
+const WEEK_OPTIONS = ['日', '一', '二', '三', '四', '五', '六'];
+function initialRecurrence(frequency: CalendarRecurrence['frequency'], date: string): CalendarRecurrence {
+  const [, , day] = date.split('-').map(Number);
+  const weekDay = new Date(`${date}T00:00:00Z`).getUTCDay();
+  const base = { frequency, interval: 1, end: 'never' as const };
+  if (frequency === 'weekly') return { ...base, weekDays: [weekDay] };
+  if (frequency === 'monthlyDate') return { ...base, monthDay: day };
+  if (frequency === 'monthlyWeekday') return { ...base, weekOrdinal: Math.min(5, Math.ceil(day / 7)) as 1 | 2 | 3 | 4 | 5, weekDay };
+  if (frequency === 'custom') return { ...base, interval: 2, customUnit: 'day' };
+  return base;
+}
+
+function RecurrenceFields({ form, setForm, locked }: { form: CalendarEventInput; setForm: React.Dispatch<React.SetStateAction<CalendarEventInput>>; locked: boolean }) {
+  const rule = form.recurrence ?? null;
+  const setRule = (patch: Partial<CalendarRecurrence>) => setForm((current) => ({ ...current, recurrence: current.recurrence ? { ...current.recurrence, ...patch } : null }));
+  const choose = (value: string) => setForm((current) => ({ ...current, parentEventId: value ? null : current.parentEventId, recurrence: value ? initialRecurrence(value as CalendarRecurrence['frequency'], current.startDate) : null }));
+  return <div className="recurrence-fields"><label className="field">重複<select value={rule?.frequency ?? ''} disabled={locked} onChange={(event) => choose(event.target.value)}><option value="">不重複</option><option value="daily">每天</option><option value="workday">每個台灣工作日</option><option value="weekly">每週指定星期</option><option value="monthlyDate">每月指定日期</option><option value="monthlyWeekday">每月第幾個星期</option><option value="monthlyLastDay">每月最後一天</option><option value="yearly">每年</option><option value="custom">自訂間隔</option></select>{locked && <small className="field-help">主行程／細項不能同時使用重複規則。</small>}</label>{rule && <>{rule.frequency === 'weekly' && <fieldset className="weekday-choice"><legend>每週哪幾天</legend>{WEEK_OPTIONS.map((label, day) => { const active = rule.weekDays?.includes(day) ?? false; return <button type="button" className={active ? 'active' : ''} key={day} onClick={() => { const days = active ? rule.weekDays!.filter((item) => item !== day) : [...(rule.weekDays ?? []), day].sort(); if (days.length) setRule({ weekDays: days }); }}>{label}</button>; })}</fieldset>}{rule.frequency === 'monthlyDate' && <label className="field">每月日期<input type="number" min="1" max="31" value={rule.monthDay ?? 1} onChange={(event) => setRule({ monthDay: Number(event.target.value) })} /><small className="field-help">沒有這一天的月份會跳過。</small></label>}{rule.frequency === 'monthlyWeekday' && <div className="form-grid"><label className="field">第幾個<select value={rule.weekOrdinal ?? 1} onChange={(event) => setRule({ weekOrdinal: Number(event.target.value) as CalendarRecurrence['weekOrdinal'] })}><option value="1">第一個</option><option value="2">第二個</option><option value="3">第三個</option><option value="4">第四個</option><option value="5">第五個</option><option value="-1">最後一個</option></select></label><label className="field">星期<select value={rule.weekDay ?? 1} onChange={(event) => setRule({ weekDay: Number(event.target.value) })}>{WEEK_OPTIONS.map((label, day) => <option key={day} value={day}>星期{label}</option>)}</select></label></div>}{rule.frequency === 'custom' && <div className="form-grid"><label className="field">每隔<input type="number" min="1" max="999" value={rule.interval} onChange={(event) => setRule({ interval: Number(event.target.value) })} /></label><label className="field">單位<select value={rule.customUnit ?? 'day'} onChange={(event) => setRule({ customUnit: event.target.value as CalendarRecurrence['customUnit'] })}><option value="day">天</option><option value="week">週</option><option value="month">個月</option><option value="year">年</option></select></label></div>}<label className="field">結束方式<select value={rule.end} onChange={(event) => { const end = event.target.value as CalendarRecurrence['end']; setRule(end === 'date' ? { end, until: form.startDate, count: undefined } : end === 'count' ? { end, count: 10, until: undefined } : { end, until: undefined, count: undefined }); }}><option value="never">不設定結束日期</option><option value="date">到指定日期</option><option value="count">指定次數</option></select></label>{rule.end === 'date' && <label className="field">重複到<input type="date" min={form.startDate} value={rule.until ?? form.startDate} onChange={(event) => setRule({ until: event.target.value })} /></label>}{rule.end === 'count' && <label className="field">總共幾次<input type="number" min="1" max="10000" value={rule.count ?? 10} onChange={(event) => setRule({ count: Number(event.target.value) })} /></label>}<p className="recurrence-summary">{calendarRecurrenceText(rule)}・{calendarRecurrenceEndText(rule)}</p></>}</div>;
+}
+
 function EventForm({ snap, event, initialDate, parentId, busy, hideStartDate = false, onCancel, onSave }: { snap: CalendarSnapshot; event: CalendarEvent | null; initialDate: string; parentId: string | null; busy: boolean; hideStartDate?: boolean; onCancel: () => void; onSave: (input: CalendarEventInput, event: CalendarEvent | null) => Promise<boolean> }) {
   const initialParent = parentId ? snap.events.find((e) => e.id === parentId) : null;
   const [form, setForm] = useState<CalendarEventInput>(() => event ? eventInput(event) : {
-    title: '', groupId: initialParent?.groupId ?? snap.defaultGroupId, parentEventId: parentId, timeType: 'point', startDate: initialDate, startTime: '09:00', startTimeZone: snap.currentTimeZone, startUtcOffset: null, startDisambiguation: 'earlier', endDate: initialDate, endTime: null, endTimeZone: snap.currentTimeZone, endUtcOffset: null, endDisambiguation: 'earlier', timeMode: 'fixedZone', timeZoneInferred: false, locationType: null, startPlace: null, endPlace: null, url: null, note: null, status: 'scheduled',
+    title: '', groupId: initialParent?.groupId ?? snap.defaultGroupId, parentEventId: parentId, timeType: 'point', startDate: initialDate, startTime: '09:00', startTimeZone: snap.currentTimeZone, startUtcOffset: null, startDisambiguation: 'earlier', endDate: initialDate, endTime: null, endTimeZone: snap.currentTimeZone, endUtcOffset: null, endDisambiguation: 'earlier', timeMode: 'fixedZone', timeZoneInferred: false, locationType: null, startPlace: null, endPlace: null, url: null, note: null, status: 'scheduled', recurrence: null, recurrenceParentId: null, recurrenceInstanceKey: null, recurrenceExceptions: [],
   });
-  const [more, setMore] = useState(!!event || !!form.startPlace || !!form.url || !!form.note);
+  const [more, setMore] = useState(!!event || !!form.startPlace || !!form.url || !!form.note || !!form.recurrence);
   const [parentError, setParentError] = useState<string | null>(null);
   const [timeError, setTimeError] = useState<string | null>(null);
   // （2026-11-20 使用者決定：主行程內新增時固定；月曆新增時可選，儲存前必須完整落在主行程日期內。）
@@ -399,7 +438,7 @@ function EventForm({ snap, event, initialDate, parentId, busy, hideStartDate = f
   const startAnalysis = form.timeType !== 'allDay' && form.timeMode === 'fixedZone' ? localTimeAnalysis(form.startDate, form.startTime, form.startTimeZone) : null;
   const endAnalysis = form.timeType === 'range' && form.timeMode === 'fixedZone' ? localTimeAnalysis(form.endDate, form.endTime, form.endTimeZone) : null;
   const parents = snap.events.filter((candidate) => {
-    if (candidate.parentEventId || candidate.id === event?.id || candidate.endDate <= candidate.startDate || candidate.status !== 'scheduled' || candidate.systemSource) return false;
+    if (candidate.parentEventId || candidate.recurrence || candidate.id === event?.id || candidate.endDate <= candidate.startDate || candidate.status !== 'scheduled' || candidate.systemSource) return false;
     if (candidate.id === form.parentEventId) return true;
     return dateInRange(form.startDate, candidate.startDate, candidate.endDate) || dateInRange(effectiveEndDate, candidate.startDate, candidate.endDate);
   });
@@ -424,7 +463,7 @@ function EventForm({ snap, event, initialDate, parentId, busy, hideStartDate = f
   return <form className="card event-form" onSubmit={submit}>
     <div className="form-head"><button type="button" className="icon-btn" onClick={onCancel} aria-label="返回"><Icon name="left" /></button><h2>{event ? '編輯行程' : initialParent ? `新增「${initialParent.title}」細項` : '新增行程'}</h2></div>
     {parentLocked && selectedParent && <label className="field">所屬主行程<span className="parent-fixed">{selectedParent.title}<small>{rangeText(selectedParent)}</small></span></label>}
-    {!parentLocked && <label className="field">所屬主行程<select value={form.parentEventId ?? ''} onChange={(e) => { set('parentEventId', e.target.value || null); setParentError(null); }}><option value="">不屬於主行程</option>{parents.map((parent) => <option key={parent.id} value={parent.id}>{parent.title}（{parent.startDate}～{parent.endDate}）</option>)}</select><small className="field-help">只列出包含開始或結束日期的主行程</small></label>}
+    {!parentLocked && <label className="field">所屬主行程<select value={form.parentEventId ?? ''} onChange={(e) => { setForm((current) => ({ ...current, parentEventId: e.target.value || null, recurrence: e.target.value ? null : current.recurrence })); setParentError(null); }}><option value="">不屬於主行程</option>{parents.map((parent) => <option key={parent.id} value={parent.id}>{parent.title}（{parent.startDate}～{parent.endDate}）</option>)}</select><small className="field-help">只列出包含開始或結束日期的主行程</small></label>}
     {parentError && <p className="form-error">{parentError}</p>}
     <label className="field">標題<input value={form.title} onChange={(e) => set('title', e.target.value)} placeholder="可以先留空，會顯示未命名行程" /></label>
     <div className="type-choice">{([['range', '時段'], ['point', '時間點'], ['allDay', '全天']] as const).map(([value, label]) => <button type="button" key={value} className={form.timeType === value ? 'active' : ''} onClick={() => setForm((current) => ({ ...current, timeType: value, startTime: value === 'allDay' ? null : current.startTime ?? '09:00', endDate: value === 'point' ? current.startDate : current.endDate, endTime: value === 'range' ? current.endTime ?? '10:00' : null }))}>{label}</button>)}</div>
@@ -434,7 +473,7 @@ function EventForm({ snap, event, initialDate, parentId, busy, hideStartDate = f
     {timeError && <p className="form-error">{timeError}</p>}
     <label className="field">行事曆群組<select value={form.groupId} onChange={(e) => set('groupId', e.target.value)}>{snap.groups.filter((group) => !group.archived && group.kind === 'user').map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
     <button type="button" className="more-toggle" onClick={() => setMore(!more)}>{more ? '收起更多設定' : '更多設定'}</button>
-    {more && <div className="more-fields"><label className="field">地點類型<select value={form.locationType ?? ''} onChange={(e) => setForm((current) => ({ ...current, locationType: (e.target.value || null) as CalendarEventInput['locationType'], endTimeZone: e.target.value === 'route' ? current.endTimeZone ?? current.startTimeZone : current.startTimeZone, endUtcOffset: null }))}><option value="">不填</option><option value="place">一般地點</option><option value="route">起點與終點</option><option value="online">線上</option></select></label>{form.locationType && form.locationType !== 'online' && <label className="field">{form.locationType === 'route' ? '起點' : '地點'}<input value={form.startPlace ?? ''} onChange={(e) => set('startPlace', e.target.value || null)} /></label>}{form.locationType === 'route' && <label className="field">終點<input value={form.endPlace ?? ''} onChange={(e) => set('endPlace', e.target.value || null)} /></label>}{form.locationType === 'online' && <label className="field">網址<input type="url" value={form.url ?? ''} onChange={(e) => set('url', e.target.value || null)} placeholder="https://" /></label>}<label className="field">備註<textarea value={form.note ?? ''} onChange={(e) => set('note', e.target.value || null)} rows={4} /></label><p className="muted small">重複、提醒、人物與標籤會在後續階段加入。</p></div>}
+    {more && <div className="more-fields"><RecurrenceFields form={form} setForm={setForm} locked={!!form.parentEventId} /><label className="field">地點類型<select value={form.locationType ?? ''} onChange={(e) => setForm((current) => ({ ...current, locationType: (e.target.value || null) as CalendarEventInput['locationType'], endTimeZone: e.target.value === 'route' ? current.endTimeZone ?? current.startTimeZone : current.startTimeZone, endUtcOffset: null }))}><option value="">不填</option><option value="place">一般地點</option><option value="route">起點與終點</option><option value="online">線上</option></select></label>{form.locationType && form.locationType !== 'online' && <label className="field">{form.locationType === 'route' ? '起點' : '地點'}<input value={form.startPlace ?? ''} onChange={(e) => set('startPlace', e.target.value || null)} /></label>}{form.locationType === 'route' && <label className="field">終點<input value={form.endPlace ?? ''} onChange={(e) => set('endPlace', e.target.value || null)} /></label>}{form.locationType === 'online' && <label className="field">網址<input type="url" value={form.url ?? ''} onChange={(e) => set('url', e.target.value || null)} placeholder="https://" /></label>}<label className="field">備註<textarea value={form.note ?? ''} onChange={(e) => set('note', e.target.value || null)} rows={4} /></label><p className="muted small">提醒、人物與標籤會在後續階段加入。</p></div>}
     <div className="form-actions"><button type="button" onClick={onCancel}>取消</button><button className="primary" disabled={busy}>儲存</button></div>
   </form>;
 }
@@ -455,7 +494,7 @@ function EventTimeZoneDetails({ snap, event }: { snap: CalendarSnapshot; event: 
   }
 }
 
-function EventDetail({ api, snap, event, onBack, onEdit, onOpen, onAddChild, onJoinExisting, onMoveChild }: { api: CalendarApi; snap: CalendarSnapshot; event: CalendarEvent; onBack: () => void; onEdit: () => void; onOpen: (id: string) => void; onAddChild: () => void; onJoinExisting: () => void; onMoveChild: () => void }) {
+function EventDetail({ api, snap, event, onBack, onEdit, onOpen, onAddChild, onJoinExisting, onMoveChild, onRecurrenceAction }: { api: CalendarApi; snap: CalendarSnapshot; event: CalendarEvent; onBack: () => void; onEdit: () => void; onOpen: (id: string) => void; onAddChild: () => void; onJoinExisting: () => void; onMoveChild: () => void; onRecurrenceAction: (action: 'cancel' | 'restore' | 'delete') => void }) {
   const [cancel, setCancel] = useState(false);
   const children = sortCalendarEvents(snap.events.filter((e) => e.parentEventId === event.id));
   const childDays = children.reduce((map, child) => {
@@ -465,13 +504,28 @@ function EventDetail({ api, snap, event, onBack, onEdit, onOpen, onAddChild, onJ
     return map;
   }, new Map<string, CalendarEvent[]>());
   const parent = event.parentEventId ? snap.events.find((e) => e.id === event.parentEventId) : null;
-  const canHaveChildren = !event.parentEventId && event.endDate > event.startDate;
+  const canHaveChildren = !event.recurrence && !event.parentEventId && event.endDate > event.startDate;
   const remove = async () => {
+    if (event.recurrence) return onRecurrenceAction('delete');
     if (!window.confirm(`確定刪除「${event.title}」？`)) return;
     const ok = await api.run((s) => s.deleteEvent(event).then(() => true));
     if (ok) onBack();
   };
-  return <section className={`card detail ${event.status === 'cancelled' ? 'cancelled' : ''}`}><div className="detail-head"><button className="icon-btn" onClick={onBack} aria-label="返回"><Icon name="left" /></button>{!event.systemSource && <button onClick={onEdit}><Icon name="pencil" size={17} /> 編輯</button>}</div>{event.status === 'cancelled' && <div className="cancel-badge">已取消</div>}<h2>{event.title}</h2><p className="detail-time">{rangeText(event)}・{timeText(event)}</p><EventTimeZoneDetails snap={snap} event={event} /><p className="muted small">{groupOf(snap, event)?.name}{event.systemSource && '・系統資料'}</p>{parent && <button className="parent-link" onClick={() => onOpen(parent.id)}>主行程：{parent.title}<Icon name="right" size={16} /></button>}{event.startPlace && <p><b>{event.locationType === 'route' ? '路線' : '地點'}：</b>{event.startPlace}{event.endPlace ? ` → ${event.endPlace}` : ''}</p>}{event.url && <p><b>網址：</b><a href={event.url} target="_blank" rel="noreferrer">{event.url}</a></p>}{event.note && <div className="note-block"><b>備註</b><p>{event.note}</p></div>}{(canHaveChildren || children.length > 0) && <div className="itinerary"><div className="section-head"><h3>行程安排</h3>{event.status !== 'cancelled' && <span className="itinerary-buttons"><button className="link" onClick={onAddChild}><Icon name="plus" size={16} /> 新增細項</button><button className="link" onClick={onJoinExisting}>加入既有行程</button></span>}</div>{children.length ? <div className="itinerary-days">{[...childDays.entries()].map(([date, list]) => <div className="itinerary-day" key={date}><h4>第 {dateDiffDays(event.startDate, date) + 1} 天・{dateLabel(date)}</h4>{list.map((child) => <EventRow key={child.id} snap={snap} event={child} nested onClick={() => onOpen(child.id)} />)}</div>)}</div> : <p className="muted small">還沒有細項，可以新增或加入既有的交通、餐廳或景點。</p>}</div>}{!event.systemSource && <div className="detail-actions">{event.status === 'cancelled' ? <button onClick={() => api.run((s) => s.restoreEvent(event)).then(() => undefined)}>恢復行程</button> : <button className="danger" onClick={() => setCancel(true)}>取消行程</button>}{event.parentEventId && <><button onClick={onMoveChild}>移到其他主行程</button><button onClick={() => api.run((s) => s.detachEvent(event))}>移出主行程</button></>}<button className="danger" disabled={children.length > 0} onClick={remove}>刪除</button></div>}{children.length > 0 && <p className="muted small">主行程仍有細項時不能刪除，請先將細項移出。</p>}{cancel && <div className="choice-panel"><b>要取消哪個範圍？</b>{children.length ? <><button className="danger" onClick={() => api.run((s) => s.cancelEvent(event, true)).then(() => setCancel(false))}>取消整趟（包含所有細項）</button><button onClick={() => api.run((s) => s.cancelEvent(event, false)).then(() => setCancel(false))}>只取消主行程，細項移出</button></> : <button className="danger" onClick={() => api.run((s) => s.cancelEvent(event, false)).then(() => setCancel(false))}>確認取消</button>}<button onClick={() => setCancel(false)}>返回</button></div>}</section>;
+  return <section className={`card detail ${event.status === 'cancelled' ? 'cancelled' : ''}`}><div className="detail-head"><button className="icon-btn" onClick={onBack} aria-label="返回"><Icon name="left" /></button>{!event.systemSource && <button onClick={onEdit}><Icon name="pencil" size={17} /> 編輯</button>}</div>{event.status === 'cancelled' && <div className="cancel-badge">已取消</div>}<h2>{event.title}</h2><p className="detail-time">{rangeText(event)}・{timeText(event)}</p><EventTimeZoneDetails snap={snap} event={event} /><p className="muted small">{groupOf(snap, event)?.name}{event.systemSource && '・系統資料'}</p>{event.recurrence && <div className="recurrence-detail"><b>{calendarRecurrenceText(event.recurrence)}</b><span>{calendarRecurrenceEndText(event.recurrence)}</span>{event.recurrenceOverride && <span>這一次有個別修改</span>}</div>}{parent && <button className="parent-link" onClick={() => onOpen(parent.id)}>主行程：{parent.title}<Icon name="right" size={16} /></button>}{event.startPlace && <p><b>{event.locationType === 'route' ? '路線' : '地點'}：</b>{event.startPlace}{event.endPlace ? ` → ${event.endPlace}` : ''}</p>}{event.url && <p><b>網址：</b><a href={event.url} target="_blank" rel="noreferrer">{event.url}</a></p>}{event.note && <div className="note-block"><b>備註</b><p>{event.note}</p></div>}{(canHaveChildren || children.length > 0) && <div className="itinerary"><div className="section-head"><h3>行程安排</h3>{event.status !== 'cancelled' && <span className="itinerary-buttons"><button className="link" onClick={onAddChild}><Icon name="plus" size={16} /> 新增細項</button><button className="link" onClick={onJoinExisting}>加入既有行程</button></span>}</div>{children.length ? <div className="itinerary-days">{[...childDays.entries()].map(([date, list]) => <div className="itinerary-day" key={date}><h4>第 {dateDiffDays(event.startDate, date) + 1} 天・{dateLabel(date)}</h4>{list.map((child) => <EventRow key={child.id} snap={snap} event={child} nested onClick={() => onOpen(child.id)} />)}</div>)}</div> : <p className="muted small">還沒有細項，可以新增或加入既有的交通、餐廳或景點。</p>}</div>}{!event.systemSource && <div className="detail-actions">{event.status === 'cancelled' ? <button onClick={() => event.recurrence ? onRecurrenceAction('restore') : api.run((s) => s.restoreEvent(event)).then(() => undefined)}>恢復行程</button> : <button className="danger" onClick={() => event.recurrence ? onRecurrenceAction('cancel') : setCancel(true)}>取消行程</button>}{event.parentEventId && <><button onClick={onMoveChild}>移到其他主行程</button><button onClick={() => api.run((s) => s.detachEvent(event))}>移出主行程</button></>}<button className="danger" disabled={children.length > 0} onClick={remove}>刪除</button></div>}{children.length > 0 && <p className="muted small">主行程仍有細項時不能刪除，請先將細項移出。</p>}{cancel && <div className="choice-panel"><b>要取消哪個範圍？</b>{children.length ? <><button className="danger" onClick={() => api.run((s) => s.cancelEvent(event, true)).then(() => setCancel(false))}>取消整趟（包含所有細項）</button><button onClick={() => api.run((s) => s.cancelEvent(event, false)).then(() => setCancel(false))}>只取消主行程，細項移出</button></> : <button className="danger" onClick={() => api.run((s) => s.cancelEvent(event, false)).then(() => setCancel(false))}>確認取消</button>}<button onClick={() => setCancel(false)}>返回</button></div>}</section>;
+}
+
+function RecurrenceScopeView({ api, data, onCancel, onDone }: { api: CalendarApi; data: Extract<Open, { kind: 'recurrence-scope' }>; onCancel: () => void; onDone: (date: string) => void }) {
+  const labels = data.action === 'edit' ? { title: '要修改哪些行程？', verb: '修改' } : data.action === 'cancel' ? { title: '要取消哪些行程？', verb: '取消' } : data.action === 'restore' ? { title: '要恢復哪些行程？', verb: '恢復' } : { title: '要刪除哪些行程？', verb: '刪除' };
+  const apply = async (scope: CalendarRecurrenceScope) => {
+    const ok = await api.run(async (store) => {
+      if (data.action === 'edit') await store.updateRecurringEvent(data.event, data.input!, scope);
+      else if (data.action === 'delete') await store.deleteRecurringEvent(data.event, scope);
+      else await store.setRecurringEventStatus(data.event, data.action === 'cancel' ? 'cancelled' : 'scheduled', scope);
+      return true;
+    });
+    if (ok) onDone(data.input?.startDate ?? data.event.startDate);
+  };
+  return <section className="card recurrence-scope"><div className="form-head"><button className="icon-btn" onClick={onCancel} aria-label="返回"><Icon name="left" /></button><div><h2>{labels.title}</h2><p className="muted small">{data.event.title}・{slashDateLabel(data.event.startDate)}</p></div></div><p>預設只處理目前選到的這一次。</p><div className="scope-options"><button className="primary" disabled={api.busy} onClick={() => apply('single')}>只{labels.verb}這一次</button><button disabled={api.busy} onClick={() => apply('future')}>{labels.verb}這一次和之後</button><button disabled={api.busy} onClick={() => apply('all')}>{labels.verb}全部重複行程</button></div>{data.action === 'delete' && <p className="muted small">刪除後仍保留資料，不提供永久刪除。</p>}</section>;
 }
 
 function JoinTripView({ api, snap, parent, onCancel, onDone }: { api: CalendarApi; snap: CalendarSnapshot; parent: CalendarEvent; onCancel: () => void; onDone: () => void }) {
@@ -481,7 +535,7 @@ function JoinTripView({ api, snap, parent, onCancel, onDone }: { api: CalendarAp
   const [selected, setSelected] = useState<Record<string, { startDate: string; endDate: string }>>({});
   const childParents = new Set(snap.events.filter((item) => item.parentEventId).map((item) => item.parentEventId));
   const overlaps = (item: CalendarEvent) => item.startDate <= parent.endDate && item.endDate >= parent.startDate;
-  const candidates = sortCalendarEvents(snap.events.filter((item) => !item.parentEventId && item.id !== parent.id && !item.systemSource && !childParents.has(item.id) && (showCancelled || item.status !== 'cancelled') && (showOtherDates || overlaps(item)) && (!query.trim() || item.title.includes(query.trim()))));
+  const candidates = sortCalendarEvents(snap.events.filter((item) => !item.recurrence && !item.parentEventId && item.id !== parent.id && !item.systemSource && !childParents.has(item.id) && (showCancelled || item.status !== 'cancelled') && (showOtherDates || overlaps(item)) && (!query.trim() || item.title.includes(query.trim()))));
   const grouped = candidates.reduce((map, item) => { const list = map.get(item.startDate) ?? []; list.push(item); map.set(item.startDate, list); return map; }, new Map<string, CalendarEvent[]>());
   const toggle = (item: CalendarEvent) => setSelected((old) => { const next = { ...old }; if (next[item.id]) delete next[item.id]; else next[item.id] = { startDate: item.startDate, endDate: item.endDate }; return next; });
   const setDateValue = (id: string, key: 'startDate' | 'endDate', value: string) => setSelected((old) => ({ ...old, [id]: { ...old[id], [key]: value } }));
@@ -495,7 +549,7 @@ function JoinTripView({ api, snap, parent, onCancel, onDone }: { api: CalendarAp
 
 function MoveChildView({ api, snap, event, onCancel, onDone }: { api: CalendarApi; snap: CalendarSnapshot; event: CalendarEvent; onCancel: () => void; onDone: () => void }) {
   const [parentId, setParentId] = useState('');
-  const parents = snap.events.filter((item) => !item.parentEventId && item.id !== event.parentEventId && item.endDate > item.startDate && !item.systemSource && item.status === 'scheduled' && event.startDate >= item.startDate && event.endDate <= item.endDate);
+  const parents = snap.events.filter((item) => !item.recurrence && !item.parentEventId && item.id !== event.parentEventId && item.endDate > item.startDate && !item.systemSource && item.status === 'scheduled' && event.startDate >= item.startDate && event.endDate <= item.endDate);
   const save = async () => { const ok = await api.run((store) => store.moveEventToTrip(event, parentId).then(() => true)); if (ok) onDone(); };
   return <section className="card chooser"><div className="form-head"><button className="icon-btn" onClick={onCancel} aria-label="返回"><Icon name="left" /></button><h2>移到其他主行程</h2></div><p><b>{event.title}</b></p><p className="muted small">只列出完整包含細項日期（{event.startDate}～{event.endDate}）的主行程；移動後不會改變日期或其他內容。</p><label className="field">新的主行程<select value={parentId} onChange={(e) => setParentId(e.target.value)}><option value="">請選擇</option>{parents.map((item) => <option key={item.id} value={item.id}>{item.title}（{item.startDate}～{item.endDate}）</option>)}</select></label>{!parents.length && <p className="form-error">目前沒有日期符合的其他主行程。</p>}<div className="form-actions"><button onClick={onCancel}>取消</button><button className="primary" disabled={!parentId || api.busy} onClick={save}>確認移動</button></div></section>;
 }

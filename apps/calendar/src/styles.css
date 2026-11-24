@@ -49,6 +49,7 @@ select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset:
 .event-main b { overflow: hidden; text-overflow: ellipsis; }
 .event-main small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
 .event-main .converted-time { color: var(--accent); font-size: .75rem; }
+.event-main .recurrence-row-label { color: var(--accent); font-size: .75rem; }
 .cancelled { opacity: .62; }
 .cancelled h2, .cancelled .event-main b, .event-row.cancelled b { text-decoration: line-through; }
 .event-row.nested { grid-template-columns: 5px 104px minmax(0, 1fr) 18px; padding-left: 0; }
@@ -98,6 +99,13 @@ select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset:
 .selected-start-date strong { color: var(--text); }
 .more-toggle { border: 0; background: none; color: var(--accent); padding-left: 0; margin-bottom: 8px; }
 .more-fields { border-top: 1px solid var(--line); padding-top: 12px; }
+.recurrence-fields { margin-bottom: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); }
+.recurrence-fields > :last-child { margin-bottom: 0; }
+.weekday-choice { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; margin: 0 0 12px; padding: 0; border: 0; }
+.weekday-choice legend { grid-column: 1 / -1; margin-bottom: 5px; color: var(--muted); font-size: .88rem; }
+.weekday-choice button { min-width: 0; padding: 8px 2px; }
+.weekday-choice button.active { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 700; }
+.recurrence-summary { margin: 3px 0 0; color: var(--accent); font-size: .85rem; }
 .timezone-form { margin: 2px 0 12px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); }
 .time-mode-choice { grid-template-columns: repeat(2, 1fr); }
 .timezone-form > .field:last-child { margin-bottom: 0; }
@@ -112,6 +120,7 @@ select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset:
 .detail-time { font-weight: 600; font-variant-numeric: tabular-nums; }
 .timezone-detail { margin: 10px 0; padding: 10px 12px; border-radius: 10px; background: var(--accent-soft); font-size: .85rem; }
 .timezone-detail p { margin: 3px 0; }
+.recurrence-detail { display: flex; flex-wrap: wrap; gap: 5px 10px; margin: 10px 0; padding: 10px 12px; border-radius: 10px; color: var(--accent); background: var(--accent-soft); font-size: .85rem; }
 .detail a { color: var(--accent); overflow-wrap: anywhere; }
 .cancel-badge { display: inline-block; color: var(--danger); background: var(--danger-soft); border-radius: 99px; padding: 3px 10px; font-size: .8rem; font-weight: 700; }
 .parent-link { margin: 10px 0; width: 100%; justify-content: space-between; color: var(--accent); }
@@ -127,6 +136,13 @@ select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset:
 /* 改期影響 */
 .impact { max-width: 680px; margin-inline: auto; display: flex; flex-direction: column; gap: 10px; }
 .impact-row { border-top: 1px solid var(--line); padding-top: 11px; display: grid; gap: 7px; }
+
+/* 重複行程影響範圍 */
+.recurrence-scope { max-width: 560px; margin-inline: auto; }
+.recurrence-scope .form-head > div { min-width: 0; }
+.recurrence-scope .form-head p { margin: 2px 0 0; }
+.scope-options { display: grid; gap: 8px; margin-top: 14px; }
+.scope-options button { width: 100%; text-align: left; }
 
 /* 加入既有行程／移動細項 */
 .chooser { max-width: 680px; margin-inline: auto; }
