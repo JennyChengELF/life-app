@@ -48,8 +48,27 @@ describe('行事曆資料', () => {
     await b.appendRaw('calendarEvents', { title: '看醫生', startDate: '2026-12-01', startTime: '14:00' });
     const snap = await s.load(1000);
     const event = snap.events.find((item) => item.title === '看醫生');
-    expect(event).toMatchObject({ title: '看醫生', timeType: 'point', startDate: '2026-12-01', endDate: '2026-12-01', startTimeZone: 'Asia/Taipei' });
+    expect(event).toMatchObject({ title: '看醫生', timeType: 'point', startDate: '2026-12-01', endDate: '2026-12-01', startTimeZone: 'Asia/Taipei', startUtcOffset: '+08:00', timeZoneInferred: true });
     expect(event?.id).toBeTruthy();
+  });
+
+  it('浮動時間不保存時區；跨國交通則分開保存出發與抵達時區', async () => {
+    const s = new CalendarStore(new LocalBackend(memoryStorage()));
+    const group = (await s.load()).defaultGroupId;
+    await s.addEvent({ ...base(group), title: '每天吃藥', timeType: 'point', startDate: '2026-12-10', endDate: '2026-12-10', startTime: '09:00', startTimeZone: 'Asia/Taipei', endTimeZone: 'Asia/Taipei', timeMode: 'floatingLocal' }, 'FLOAT');
+    await s.addEvent({ ...base(group), title: '飛洛杉磯', timeType: 'range', startDate: '2026-12-11', endDate: '2026-12-11', startTime: '23:00', endTime: '18:00', startTimeZone: 'Asia/Taipei', endTimeZone: 'America/Los_Angeles', locationType: 'route' }, 'FLIGHT');
+    const snap = await s.load();
+    expect(snap.events.find((item) => item.id === 'FLOAT')).toMatchObject({ timeMode: 'floatingLocal', startTimeZone: null, endTimeZone: null, startUtcOffset: null, endUtcOffset: null });
+    expect(snap.events.find((item) => item.id === 'FLIGHT')).toMatchObject({ startTimeZone: 'Asia/Taipei', startUtcOffset: '+08:00', endTimeZone: 'America/Los_Angeles', endUtcOffset: '-08:00' });
+  });
+
+  it('主要時區與目前所在地分開設定，確認裝置時區不會改既有主要時區', async () => {
+    const s = new CalendarStore(new LocalBackend(memoryStorage()));
+    await s.load();
+    await s.setHomeTimeZone('Asia/Tokyo');
+    await s.confirmDetectedTimeZone('America/New_York', true);
+    const snap = await s.load();
+    expect(snap).toMatchObject({ homeTimeZone: 'Asia/Tokyo', currentTimeZone: 'America/New_York', lastDetectedTimeZone: 'America/New_York' });
   });
 
   it('時間點只保存開始時間，結束日期自動等於開始日期', async () => {
@@ -74,6 +93,19 @@ describe('行事曆資料', () => {
     await s.updateTrip(trip, { ...base(group), startDate: '2026-11-28', endDate: '2026-11-30' }, 'together');
     snap = await s.load();
     expect(snap.events.find((e) => e.id === 'TRAIN')).toMatchObject({ startDate: '2026-11-28', endDate: '2026-11-28', startTime: '09:00' });
+  });
+
+  it('整趟改期跨過夏令時間邊界時會重算細項 UTC 位移', async () => {
+    const s = new CalendarStore(new LocalBackend(memoryStorage()));
+    const group = (await s.load()).defaultGroupId;
+    await s.addEvent({ ...base(group), title: '紐約旅遊', startDate: '2026-03-07', endDate: '2026-03-09' }, 'NY-TRIP');
+    await s.addEvent({ ...base(group), title: '早餐', parentEventId: 'NY-TRIP', timeType: 'range', startDate: '2026-03-07', endDate: '2026-03-07', startTime: '09:00', endTime: '10:00', startTimeZone: 'America/New_York', endTimeZone: 'America/New_York' }, 'NY-BREAKFAST');
+    let snap = await s.load();
+    expect(snap.events.find((item) => item.id === 'NY-BREAKFAST')?.startUtcOffset).toBe('-05:00');
+    const trip = snap.events.find((item) => item.id === 'NY-TRIP')!;
+    await s.updateTrip(trip, { ...base(group), title: '紐約旅遊', startDate: '2026-03-14', endDate: '2026-03-16' }, 'together');
+    snap = await s.load();
+    expect(snap.events.find((item) => item.id === 'NY-BREAKFAST')).toMatchObject({ startDate: '2026-03-14', startUtcOffset: '-04:00', endUtcOffset: '-04:00' });
   });
 
   it('取消整趟保留資料並取消細項；只取消主行程會解除細項', async () => {

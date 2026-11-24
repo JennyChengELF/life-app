@@ -6,11 +6,20 @@ import { WeekDateStrip } from '@life/ui/week-date-strip';
 import { TimeField } from '@life/ui/time-field';
 import {
   addDateDays,
+  analyzeCalendarLocalTime,
+  calendarDurationMinutes,
+  convertCalendarInstant,
+  currentDeviceTimeZone,
   dateDiffDays,
   dateInRange,
   eventOnDate,
+  formatConvertedCalendarTime,
+  isValidTimeZone,
+  resolveCalendarLocalTime,
   sortCalendarEvents,
+  supportedTimeZones,
   taiwanDayInfo,
+  timeZoneLabel,
   todayKey,
   type CalendarEvent,
   type CalendarEventInput,
@@ -24,7 +33,7 @@ import { AppSwitcher } from '@life/ui/app-switcher';
 
 const HOME_URL = import.meta.env.DEV ? `http://${location.hostname}:5172/` : '../';
 type MainTab = 'add' | 'calendar' | 'more';
-type Tab = MainTab | 'agenda' | 'groups' | 'data' | 'issues';
+type Tab = MainTab | 'agenda' | 'groups' | 'timezones' | 'data' | 'issues';
 type AgendaMode = 'upcoming' | 'history' | 'month';
 const TABS: AppTabItem<MainTab>[] = [
   { key: 'add', icon: 'plus', label: '新增' },
@@ -71,10 +80,15 @@ const eventInput = (e: CalendarEvent): CalendarEventInput => ({
   startDate: e.startDate,
   startTime: e.startTime,
   startTimeZone: e.startTimeZone,
+  startUtcOffset: e.startUtcOffset,
+  startDisambiguation: e.startDisambiguation,
   endDate: e.endDate,
   endTime: e.endTime,
   endTimeZone: e.endTimeZone,
+  endUtcOffset: e.endUtcOffset,
+  endDisambiguation: e.endDisambiguation,
   timeMode: e.timeMode,
+  timeZoneInferred: e.timeZoneInferred,
   locationType: e.locationType,
   startPlace: e.startPlace,
   endPlace: e.endPlace,
@@ -151,6 +165,8 @@ export function App() {
 
   return (
     <Shell api={api} tab={tab} goTab={goTab} date={selectedDate} confirmLeave={open?.kind === 'form' || open?.kind === 'trip-change'}>
+      <TimeZoneNotice api={api} snap={snap} />
+      {snap.timeZoneRulesUpdated > 0 && <div className="msg warn">有 {snap.timeZoneRulesUpdated} 個未來時間因所在地規則更新，已保留原本鐘面時間並重新計算換算結果。</div>}
       {open?.kind === 'form' ? (
         <>{tab === 'add' && !open.eventId && !open.parentId && <WeekDateStrip selected={open.date} setDate={(value) => {
           if (value !== open.date && !confirm('更換日期會清除目前尚未儲存的表單，確定要更換嗎？')) return;
@@ -175,6 +191,7 @@ export function App() {
           {tab === 'more' && <MoreView issues={snap.issues.length} open={(next) => { setTab(next); window.scrollTo(0, 0); }} />}
           {tab === 'agenda' && <><MoreBack onClick={() => setTab('more')} /><AgendaView snap={snap} events={visibleEvents} selectedMonth={selectedDate.slice(0, 7)} openEvent={(id) => setOpen({ kind: 'detail', id })} /></>}
           {tab === 'groups' && <><MoreBack onClick={() => setTab('more')} /><GroupsView api={api} snap={snap} /></>}
+          {tab === 'timezones' && <><MoreBack onClick={() => setTab('more')} /><TimeZoneSettingsView api={api} snap={snap} /></>}
           {tab === 'data' && <><MoreBack onClick={() => setTab('more')} /><DataView api={api} /></>}
           {tab === 'issues' && <><MoreBack onClick={() => setTab('more')} /><IssuesView snap={snap} /></>}
           {tab === 'calendar' && <button className="fab" onClick={() => goTab('add')} aria-label="新增行程"><Icon name="plus" size={28} /></button>}
@@ -235,10 +252,35 @@ function MoreView({ issues, open }: { issues: number; open: (tab: Exclude<Tab, M
   const rows: { tab: Exclude<Tab, MainTab>; icon: 'clipboard' | 'settings' | 'book' | 'alert'; label: string; note: string }[] = [
     { tab: 'agenda', icon: 'clipboard', label: '行程表', note: '近期、歷史與指定月份' },
     { tab: 'groups', icon: 'settings', label: '群組設定', note: '名稱、顏色、排序、隱藏與停用' },
+    { tab: 'timezones', icon: 'settings', label: '時區設定', note: '主要時區、目前所在地與最近使用' },
     { tab: 'data', icon: 'book', label: '資料與試算表', note: '行事曆資料與 Google 連線' },
   ];
   if (issues) rows.push({ tab: 'issues', icon: 'alert', label: '需要處理的資料', note: `${issues} 列需要修正` });
   return <div className="more-menu"><h2>行事曆功能</h2>{rows.map((row) => <button className="more-menu-item" key={row.tab} onClick={() => open(row.tab)}><Icon name={row.icon} /><span><strong>{row.label}</strong><small>{row.note}</small></span><Icon name="right" size={18} /></button>)}</div>;
+}
+
+function TimeZoneNotice({ api, snap }: { api: CalendarApi; snap: CalendarSnapshot }) {
+  const detected = currentDeviceTimeZone();
+  if (!isValidTimeZone(detected) || detected === snap.currentTimeZone || detected === snap.lastDetectedTimeZone) return null;
+  return <div className="msg timezone-notice"><b>偵測到目前所在地的時區不同</b><span>裝置：{timeZoneLabel(detected)}；目前設定：{timeZoneLabel(snap.currentTimeZone)}</span><span className="row"><button className="primary" onClick={() => api.run((store) => store.confirmDetectedTimeZone(detected, true))}>改用裝置時區</button><button onClick={() => api.run((store) => store.confirmDetectedTimeZone(detected, false))}>維持目前設定</button></span></div>;
+}
+
+function TimeZoneSelect({ label, value, snap, onChange }: { label: string; value: string; snap: CalendarSnapshot; onChange: (value: string) => void }) {
+  const preferred = [...new Set([snap.currentTimeZone, snap.homeTimeZone, ...snap.recentTimeZones])];
+  const preferredSet = new Set(preferred);
+  const others = supportedTimeZones().filter((zone) => !preferredSet.has(zone));
+  return <label className="field">{label}<select value={value} onChange={(event) => onChange(event.target.value)}><optgroup label="常用時區">{preferred.map((zone) => <option key={zone} value={zone}>{timeZoneLabel(zone)}</option>)}</optgroup><optgroup label="其他國家／城市">{others.map((zone) => <option key={zone} value={zone}>{timeZoneLabel(zone)}</option>)}</optgroup></select></label>;
+}
+
+function TimeZoneSettingsView({ api, snap }: { api: CalendarApi; snap: CalendarSnapshot }) {
+  const [home, setHome] = useState(snap.homeTimeZone);
+  const [current, setCurrent] = useState(snap.currentTimeZone);
+  const device = currentDeviceTimeZone();
+  const save = async () => {
+    const ok = await api.run(async (store) => { await store.setHomeTimeZone(home); await store.setCurrentTimeZone(current); return true; });
+    if (ok) api.showToast({ kind: 'info', text: '時區設定已儲存；既有行程不會被更改' });
+  };
+  return <section className="card timezone-settings"><h2>時區設定</h2><p className="muted small">主要時區只會影響新行程與舊資料缺少時區時的推定，不會改動既有行程。</p><TimeZoneSelect label="主要時區" value={home} snap={snap} onChange={setHome} /><TimeZoneSelect label="目前所在地時區" value={current} snap={snap} onChange={setCurrent} />{isValidTimeZone(device) && <button type="button" onClick={() => setCurrent(device)}>使用裝置偵測：{timeZoneLabel(device)}</button>}<div className="form-actions"><button className="primary" disabled={api.busy || (home === snap.homeTimeZone && current === snap.currentTimeZone)} onClick={save}>儲存設定</button></div></section>;
 }
 
 function DataView({ api }: { api: CalendarApi }) {
@@ -250,9 +292,30 @@ function IssuesView({ snap }: { snap: CalendarSnapshot }) {
   return <section className="card"><h2>需要處理的資料</h2>{snap.issues.length ? snap.issues.map((issue) => <div className="issue-row" key={`${issue.table}-${issue.rowNumber}-${issue.text}`}><strong>{issue.table} 第 {issue.rowNumber} 列</strong><p>{issue.text}</p></div>) : <p className="muted">目前沒有需要處理的資料。</p>}</section>;
 }
 
+function eventResolvedTime(event: CalendarEvent, end = false) {
+  if (event.timeType === 'allDay' || event.timeMode === 'floatingLocal') return null;
+  const date = end && event.timeType === 'range' ? event.endDate : event.startDate;
+  const time = end && event.timeType === 'range' ? event.endTime! : event.startTime!;
+  const zone = end && event.timeType === 'range' ? event.endTimeZone! : event.startTimeZone!;
+  const offset = end && event.timeType === 'range' ? event.endUtcOffset : event.startUtcOffset;
+  const choice = end && event.timeType === 'range' ? event.endDisambiguation : event.startDisambiguation;
+  return resolveCalendarLocalTime(date, time, zone, choice, offset, true);
+}
+
+function currentZoneText(snap: CalendarSnapshot, event: CalendarEvent) {
+  if (event.timeType === 'allDay' || event.timeMode === 'floatingLocal' || event.startTimeZone === snap.currentTimeZone) return null;
+  try {
+    const converted = convertCalendarInstant(eventResolvedTime(event)!.epochMilliseconds, snap.currentTimeZone);
+    return `目前所在地：${formatConvertedCalendarTime(converted)}`;
+  } catch {
+    return null;
+  }
+}
+
 function EventRow({ snap, event, onClick, nested = false }: { snap: CalendarSnapshot; event: CalendarEvent; onClick: () => void; nested?: boolean }) {
   const group = groupOf(snap, event);
-  return <button className={`event-row ${event.status === 'cancelled' ? 'cancelled' : ''} ${nested ? 'nested' : ''}`} onClick={onClick}><span className="event-color" style={{ background: group?.color ?? '#1f6fd1' }} /><span className="event-time">{timeText(event)}</span><span className="event-main"><b>{event.title}</b>{event.startPlace && <small>{event.startPlace}{event.endPlace ? ` → ${event.endPlace}` : ''}</small>}</span><Icon name="right" size={17} /></button>;
+  const converted = currentZoneText(snap, event);
+  return <button className={`event-row ${event.status === 'cancelled' ? 'cancelled' : ''} ${nested ? 'nested' : ''}`} onClick={onClick}><span className="event-color" style={{ background: group?.color ?? '#1f6fd1' }} /><span className="event-time">{timeText(event)}</span><span className="event-main"><b>{event.title}</b>{event.startPlace && <small>{event.startPlace}{event.endPlace ? ` → ${event.endPlace}` : ''}</small>}{converted && <small className="converted-time">{converted}</small>}</span><Icon name="right" size={17} /></button>;
 }
 
 function AgendaView({ snap, events, selectedMonth, openEvent }: { snap: CalendarSnapshot; events: CalendarEvent[]; selectedMonth: string; openEvent: (id: string) => void }) {
@@ -316,17 +379,25 @@ function AgendaItem({ snap, events, event, collapsed, toggle, openEvent }: { sna
   return <section className="card trip-card"><button className="trip-head" onClick={toggle} aria-expanded={!collapsed}><span className="event-color" style={{ background: groupOf(snap, event)?.color ?? '#1f6fd1' }} /><span><b>{event.title}</b><small>{rangeText(event)}・{dateDiffDays(event.startDate, event.endDate) + 1} 天</small></span><Icon name={collapsed ? 'right' : 'left'} className={collapsed ? '' : 'chevron-down'} size={18} /></button>{!collapsed && <div className="trip-days">{[...groups.entries()].map(([date, list]) => <div className="trip-day" key={date}><h3>第 {dateDiffDays(event.startDate, date) + 1} 天・{dateLabel(date)}</h3>{list.map((child) => <EventRow key={child.id} snap={snap} event={child} nested onClick={() => openEvent(child.id)} />)}</div>)}</div>}<button className="trip-open" onClick={() => openEvent(event.id)}>查看主行程</button></section>;
 }
 
+function localTimeAnalysis(date: string, time: string | null, zone: string | null) {
+  if (!time || !zone || !date || !isValidTimeZone(zone)) return null;
+  try { return analyzeCalendarLocalTime(date, time, zone); } catch { return null; }
+}
+
 function EventForm({ snap, event, initialDate, parentId, busy, hideStartDate = false, onCancel, onSave }: { snap: CalendarSnapshot; event: CalendarEvent | null; initialDate: string; parentId: string | null; busy: boolean; hideStartDate?: boolean; onCancel: () => void; onSave: (input: CalendarEventInput, event: CalendarEvent | null) => Promise<boolean> }) {
   const initialParent = parentId ? snap.events.find((e) => e.id === parentId) : null;
   const [form, setForm] = useState<CalendarEventInput>(() => event ? eventInput(event) : {
-    title: '', groupId: initialParent?.groupId ?? snap.defaultGroupId, parentEventId: parentId, timeType: 'point', startDate: initialDate, startTime: '09:00', startTimeZone: 'Asia/Taipei', endDate: initialDate, endTime: null, endTimeZone: 'Asia/Taipei', timeMode: 'fixedZone', locationType: null, startPlace: null, endPlace: null, url: null, note: null, status: 'scheduled',
+    title: '', groupId: initialParent?.groupId ?? snap.defaultGroupId, parentEventId: parentId, timeType: 'point', startDate: initialDate, startTime: '09:00', startTimeZone: snap.currentTimeZone, startUtcOffset: null, startDisambiguation: 'earlier', endDate: initialDate, endTime: null, endTimeZone: snap.currentTimeZone, endUtcOffset: null, endDisambiguation: 'earlier', timeMode: 'fixedZone', timeZoneInferred: false, locationType: null, startPlace: null, endPlace: null, url: null, note: null, status: 'scheduled',
   });
   const [more, setMore] = useState(!!event || !!form.startPlace || !!form.url || !!form.note);
   const [parentError, setParentError] = useState<string | null>(null);
+  const [timeError, setTimeError] = useState<string | null>(null);
   // （2026-11-20 使用者決定：主行程內新增時固定；月曆新增時可選，儲存前必須完整落在主行程日期內。）
   const parentLocked = !!event || !!parentId;
   const selectedParent = form.parentEventId ? snap.events.find((e) => e.id === form.parentEventId) ?? null : null;
   const effectiveEndDate = form.timeType === 'point' ? form.startDate : form.endDate;
+  const startAnalysis = form.timeType !== 'allDay' && form.timeMode === 'fixedZone' ? localTimeAnalysis(form.startDate, form.startTime, form.startTimeZone) : null;
+  const endAnalysis = form.timeType === 'range' && form.timeMode === 'fixedZone' ? localTimeAnalysis(form.endDate, form.endTime, form.endTimeZone) : null;
   const parents = snap.events.filter((candidate) => {
     if (candidate.parentEventId || candidate.id === event?.id || candidate.endDate <= candidate.startDate || candidate.status !== 'scheduled' || candidate.systemSource) return false;
     if (candidate.id === form.parentEventId) return true;
@@ -337,12 +408,17 @@ function EventForm({ snap, event, initialDate, parentId, busy, hideStartDate = f
   const submit = async (ev: React.FormEvent) => {
     ev.preventDefault();
     const input = form.timeType === 'point' ? { ...form, endDate: form.startDate, endTime: null } : form;
+    if (startAnalysis?.kind === 'nonexistent' || endAnalysis?.kind === 'nonexistent') {
+      setTimeError('選擇的當地時間因日光節約調整而不存在，請先使用下方建議時間或自行修改。');
+      return;
+    }
     const parent = input.parentEventId ? snap.events.find((item) => item.id === input.parentEventId) : null;
     if (parent && (input.startDate < parent.startDate || input.endDate > parent.endDate)) {
       setParentError(`細項日期必須在主行程的 ${parent.startDate}～${parent.endDate} 之內`);
       return;
     }
     setParentError(null);
+    setTimeError(null);
     await onSave(input, event);
   };
   return <form className="card event-form" onSubmit={submit}>
@@ -353,12 +429,30 @@ function EventForm({ snap, event, initialDate, parentId, busy, hideStartDate = f
     <label className="field">標題<input value={form.title} onChange={(e) => set('title', e.target.value)} placeholder="可以先留空，會顯示未命名行程" /></label>
     <div className="type-choice">{([['range', '時段'], ['point', '時間點'], ['allDay', '全天']] as const).map(([value, label]) => <button type="button" key={value} className={form.timeType === value ? 'active' : ''} onClick={() => setForm((current) => ({ ...current, timeType: value, startTime: value === 'allDay' ? null : current.startTime ?? '09:00', endDate: value === 'point' ? current.startDate : current.endDate, endTime: value === 'range' ? current.endTime ?? '10:00' : null }))}>{label}</button>)}</div>
     {hideStartDate && <div className="selected-start-date"><span>開始日期</span><strong>{slashDateLabel(form.startDate)}</strong></div>}
-    <div className="form-grid">{!hideStartDate && <label className="field">開始日期<input type="date" value={form.startDate} onChange={(e) => setStartDate(e.target.value)} required /></label>}{form.timeType !== 'allDay' && <TimeField label="開始時間" value={form.startTime ?? ''} onChange={(value) => set('startTime', value)} />}{form.timeType !== 'point' && <label className="field">結束日期<input type="date" value={form.endDate} onChange={(e) => set('endDate', e.target.value)} required /></label>}{form.timeType === 'range' && <TimeField label="結束時間" value={form.endTime ?? ''} onChange={(value) => set('endTime', value)} />}</div>
+    <div className="form-grid">{!hideStartDate && <label className="field">開始日期<input type="date" value={form.startDate} onChange={(e) => setStartDate(e.target.value)} required /></label>}{form.timeType !== 'allDay' && <TimeField label="開始時間" value={form.startTime ?? ''} onChange={(value) => { set('startTime', value); set('startUtcOffset', null); }} />}{form.timeType !== 'point' && <label className="field">結束日期<input type="date" value={form.endDate} onChange={(e) => set('endDate', e.target.value)} required /></label>}{form.timeType === 'range' && <TimeField label="結束時間" value={form.endTime ?? ''} onChange={(value) => { set('endTime', value); set('endUtcOffset', null); }} />}</div>
+    {form.timeType !== 'allDay' && <div className="timezone-form"><div className="type-choice time-mode-choice"><button type="button" className={form.timeMode === 'fixedZone' ? 'active' : ''} onClick={() => set('timeMode', 'fixedZone')}>固定所在地時間</button><button type="button" className={form.timeMode === 'floatingLocal' ? 'active' : ''} onClick={() => set('timeMode', 'floatingLocal')}>跟隨目前時間</button></div>{form.timeMode === 'floatingLocal' ? <p className="field-help">例如每天 09:00，不論人在台灣或日本都顯示當地 09:00；不做時區換算。</p> : <><TimeZoneSelect label={form.locationType === 'route' ? '出發時區' : '行程時區'} value={form.startTimeZone ?? snap.currentTimeZone} snap={snap} onChange={(zone) => setForm((current) => ({ ...current, startTimeZone: zone, endTimeZone: current.locationType === 'route' && current.timeType === 'range' ? current.endTimeZone : zone, startUtcOffset: null, endUtcOffset: current.locationType === 'route' && current.timeType === 'range' ? current.endUtcOffset : null, timeZoneInferred: false }))} />{form.locationType === 'route' && form.timeType === 'range' && <TimeZoneSelect label="抵達時區" value={form.endTimeZone ?? form.startTimeZone ?? snap.currentTimeZone} snap={snap} onChange={(zone) => setForm((current) => ({ ...current, endTimeZone: zone, endUtcOffset: null }))} />}{startAnalysis?.kind === 'ambiguous' && <label className="field dst-choice">開始時間出現兩次<select value={form.startDisambiguation ?? 'earlier'} onChange={(e) => set('startDisambiguation', e.target.value as 'earlier' | 'later')}><option value="earlier">第一次（UTC{startAnalysis.earlier.offset}）</option><option value="later">第二次（UTC{startAnalysis.later.offset}）</option></select></label>}{endAnalysis?.kind === 'ambiguous' && <label className="field dst-choice">結束時間出現兩次<select value={form.endDisambiguation ?? 'earlier'} onChange={(e) => set('endDisambiguation', e.target.value as 'earlier' | 'later')}><option value="earlier">第一次（UTC{endAnalysis.earlier.offset}）</option><option value="later">第二次（UTC{endAnalysis.later.offset}）</option></select></label>}{startAnalysis?.kind === 'nonexistent' && <div className="dst-warning"><p>這個開始時間在當地不存在。</p><button type="button" onClick={() => setForm((current) => ({ ...current, startDate: startAnalysis.later.date, startTime: startAnalysis.later.time, startUtcOffset: null }))}>改成 {startAnalysis.later.date} {startAnalysis.later.time}</button></div>}{endAnalysis?.kind === 'nonexistent' && <div className="dst-warning"><p>這個結束時間在當地不存在。</p><button type="button" onClick={() => setForm((current) => ({ ...current, endDate: endAnalysis.later.date, endTime: endAnalysis.later.time, endUtcOffset: null }))}>改成 {endAnalysis.later.date} {endAnalysis.later.time}</button></div>}</>}</div>}
+    {timeError && <p className="form-error">{timeError}</p>}
     <label className="field">行事曆群組<select value={form.groupId} onChange={(e) => set('groupId', e.target.value)}>{snap.groups.filter((group) => !group.archived && group.kind === 'user').map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
     <button type="button" className="more-toggle" onClick={() => setMore(!more)}>{more ? '收起更多設定' : '更多設定'}</button>
-    {more && <div className="more-fields"><label className="field">地點類型<select value={form.locationType ?? ''} onChange={(e) => set('locationType', (e.target.value || null) as CalendarEventInput['locationType'])}><option value="">不填</option><option value="place">一般地點</option><option value="route">起點與終點</option><option value="online">線上</option></select></label>{form.locationType && form.locationType !== 'online' && <label className="field">{form.locationType === 'route' ? '起點' : '地點'}<input value={form.startPlace ?? ''} onChange={(e) => set('startPlace', e.target.value || null)} /></label>}{form.locationType === 'route' && <label className="field">終點<input value={form.endPlace ?? ''} onChange={(e) => set('endPlace', e.target.value || null)} /></label>}{form.locationType === 'online' && <label className="field">網址<input type="url" value={form.url ?? ''} onChange={(e) => set('url', e.target.value || null)} placeholder="https://" /></label>}<label className="field">備註<textarea value={form.note ?? ''} onChange={(e) => set('note', e.target.value || null)} rows={4} /></label><p className="muted small">完整時區、重複、提醒、人物與標籤會在第二輪加入；資料欄位已先保留。</p></div>}
+    {more && <div className="more-fields"><label className="field">地點類型<select value={form.locationType ?? ''} onChange={(e) => setForm((current) => ({ ...current, locationType: (e.target.value || null) as CalendarEventInput['locationType'], endTimeZone: e.target.value === 'route' ? current.endTimeZone ?? current.startTimeZone : current.startTimeZone, endUtcOffset: null }))}><option value="">不填</option><option value="place">一般地點</option><option value="route">起點與終點</option><option value="online">線上</option></select></label>{form.locationType && form.locationType !== 'online' && <label className="field">{form.locationType === 'route' ? '起點' : '地點'}<input value={form.startPlace ?? ''} onChange={(e) => set('startPlace', e.target.value || null)} /></label>}{form.locationType === 'route' && <label className="field">終點<input value={form.endPlace ?? ''} onChange={(e) => set('endPlace', e.target.value || null)} /></label>}{form.locationType === 'online' && <label className="field">網址<input type="url" value={form.url ?? ''} onChange={(e) => set('url', e.target.value || null)} placeholder="https://" /></label>}<label className="field">備註<textarea value={form.note ?? ''} onChange={(e) => set('note', e.target.value || null)} rows={4} /></label><p className="muted small">重複、提醒、人物與標籤會在後續階段加入。</p></div>}
     <div className="form-actions"><button type="button" onClick={onCancel}>取消</button><button className="primary" disabled={busy}>儲存</button></div>
   </form>;
+}
+
+function EventTimeZoneDetails({ snap, event }: { snap: CalendarSnapshot; event: CalendarEvent }) {
+  if (event.timeType === 'allDay') return null;
+  if (event.timeMode === 'floatingLocal') return <div className="timezone-detail"><b>時間方式：</b>跟隨目前所在地時間（不換算時區）</div>;
+  try {
+    const start = eventResolvedTime(event)!;
+    const end = event.timeType === 'range' ? eventResolvedTime(event, true)! : null;
+    const currentStart = event.startTimeZone !== snap.currentTimeZone ? convertCalendarInstant(start.epochMilliseconds, snap.currentTimeZone) : null;
+    const currentEnd = end && event.endTimeZone !== snap.currentTimeZone ? convertCalendarInstant(end.epochMilliseconds, snap.currentTimeZone) : null;
+    const duration = end ? calendarDurationMinutes(start.epochMilliseconds, end.epochMilliseconds) : null;
+    const durationText = duration == null ? null : `${Math.floor(duration / 60)} 小時 ${Math.abs(duration % 60)} 分`;
+    return <div className="timezone-detail"><p><b>{event.locationType === 'route' ? '出發時區' : '行程時區'}：</b>{timeZoneLabel(event.startTimeZone!, start.epochMilliseconds)}{event.timeZoneInferred && '（由主要時區推定）'}</p>{event.locationType === 'route' && end && <p><b>抵達時區：</b>{timeZoneLabel(event.endTimeZone!, end.epochMilliseconds)}</p>}{durationText && <p><b>實際經過時間：</b>{durationText}</p>}{currentStart && <p><b>開始換算目前所在地：</b>{formatConvertedCalendarTime(currentStart)}</p>}{currentEnd && <p><b>結束換算目前所在地：</b>{formatConvertedCalendarTime(currentEnd)}</p>}</div>;
+  } catch {
+    return <p className="form-error">這筆行程的時區資料需要修正。</p>;
+  }
 }
 
 function EventDetail({ api, snap, event, onBack, onEdit, onOpen, onAddChild, onJoinExisting, onMoveChild }: { api: CalendarApi; snap: CalendarSnapshot; event: CalendarEvent; onBack: () => void; onEdit: () => void; onOpen: (id: string) => void; onAddChild: () => void; onJoinExisting: () => void; onMoveChild: () => void }) {
@@ -377,7 +471,7 @@ function EventDetail({ api, snap, event, onBack, onEdit, onOpen, onAddChild, onJ
     const ok = await api.run((s) => s.deleteEvent(event).then(() => true));
     if (ok) onBack();
   };
-  return <section className={`card detail ${event.status === 'cancelled' ? 'cancelled' : ''}`}><div className="detail-head"><button className="icon-btn" onClick={onBack} aria-label="返回"><Icon name="left" /></button>{!event.systemSource && <button onClick={onEdit}><Icon name="pencil" size={17} /> 編輯</button>}</div>{event.status === 'cancelled' && <div className="cancel-badge">已取消</div>}<h2>{event.title}</h2><p className="detail-time">{rangeText(event)}・{timeText(event)}</p><p className="muted small">{groupOf(snap, event)?.name}{event.systemSource && '・系統資料'}</p>{parent && <button className="parent-link" onClick={() => onOpen(parent.id)}>主行程：{parent.title}<Icon name="right" size={16} /></button>}{event.startPlace && <p><b>{event.locationType === 'route' ? '路線' : '地點'}：</b>{event.startPlace}{event.endPlace ? ` → ${event.endPlace}` : ''}</p>}{event.url && <p><b>網址：</b><a href={event.url} target="_blank" rel="noreferrer">{event.url}</a></p>}{event.note && <div className="note-block"><b>備註</b><p>{event.note}</p></div>}{(canHaveChildren || children.length > 0) && <div className="itinerary"><div className="section-head"><h3>行程安排</h3>{event.status !== 'cancelled' && <span className="itinerary-buttons"><button className="link" onClick={onAddChild}><Icon name="plus" size={16} /> 新增細項</button><button className="link" onClick={onJoinExisting}>加入既有行程</button></span>}</div>{children.length ? <div className="itinerary-days">{[...childDays.entries()].map(([date, list]) => <div className="itinerary-day" key={date}><h4>第 {dateDiffDays(event.startDate, date) + 1} 天・{dateLabel(date)}</h4>{list.map((child) => <EventRow key={child.id} snap={snap} event={child} nested onClick={() => onOpen(child.id)} />)}</div>)}</div> : <p className="muted small">還沒有細項，可以新增或加入既有的交通、餐廳或景點。</p>}</div>}{!event.systemSource && <div className="detail-actions">{event.status === 'cancelled' ? <button onClick={() => api.run((s) => s.restoreEvent(event)).then(() => undefined)}>恢復行程</button> : <button className="danger" onClick={() => setCancel(true)}>取消行程</button>}{event.parentEventId && <><button onClick={onMoveChild}>移到其他主行程</button><button onClick={() => api.run((s) => s.detachEvent(event))}>移出主行程</button></>}<button className="danger" disabled={children.length > 0} onClick={remove}>刪除</button></div>}{children.length > 0 && <p className="muted small">主行程仍有細項時不能刪除，請先將細項移出。</p>}{cancel && <div className="choice-panel"><b>要取消哪個範圍？</b>{children.length ? <><button className="danger" onClick={() => api.run((s) => s.cancelEvent(event, true)).then(() => setCancel(false))}>取消整趟（包含所有細項）</button><button onClick={() => api.run((s) => s.cancelEvent(event, false)).then(() => setCancel(false))}>只取消主行程，細項移出</button></> : <button className="danger" onClick={() => api.run((s) => s.cancelEvent(event, false)).then(() => setCancel(false))}>確認取消</button>}<button onClick={() => setCancel(false)}>返回</button></div>}</section>;
+  return <section className={`card detail ${event.status === 'cancelled' ? 'cancelled' : ''}`}><div className="detail-head"><button className="icon-btn" onClick={onBack} aria-label="返回"><Icon name="left" /></button>{!event.systemSource && <button onClick={onEdit}><Icon name="pencil" size={17} /> 編輯</button>}</div>{event.status === 'cancelled' && <div className="cancel-badge">已取消</div>}<h2>{event.title}</h2><p className="detail-time">{rangeText(event)}・{timeText(event)}</p><EventTimeZoneDetails snap={snap} event={event} /><p className="muted small">{groupOf(snap, event)?.name}{event.systemSource && '・系統資料'}</p>{parent && <button className="parent-link" onClick={() => onOpen(parent.id)}>主行程：{parent.title}<Icon name="right" size={16} /></button>}{event.startPlace && <p><b>{event.locationType === 'route' ? '路線' : '地點'}：</b>{event.startPlace}{event.endPlace ? ` → ${event.endPlace}` : ''}</p>}{event.url && <p><b>網址：</b><a href={event.url} target="_blank" rel="noreferrer">{event.url}</a></p>}{event.note && <div className="note-block"><b>備註</b><p>{event.note}</p></div>}{(canHaveChildren || children.length > 0) && <div className="itinerary"><div className="section-head"><h3>行程安排</h3>{event.status !== 'cancelled' && <span className="itinerary-buttons"><button className="link" onClick={onAddChild}><Icon name="plus" size={16} /> 新增細項</button><button className="link" onClick={onJoinExisting}>加入既有行程</button></span>}</div>{children.length ? <div className="itinerary-days">{[...childDays.entries()].map(([date, list]) => <div className="itinerary-day" key={date}><h4>第 {dateDiffDays(event.startDate, date) + 1} 天・{dateLabel(date)}</h4>{list.map((child) => <EventRow key={child.id} snap={snap} event={child} nested onClick={() => onOpen(child.id)} />)}</div>)}</div> : <p className="muted small">還沒有細項，可以新增或加入既有的交通、餐廳或景點。</p>}</div>}{!event.systemSource && <div className="detail-actions">{event.status === 'cancelled' ? <button onClick={() => api.run((s) => s.restoreEvent(event)).then(() => undefined)}>恢復行程</button> : <button className="danger" onClick={() => setCancel(true)}>取消行程</button>}{event.parentEventId && <><button onClick={onMoveChild}>移到其他主行程</button><button onClick={() => api.run((s) => s.detachEvent(event))}>移出主行程</button></>}<button className="danger" disabled={children.length > 0} onClick={remove}>刪除</button></div>}{children.length > 0 && <p className="muted small">主行程仍有細項時不能刪除，請先將細項移出。</p>}{cancel && <div className="choice-panel"><b>要取消哪個範圍？</b>{children.length ? <><button className="danger" onClick={() => api.run((s) => s.cancelEvent(event, true)).then(() => setCancel(false))}>取消整趟（包含所有細項）</button><button onClick={() => api.run((s) => s.cancelEvent(event, false)).then(() => setCancel(false))}>只取消主行程，細項移出</button></> : <button className="danger" onClick={() => api.run((s) => s.cancelEvent(event, false)).then(() => setCancel(false))}>確認取消</button>}<button onClick={() => setCancel(false)}>返回</button></div>}</section>;
 }
 
 function JoinTripView({ api, snap, parent, onCancel, onDone }: { api: CalendarApi; snap: CalendarSnapshot; parent: CalendarEvent; onCancel: () => void; onDone: () => void }) {

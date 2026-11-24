@@ -48,6 +48,7 @@ select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset:
 .event-main { display: flex; min-width: 0; flex-direction: column; }
 .event-main b { overflow: hidden; text-overflow: ellipsis; }
 .event-main small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+.event-main .converted-time { color: var(--accent); font-size: .75rem; }
 .cancelled { opacity: .62; }
 .cancelled h2, .cancelled .event-main b, .event-row.cancelled b { text-decoration: line-through; }
 .event-row.nested { grid-template-columns: 5px 104px minmax(0, 1fr) 18px; padding-left: 0; }
@@ -97,12 +98,20 @@ select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset:
 .selected-start-date strong { color: var(--text); }
 .more-toggle { border: 0; background: none; color: var(--accent); padding-left: 0; margin-bottom: 8px; }
 .more-fields { border-top: 1px solid var(--line); padding-top: 12px; }
+.timezone-form { margin: 2px 0 12px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); }
+.time-mode-choice { grid-template-columns: repeat(2, 1fr); }
+.timezone-form > .field:last-child { margin-bottom: 0; }
+.dst-choice select { background: var(--card); }
+.dst-warning { margin: 8px 0; padding: 10px; border-radius: 10px; background: var(--warn-soft); color: var(--warn); }
+.dst-warning p { margin: 0 0 7px; }
 .form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 
 /* 詳細 */
 .detail { max-width: 680px; margin-inline: auto; }
 .detail h2 { font-size: 1.5rem; margin-bottom: 3px; }
 .detail-time { font-weight: 600; font-variant-numeric: tabular-nums; }
+.timezone-detail { margin: 10px 0; padding: 10px 12px; border-radius: 10px; background: var(--accent-soft); font-size: .85rem; }
+.timezone-detail p { margin: 3px 0; }
 .detail a { color: var(--accent); overflow-wrap: anywhere; }
 .cancel-badge { display: inline-block; color: var(--danger); background: var(--danger-soft); border-radius: 99px; padding: 3px 10px; font-size: .8rem; font-weight: 700; }
 .parent-link { margin: 10px 0; width: 100%; justify-content: space-between; color: var(--accent); }
@@ -159,6 +168,10 @@ input[type='color'] { width: 44px; height: 42px; padding: 3px; border: 1px solid
 .more-back { margin-bottom: 10px; }
 .issue-row { padding: 10px 0; border-top: 1px solid var(--line); }
 .issue-row p { margin: 3px 0 0; color: var(--muted); }
+.timezone-notice { display: grid; gap: 7px; }
+.timezone-notice .row { flex-wrap: wrap; }
+.timezone-settings { max-width: 680px; }
+.timezone-settings > button { margin-bottom: 8px; text-align: left; }
 
 .fab {
   position: fixed; right: max(20px, calc((100vw - 820px) / 2 + 20px)); bottom: calc(76px + env(safe-area-inset-bottom));

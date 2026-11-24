@@ -13,6 +13,7 @@ export * from './lab';
 export * from './bowel';
 export * from './hub';
 export * from './calendar';
+export * from './calendar-time';
 export * from './taiwan-calendar';
 export * from './period';
 export * from './conditions';

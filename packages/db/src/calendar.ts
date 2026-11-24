@@ -4,11 +4,22 @@
  */
 import type { Backend, RowUpdate, RowValues, TableRow } from './backend';
 import { newId } from './ids';
+import {
+  analyzeCalendarLocalTime,
+  convertCalendarInstant,
+  isValidTimeZone,
+  resolveCalendarLocalTime,
+  type CalendarTimeDisambiguation,
+} from './calendar-time';
 import { TAIWAN_CALENDAR_GROUP_NAME, TAIWAN_CALENDAR_GROUP_SOURCE, taiwanSpecialDays } from './taiwan-calendar';
 
 export const DEFAULT_CALENDAR_TIME_ZONE = 'Asia/Taipei';
 export const DEFAULT_CALENDAR_COLOR = '#1f6fd1';
 const DEFAULT_GROUP_KEY = 'calendar.defaultGroupId';
+const HOME_TIME_ZONE_KEY = 'calendar.homeTimeZone';
+const CURRENT_TIME_ZONE_KEY = 'calendar.currentTimeZone';
+const LAST_DETECTED_TIME_ZONE_KEY = 'calendar.lastDetectedTimeZone';
+const RECENT_TIME_ZONES_KEY = 'calendar.recentTimeZones';
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 
@@ -37,10 +48,15 @@ export interface CalendarEventInput {
   startDate: string;
   startTime: string | null;
   startTimeZone: string | null;
+  startUtcOffset?: string | null;
+  startDisambiguation?: CalendarTimeDisambiguation;
   endDate: string;
   endTime: string | null;
   endTimeZone: string | null;
+  endUtcOffset?: string | null;
+  endDisambiguation?: CalendarTimeDisambiguation;
   timeMode: CalendarTimeMode;
+  timeZoneInferred?: boolean;
   locationType: CalendarLocationType;
   startPlace: string | null;
   endPlace: string | null;
@@ -59,6 +75,11 @@ export interface CalendarEvent extends CalendarEventInput {
   titleMissing: boolean;
   /** 由系統資料產生的唯讀行程；一般行程為 null。 */
   systemSource: string | null;
+  startUtcOffset: string | null;
+  startDisambiguation: CalendarTimeDisambiguation;
+  endUtcOffset: string | null;
+  endDisambiguation: CalendarTimeDisambiguation;
+  timeZoneInferred: boolean;
 }
 
 export interface CalendarIssue {
@@ -72,6 +93,11 @@ export interface CalendarSnapshot {
   groups: CalendarGroup[];
   events: CalendarEvent[];
   defaultGroupId: string;
+  homeTimeZone: string;
+  currentTimeZone: string;
+  lastDetectedTimeZone: string | null;
+  recentTimeZones: string[];
+  timeZoneRulesUpdated: number;
   issues: CalendarIssue[];
 }
 
@@ -129,6 +155,7 @@ export function sortCalendarEvents<T extends Pick<CalendarEvent, 'startDate' | '
 function eventValues(input: CalendarEventInput): RowValues {
   // （2026-11-20 使用者決定：時間點不顯示結束欄位；結束日期存開始日、結束時間留空。）
   const endDate = input.timeType === 'point' ? input.startDate : input.endDate;
+  const fixedTimeZone = input.timeType !== 'allDay' && input.timeMode === 'fixedZone';
   return {
     title: input.title.trim() || null,
     groupId: input.groupId,
@@ -136,11 +163,16 @@ function eventValues(input: CalendarEventInput): RowValues {
     timeType: input.timeType,
     startDate: input.startDate,
     startTime: input.timeType === 'allDay' ? null : input.startTime,
-    startTimeZone: input.timeType === 'allDay' ? null : input.startTimeZone,
+    startTimeZone: fixedTimeZone ? input.startTimeZone : null,
+    startUtcOffset: fixedTimeZone ? input.startUtcOffset ?? null : null,
+    startDisambiguation: fixedTimeZone ? input.startDisambiguation ?? 'earlier' : null,
     endDate,
     endTime: input.timeType === 'range' ? input.endTime : null,
-    endTimeZone: input.timeType === 'allDay' ? null : input.endTimeZone,
+    endTimeZone: fixedTimeZone ? input.endTimeZone : null,
+    endUtcOffset: fixedTimeZone ? input.endUtcOffset ?? null : null,
+    endDisambiguation: fixedTimeZone ? input.endDisambiguation ?? 'earlier' : null,
     timeMode: input.timeMode,
+    timeZoneInferred: fixedTimeZone ? input.timeZoneInferred ?? false : false,
     locationType: input.locationType,
     startPlace: input.startPlace?.trim() || null,
     endPlace: input.locationType === 'route' ? input.endPlace?.trim() || null : null,
@@ -150,13 +182,50 @@ function eventValues(input: CalendarEventInput): RowValues {
   };
 }
 
+function prepareEventInput(input: CalendarEventInput, previous?: CalendarEvent): CalendarEventInput {
+  if (input.timeType === 'allDay' || input.timeMode === 'floatingLocal') {
+    return { ...input, startTimeZone: null, endTimeZone: null, startUtcOffset: null, endUtcOffset: null, startDisambiguation: 'earlier', endDisambiguation: 'earlier', timeZoneInferred: false };
+  }
+  const startTimeZone = input.startTimeZone ?? DEFAULT_CALENDAR_TIME_ZONE;
+  const endTimeZone = input.locationType === 'route' && input.timeType === 'range' ? input.endTimeZone ?? startTimeZone : startTimeZone;
+  if (!isValidTimeZone(startTimeZone) || !isValidTimeZone(endTimeZone)) throw new Error('請選擇正確的時區');
+  const startDisambiguation = input.startDisambiguation === 'later' ? 'later' : 'earlier';
+  const endDisambiguation = input.endDisambiguation === 'later' ? 'later' : 'earlier';
+  const preserveStart = !!previous && previous.startDate === input.startDate && previous.startTime === input.startTime && previous.startTimeZone === startTimeZone && previous.startDisambiguation === startDisambiguation;
+  const preserveEnd = !!previous && previous.endDate === input.endDate && previous.endTime === input.endTime && previous.endTimeZone === endTimeZone && previous.endDisambiguation === endDisambiguation;
+  const start = resolveCalendarLocalTime(input.startDate, input.startTime!, startTimeZone, startDisambiguation, input.startUtcOffset, preserveStart);
+  const end = input.timeType === 'point'
+    ? start
+    : resolveCalendarLocalTime(input.endDate, input.endTime!, endTimeZone, endDisambiguation, input.endUtcOffset, preserveEnd);
+  return {
+    ...input,
+    startTimeZone,
+    endTimeZone,
+    startUtcOffset: start.offset,
+    endUtcOffset: end.offset,
+    startDisambiguation,
+    endDisambiguation: input.timeType === 'point' ? startDisambiguation : endDisambiguation,
+    timeZoneInferred: input.timeZoneInferred ?? false,
+  };
+}
+
 function validateEvent(input: CalendarEventInput) {
   const endDate = input.timeType === 'point' ? input.startDate : input.endDate;
   if (!DATE_RE.test(input.startDate) || !DATE_RE.test(endDate)) throw new Error('請填正確的日期');
   if (endDate < input.startDate) throw new Error('結束日期不能早於開始日期');
   if (input.timeType !== 'allDay' && (!input.startTime || !TIME_RE.test(input.startTime))) throw new Error('請填正確的開始時間');
   if (input.timeType === 'range' && (!input.endTime || !TIME_RE.test(input.endTime))) throw new Error('請填正確的結束時間');
-  if (input.timeType === 'range' && input.startDate === input.endDate && input.endTime! <= input.startTime!) throw new Error('同一天的結束時間必須晚於開始時間');
+  const separateRouteZones = input.timeMode === 'fixedZone' && input.locationType === 'route' && input.startTimeZone !== input.endTimeZone;
+  if (input.timeType === 'range' && input.startDate === input.endDate && input.endTime! <= input.startTime! && !separateRouteZones) throw new Error('同一天的結束時間必須晚於開始時間');
+}
+
+function validatePreparedEvent(input: CalendarEventInput) {
+  validateEvent(input);
+  if (input.timeType === 'range' && input.timeMode === 'fixedZone' && input.locationType === 'route' && input.startTimeZone && input.endTimeZone && input.startUtcOffset && input.endUtcOffset) {
+    const start = resolveCalendarLocalTime(input.startDate, input.startTime!, input.startTimeZone, input.startDisambiguation, input.startUtcOffset, true);
+    const end = resolveCalendarLocalTime(input.endDate, input.endTime!, input.endTimeZone, input.endDisambiguation, input.endUtcOffset, true);
+    if (end.epochMilliseconds <= start.epochMilliseconds) throw new Error('抵達時間換算後必須晚於出發時間');
+  }
 }
 
 export class CalendarStore {
@@ -219,10 +288,30 @@ export class CalendarStore {
     groups.sort((a, b) => a.sort - b.sort || a.name.localeCompare(b.name, 'zh-Hant'));
 
     const settingRows = await this.b.read('calendarSettings');
-    const setting = settingRows.find((r) => !r.empty && str(r.values.key) === DEFAULT_GROUP_KEY);
+    const findSetting = (key: string) => settingRows.find((r) => !r.empty && str(r.values.key) === key) ?? null;
+    const setting = findSetting(DEFAULT_GROUP_KEY);
     const configured = setting ? str(setting.values.value) : null;
     const defaultGroupId = groups.some((g) => g.id === configured && !g.archived && g.kind === 'user') ? configured! : groups.find((g) => !g.archived && g.kind === 'user')?.id ?? groups[0].id;
     if (configured !== defaultGroupId) await this.saveSetting(setting ?? null, DEFAULT_GROUP_KEY, defaultGroupId);
+
+    // （2026-11-24 使用者決定：主要時區只能手動改；偵測到裝置時區變更時先詢問，不直接改既有行程。）
+    const rawHomeTimeZone = str(findSetting(HOME_TIME_ZONE_KEY)?.values.value);
+    const homeTimeZone = rawHomeTimeZone && isValidTimeZone(rawHomeTimeZone) ? rawHomeTimeZone : DEFAULT_CALENDAR_TIME_ZONE;
+    if (rawHomeTimeZone !== homeTimeZone) await this.saveSetting(findSetting(HOME_TIME_ZONE_KEY), HOME_TIME_ZONE_KEY, homeTimeZone);
+    const rawCurrentTimeZone = str(findSetting(CURRENT_TIME_ZONE_KEY)?.values.value);
+    const currentTimeZone = rawCurrentTimeZone && isValidTimeZone(rawCurrentTimeZone) ? rawCurrentTimeZone : homeTimeZone;
+    if (rawCurrentTimeZone !== currentTimeZone) await this.saveSetting(findSetting(CURRENT_TIME_ZONE_KEY), CURRENT_TIME_ZONE_KEY, currentTimeZone);
+    const rawLastDetected = str(findSetting(LAST_DETECTED_TIME_ZONE_KEY)?.values.value);
+    const lastDetectedTimeZone = rawLastDetected && isValidTimeZone(rawLastDetected) ? rawLastDetected : null;
+    let recentTimeZones: string[] = [];
+    try {
+      const parsed = JSON.parse(str(findSetting(RECENT_TIME_ZONES_KEY)?.values.value) ?? '[]');
+      if (Array.isArray(parsed)) recentTimeZones = [...new Set(parsed.filter((item): item is string => typeof item === 'string' && isValidTimeZone(item)))].slice(0, 8);
+    } catch {
+      // 設定值損壞時忽略，之後儲存行程會重新建立。
+    }
+    const today = convertCalendarInstant(now, homeTimeZone).date;
+    let timeZoneRulesUpdated = 0;
 
     const eventRows = await this.b.read('calendarEvents');
     const eventFixes: RowUpdate[] = [];
@@ -256,6 +345,77 @@ export class CalendarStore {
       const rawEndDate = str(r.values.endDate);
       const endDate = timeType === 'point' ? startDate : rawEndDate ?? startDate;
       const patch: RowValues = {};
+      const timeMode: CalendarTimeMode = str(r.values.timeMode) === 'floatingLocal' ? 'floatingLocal' : 'fixedZone';
+      const locationType = (['place', 'route', 'online'].includes(str(r.values.locationType) ?? '') ? str(r.values.locationType) : null) as CalendarLocationType;
+      let startTimeZone: string | null = null;
+      let endTimeZone: string | null = null;
+      let startUtcOffset: string | null = null;
+      let endUtcOffset: string | null = null;
+      const startDisambiguation: CalendarTimeDisambiguation = str(r.values.startDisambiguation) === 'later' ? 'later' : 'earlier';
+      const endDisambiguation: CalendarTimeDisambiguation = str(r.values.endDisambiguation) === 'later' ? 'later' : 'earlier';
+      let timeZoneInferred = false;
+
+      if (timeType !== 'allDay' && timeMode === 'fixedZone') {
+        const rawStartTimeZone = str(r.values.startTimeZone);
+        startTimeZone = rawStartTimeZone ?? homeTimeZone;
+        timeZoneInferred = bool(r.values.timeZoneInferred) || !rawStartTimeZone;
+        if (!isValidTimeZone(startTimeZone)) {
+          issues.push({ table: 'calendarEvents', rowNumber: r.rowNumber, text: '開始時區格式看不懂' });
+          continue;
+        }
+        const rawEndTimeZone = str(r.values.endTimeZone);
+        endTimeZone = locationType === 'route' && timeType === 'range' ? rawEndTimeZone ?? startTimeZone : startTimeZone;
+        if (!isValidTimeZone(endTimeZone)) {
+          issues.push({ table: 'calendarEvents', rowNumber: r.rowNumber, text: '結束時區格式看不懂' });
+          continue;
+        }
+        if (!rawStartTimeZone) patch.startTimeZone = startTimeZone;
+        if (!rawStartTimeZone) patch.timeZoneInferred = true;
+        if (!rawEndTimeZone || rawEndTimeZone !== endTimeZone) patch.endTimeZone = endTimeZone;
+        if (!['earlier', 'later'].includes(str(r.values.startDisambiguation) ?? '')) patch.startDisambiguation = startDisambiguation;
+        if (!['earlier', 'later'].includes(str(r.values.endDisambiguation) ?? '')) patch.endDisambiguation = timeType === 'point' ? startDisambiguation : endDisambiguation;
+
+        try {
+          const startAnalysis = analyzeCalendarLocalTime(startDate, startTime!, startTimeZone);
+          if (startAnalysis.kind === 'nonexistent') throw new Error('開始時間是當地不存在的時間');
+          const computedStart = startDisambiguation === 'later' ? startAnalysis.later : startAnalysis.earlier;
+          const storedStart = str(r.values.startUtcOffset);
+          if (storedStart && startDate < today) resolveCalendarLocalTime(startDate, startTime!, startTimeZone, startDisambiguation, storedStart, true);
+          startUtcOffset = storedStart && startDate < today ? storedStart : computedStart.offset;
+          if (!storedStart || (startDate >= today && storedStart !== computedStart.offset)) {
+            patch.startUtcOffset = computedStart.offset;
+            if (storedStart && storedStart !== computedStart.offset) timeZoneRulesUpdated += 1;
+          }
+
+          if (timeType === 'point') {
+            endUtcOffset = startUtcOffset;
+            if (str(r.values.endUtcOffset) !== startUtcOffset) patch.endUtcOffset = startUtcOffset;
+          } else {
+            const endAnalysis = analyzeCalendarLocalTime(endDate, endTime!, endTimeZone);
+            if (endAnalysis.kind === 'nonexistent') throw new Error('結束時間是當地不存在的時間');
+            const computedEnd = endDisambiguation === 'later' ? endAnalysis.later : endAnalysis.earlier;
+            const storedEnd = str(r.values.endUtcOffset);
+            if (storedEnd && endDate < today) resolveCalendarLocalTime(endDate, endTime!, endTimeZone, endDisambiguation, storedEnd, true);
+            endUtcOffset = storedEnd && endDate < today ? storedEnd : computedEnd.offset;
+            if (!storedEnd || (endDate >= today && storedEnd !== computedEnd.offset)) {
+              patch.endUtcOffset = computedEnd.offset;
+              if (storedEnd && storedEnd !== computedEnd.offset) timeZoneRulesUpdated += 1;
+            }
+            if (locationType === 'route' && resolveCalendarLocalTime(endDate, endTime!, endTimeZone, endDisambiguation, endUtcOffset, true).epochMilliseconds <= resolveCalendarLocalTime(startDate, startTime!, startTimeZone, startDisambiguation, startUtcOffset, true).epochMilliseconds) throw new Error('抵達時間換算後必須晚於出發時間');
+          }
+        } catch (error) {
+          issues.push({ table: 'calendarEvents', rowNumber: r.rowNumber, text: error instanceof Error ? error.message : '時區時間格式看不懂' });
+          continue;
+        }
+      } else {
+        if (r.values.startTimeZone != null) patch.startTimeZone = null;
+        if (r.values.endTimeZone != null) patch.endTimeZone = null;
+        if (r.values.startUtcOffset != null) patch.startUtcOffset = null;
+        if (r.values.endUtcOffset != null) patch.endUtcOffset = null;
+        if (r.values.startDisambiguation != null) patch.startDisambiguation = null;
+        if (r.values.endDisambiguation != null) patch.endDisambiguation = null;
+        if (bool(r.values.timeZoneInferred)) patch.timeZoneInferred = false;
+      }
       if (!r.values.id) Object.assign(patch, { id, createdAt: now, updatedAt: now, createdVia: str(r.values.createdVia) ?? 'sheet' });
       if (titleMissing) issues.push({ table: 'calendarEvents', rowNumber: r.rowNumber, text: '行程還沒有標題' });
       if (!str(r.values.groupId)) patch.groupId = defaultGroupId;
@@ -264,8 +424,6 @@ export class CalendarStore {
       if (timeType === 'point' && endTime) patch.endTime = null;
       if (!str(r.values.status)) patch.status = 'scheduled';
       if (!str(r.values.timeMode)) patch.timeMode = 'fixedZone';
-      if (timeType !== 'allDay' && !str(r.values.startTimeZone)) patch.startTimeZone = DEFAULT_CALENDAR_TIME_ZONE;
-      if (timeType !== 'allDay' && !str(r.values.endTimeZone)) patch.endTimeZone = DEFAULT_CALENDAR_TIME_ZONE;
       if (Object.keys(patch).length) eventFixes.push({ rowNumber: r.rowNumber, values: patch, expectId: str(r.values.id) ?? '' });
       events.push({
         rowNumber: r.rowNumber,
@@ -276,12 +434,17 @@ export class CalendarStore {
         timeType,
         startDate,
         startTime: timeType === 'allDay' ? null : startTime,
-        startTimeZone: timeType === 'allDay' ? null : str(r.values.startTimeZone) ?? DEFAULT_CALENDAR_TIME_ZONE,
+        startTimeZone,
+        startUtcOffset,
+        startDisambiguation,
         endDate,
         endTime: timeType === 'range' ? endTime : null,
-        endTimeZone: timeType === 'allDay' ? null : str(r.values.endTimeZone) ?? DEFAULT_CALENDAR_TIME_ZONE,
-        timeMode: str(r.values.timeMode) === 'floatingLocal' ? 'floatingLocal' : 'fixedZone',
-        locationType: (['place', 'route', 'online'].includes(str(r.values.locationType) ?? '') ? str(r.values.locationType) : null) as CalendarLocationType,
+        endTimeZone,
+        endUtcOffset,
+        endDisambiguation: timeType === 'point' ? startDisambiguation : endDisambiguation,
+        timeMode,
+        timeZoneInferred,
+        locationType,
         startPlace: str(r.values.startPlace),
         endPlace: str(r.values.endPlace),
         url: str(r.values.url),
@@ -308,10 +471,15 @@ export class CalendarStore {
           startDate: day.date,
           startTime: null,
           startTimeZone: null,
+          startUtcOffset: null,
+          startDisambiguation: 'earlier',
           endDate: day.date,
           endTime: null,
           endTimeZone: null,
+          endUtcOffset: null,
+          endDisambiguation: 'earlier',
           timeMode: 'fixedZone',
+          timeZoneInferred: false,
           locationType: null,
           startPlace: null,
           endPlace: null,
@@ -326,7 +494,7 @@ export class CalendarStore {
         });
       }
     }
-    return { loadedAt: now, groups, events: sortCalendarEvents(events), defaultGroupId, issues };
+    return { loadedAt: now, groups, events: sortCalendarEvents(events), defaultGroupId, homeTimeZone, currentTimeZone, lastDetectedTimeZone, recentTimeZones, timeZoneRulesUpdated, issues };
   }
 
   async addGroup(name: string, color = DEFAULT_CALENDAR_COLOR) {
@@ -365,62 +533,118 @@ export class CalendarStore {
     await this.saveSetting(row, DEFAULT_GROUP_KEY, id);
   }
 
+  async setHomeTimeZone(timeZone: string) {
+    if (!isValidTimeZone(timeZone)) throw new Error('請選擇正確的主要時區');
+    const rows = await this.b.read('calendarSettings');
+    await this.saveSetting(rows.find((r) => !r.empty && str(r.values.key) === HOME_TIME_ZONE_KEY) ?? null, HOME_TIME_ZONE_KEY, timeZone);
+  }
+
+  async setCurrentTimeZone(timeZone: string) {
+    if (!isValidTimeZone(timeZone)) throw new Error('請選擇正確的目前時區');
+    const rows = await this.b.read('calendarSettings');
+    await this.saveSetting(rows.find((r) => !r.empty && str(r.values.key) === CURRENT_TIME_ZONE_KEY) ?? null, CURRENT_TIME_ZONE_KEY, timeZone);
+  }
+
+  /** 裝置時區改變只記錄使用者選擇，不改主要時區與既有行程。（2026-11-24 使用者決定） */
+  async confirmDetectedTimeZone(timeZone: string, useAsCurrent: boolean) {
+    if (!isValidTimeZone(timeZone)) throw new Error('裝置回報的時區無法使用');
+    const rows = await this.b.read('calendarSettings');
+    await this.saveSetting(rows.find((r) => !r.empty && str(r.values.key) === LAST_DETECTED_TIME_ZONE_KEY) ?? null, LAST_DETECTED_TIME_ZONE_KEY, timeZone);
+    if (useAsCurrent) await this.saveSetting(rows.find((r) => !r.empty && str(r.values.key) === CURRENT_TIME_ZONE_KEY) ?? null, CURRENT_TIME_ZONE_KEY, timeZone);
+  }
+
   private async saveSetting(row: TableRow | null, key: string, value: string) {
     if (row) await this.b.update('calendarSettings', [{ rowNumber: row.rowNumber, values: { value } }]);
     else await this.b.append('calendarSettings', [{ key, value }]);
   }
 
+  private async rememberTimeZones(input: CalendarEventInput) {
+    if (input.timeType === 'allDay' || input.timeMode === 'floatingLocal') return;
+    const zones = [input.startTimeZone, input.endTimeZone].filter((item): item is string => !!item && isValidTimeZone(item));
+    if (!zones.length) return;
+    const rows = await this.b.read('calendarSettings');
+    const row = rows.find((r) => !r.empty && str(r.values.key) === RECENT_TIME_ZONES_KEY) ?? null;
+    let current: string[] = [];
+    try {
+      const parsed = JSON.parse(str(row?.values.value) ?? '[]');
+      if (Array.isArray(parsed)) current = parsed.filter((item): item is string => typeof item === 'string' && isValidTimeZone(item));
+    } catch {
+      // 以這次的正確選項重新建立最近使用清單。
+    }
+    await this.saveSetting(row, RECENT_TIME_ZONES_KEY, JSON.stringify([...new Set([...zones, ...current])].slice(0, 8)));
+  }
+
   async addEvent(input: CalendarEventInput, id = newId()) {
     validateEvent(input);
+    const prepared = prepareEventInput(input);
+    validatePreparedEvent(prepared);
     const snap = await this.load();
-    if (!snap.groups.some((g) => g.id === input.groupId && !g.archived && g.kind === 'user')) throw new Error('請選擇可用的行事曆群組');
-    if (input.parentEventId) {
-      const parent = snap.events.find((e) => e.id === input.parentEventId);
+    if (!snap.groups.some((g) => g.id === prepared.groupId && !g.archived && g.kind === 'user')) throw new Error('請選擇可用的行事曆群組');
+    if (prepared.parentEventId) {
+      const parent = snap.events.find((e) => e.id === prepared.parentEventId);
       if (!parent) throw new Error('找不到主行程');
-      const endDate = input.timeType === 'point' ? input.startDate : input.endDate;
-      if (input.startDate < parent.startDate || endDate > parent.endDate) throw new Error(`細項日期必須在主行程的 ${parent.startDate}～${parent.endDate} 之內`);
+      const endDate = prepared.timeType === 'point' ? prepared.startDate : prepared.endDate;
+      if (prepared.startDate < parent.startDate || endDate > parent.endDate) throw new Error(`細項日期必須在主行程的 ${parent.startDate}～${parent.endDate} 之內`);
     }
     const now = Date.now();
-    await this.b.append('calendarEvents', [{ ...eventValues(input), createdVia: this.via, id, createdAt: now, updatedAt: now }]);
+    await this.b.append('calendarEvents', [{ ...eventValues(prepared), createdVia: this.via, id, createdAt: now, updatedAt: now }]);
+    await this.rememberTimeZones(prepared);
     return id;
   }
 
   async updateEvent(event: Pick<CalendarEvent, 'rowNumber' | 'id'>, input: CalendarEventInput) {
     if ((event as CalendarEvent).systemSource) throw new Error('系統行程不能在這裡修改');
     validateEvent(input);
-    if (input.parentEventId) {
-      const snap = await this.load();
-      const parent = snap.events.find((item) => item.id === input.parentEventId);
+    const snap = await this.load();
+    const prepared = prepareEventInput(input, snap.events.find((item) => item.id === event.id));
+    validatePreparedEvent(prepared);
+    if (prepared.parentEventId) {
+      const parent = snap.events.find((item) => item.id === prepared.parentEventId);
       if (!parent) throw new Error('找不到主行程');
-      const endDate = input.timeType === 'point' ? input.startDate : input.endDate;
-      if (input.startDate < parent.startDate || endDate > parent.endDate) throw new Error(`細項日期必須在主行程的 ${parent.startDate}～${parent.endDate} 之內`);
+      const endDate = prepared.timeType === 'point' ? prepared.startDate : prepared.endDate;
+      if (prepared.startDate < parent.startDate || endDate > parent.endDate) throw new Error(`細項日期必須在主行程的 ${parent.startDate}～${parent.endDate} 之內`);
     }
-    await this.b.update('calendarEvents', [{ rowNumber: event.rowNumber, values: { ...eventValues(input), updatedAt: Date.now() }, expectId: event.id }]);
+    await this.b.update('calendarEvents', [{ rowNumber: event.rowNumber, values: { ...eventValues(prepared), updatedAt: Date.now() }, expectId: event.id }]);
+    await this.rememberTimeZones(prepared);
   }
 
   /** 主行程改期：together = 所有細項依相同天數平移；onlyParent = 只改主行程。（2026-11-19 使用者決定） */
   async updateTrip(event: CalendarEvent, input: CalendarEventInput, mode: 'together' | 'onlyParent') {
     validateEvent(input);
+    const prepared = prepareEventInput(input, event);
+    validatePreparedEvent(prepared);
     const snap = await this.load();
     const children = snap.events.filter((e) => e.parentEventId === event.id);
-    const updates: RowUpdate[] = [{ rowNumber: event.rowNumber, values: { ...eventValues(input), updatedAt: Date.now() }, expectId: event.id }];
+    const updates: RowUpdate[] = [{ rowNumber: event.rowNumber, values: { ...eventValues(prepared), updatedAt: Date.now() }, expectId: event.id }];
     if (mode === 'together') {
-      const delta = dateDiffDays(event.startDate, input.startDate);
-      for (const child of children) updates.push({ rowNumber: child.rowNumber, values: { startDate: addDateDays(child.startDate, delta), endDate: addDateDays(child.endDate, delta), updatedAt: Date.now() }, expectId: child.id });
+      const delta = dateDiffDays(event.startDate, prepared.startDate);
+      for (const child of children) {
+        const moved = prepareEventInput({ ...child, startDate: addDateDays(child.startDate, delta), endDate: addDateDays(child.endDate, delta) }, child);
+        validatePreparedEvent(moved);
+        updates.push({ rowNumber: child.rowNumber, values: { ...eventValues(moved), updatedAt: Date.now() }, expectId: child.id });
+      }
     }
     await this.b.update('calendarEvents', updates);
+    await this.rememberTimeZones(prepared);
   }
 
   /** 只改主行程時，超出新期間的細項逐筆移入 / 解除 / 取消。（2026-11-19 使用者決定） */
   async updateTripSelective(event: CalendarEvent, input: CalendarEventInput, actions: TripChildAction[]) {
     validateEvent(input);
+    const prepared = prepareEventInput(input, event);
+    validatePreparedEvent(prepared);
+    const snap = await this.load();
     const now = Date.now();
-    const updates: RowUpdate[] = [{ rowNumber: event.rowNumber, values: { ...eventValues(input), updatedAt: now }, expectId: event.id }];
+    const updates: RowUpdate[] = [{ rowNumber: event.rowNumber, values: { ...eventValues(prepared), updatedAt: now }, expectId: event.id }];
     for (const item of actions) {
       if (item.action === 'move') {
         if (!item.startDate || !item.endDate || !DATE_RE.test(item.startDate) || !DATE_RE.test(item.endDate)) throw new Error('請填細項的新日期');
-        if (item.startDate < input.startDate || item.endDate > input.endDate || item.endDate < item.startDate) throw new Error('細項的新日期必須在主行程期間內');
-        updates.push({ rowNumber: item.event.rowNumber, values: { startDate: item.startDate, endDate: item.endDate, updatedAt: now }, expectId: item.event.id });
+        if (item.startDate < prepared.startDate || item.endDate > prepared.endDate || item.endDate < item.startDate) throw new Error('細項的新日期必須在主行程期間內');
+        const current = snap.events.find((candidate) => candidate.id === item.event.id);
+        if (!current) throw new Error('找不到要移動的細項');
+        const moved = prepareEventInput({ ...current, startDate: item.startDate, endDate: item.endDate }, current);
+        validatePreparedEvent(moved);
+        updates.push({ rowNumber: item.event.rowNumber, values: { ...eventValues(moved), updatedAt: now }, expectId: item.event.id });
       } else if (item.action === 'detach') {
         updates.push({ rowNumber: item.event.rowNumber, values: { parentEventId: null, updatedAt: now }, expectId: item.event.id });
       } else {
@@ -428,6 +652,7 @@ export class CalendarStore {
       }
     }
     await this.b.update('calendarEvents', updates);
+    await this.rememberTimeZones(prepared);
   }
 
   async detachEvent(event: Pick<CalendarEvent, 'rowNumber' | 'id'>) {
@@ -446,7 +671,9 @@ export class CalendarStore {
       const endDate = current.timeType === 'point' ? action.startDate : action.endDate;
       if (!DATE_RE.test(action.startDate) || !DATE_RE.test(endDate) || endDate < action.startDate) throw new Error(`「${current.title}」的日期不正確`);
       if (action.startDate < parent.startDate || endDate > parent.endDate) throw new Error(`「${current.title}」的日期必須在主行程的 ${parent.startDate}～${parent.endDate} 之內`);
-      updates.push({ rowNumber: current.rowNumber, values: { parentEventId: parent.id, startDate: action.startDate, endDate, updatedAt: now }, expectId: current.id });
+      const moved = prepareEventInput({ ...current, parentEventId: parent.id, startDate: action.startDate, endDate }, current);
+      validatePreparedEvent(moved);
+      updates.push({ rowNumber: current.rowNumber, values: { ...eventValues(moved), updatedAt: now }, expectId: current.id });
     }
     if (updates.length) await this.b.update('calendarEvents', updates);
   }
