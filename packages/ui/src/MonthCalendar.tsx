@@ -20,6 +20,8 @@ export interface MonthCalendarMark {
 export interface MonthCalendarDayInfo {
   marks?: MonthCalendarMark[];
   label?: string;
+  /** 行事曆可用來標示台灣休假日紅字與補班日。 */
+  tone?: 'holiday' | 'workday';
 }
 
 const monthOf = (date: string) => date.slice(0, 7);
@@ -93,6 +95,7 @@ export function MonthCalendar({
                 date === selected && 'selected',
                 date === today && 'today',
                 outside && 'outside',
+                info?.tone,
               ].filter(Boolean).join(' ')}
               onClick={() => setDate(date)}
               disabled={disabled}

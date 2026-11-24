@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Backend, CalendarSnapshot } from '@life/db';
-import { AuthError, CalendarStore, GoogleAuth, LocalBackend, SheetsBackend } from '@life/db';
+import { AuthError, CalendarStore, GoogleAuth, installTaiwanCalendarResource, LocalBackend, SheetsBackend, type TaiwanCalendarResource } from '@life/db';
 
 const CLIENT_ID = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined)?.trim() ?? '';
 const FORCE_LOCAL = new URLSearchParams(location.search).has('local');
+const TAIWAN_VERSION_KEY = 'life.calendar.taiwanCalendarVersion';
 
 export type Status = 'starting' | 'need-connect' | 'loading' | 'ready' | 'error';
 export interface Toast { id: number; text: string; kind: 'info' | 'error' }
@@ -20,6 +21,8 @@ export function useCalendar() {
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<Toast | null>(null);
   const initPromise = useRef<Promise<void> | null>(null);
+  const taiwanCalendarPromise = useRef<Promise<boolean> | null>(null);
+  const taiwanCalendarNotified = useRef(false);
   const toastTimer = useRef<number>();
 
   const showToast = useCallback((t: Omit<Toast, 'id'>, ms = 5500) => {
@@ -28,7 +31,26 @@ export function useCalendar() {
     toastTimer.current = window.setTimeout(() => setToast(null), ms);
   }, []);
 
+  const loadTaiwanCalendar = useCallback(async () => {
+    if (!taiwanCalendarPromise.current) taiwanCalendarPromise.current = (async () => {
+      try {
+        const response = await fetch(`${import.meta.env.BASE_URL}taiwan-calendar.json`, { cache: 'no-cache' });
+        if (!response.ok) return false;
+        const resource = await response.json() as TaiwanCalendarResource;
+        installTaiwanCalendarResource(resource);
+        const previous = localStorage.getItem(TAIWAN_VERSION_KEY);
+        localStorage.setItem(TAIWAN_VERSION_KEY, resource.version);
+        return !!previous && previous !== resource.version;
+      } catch {
+        // 本機開發或政府來源暫時失敗時，繼續使用程式內建的官方資料。
+        return false;
+      }
+    })();
+    return taiwanCalendarPromise.current;
+  }, []);
+
   const load = useCallback(async () => {
+    const taiwanCalendarUpdated = await loadTaiwanCalendar();
     if (!initPromise.current) {
       initPromise.current = backend.init().catch((e) => {
         initPromise.current = null;
@@ -39,7 +61,11 @@ export function useCalendar() {
     setSnap(await store.load());
     setStatus('ready');
     setError(null);
-  }, [backend, store]);
+    if (taiwanCalendarUpdated && !taiwanCalendarNotified.current) {
+      taiwanCalendarNotified.current = true;
+      showToast({ kind: 'info', text: '台灣休假與補班資料已更新' });
+    }
+  }, [backend, loadTaiwanCalendar, showToast, store]);
 
   const fail = useCallback((e: unknown) => {
     if (e instanceof AuthError) {

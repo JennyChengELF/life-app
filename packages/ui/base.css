@@ -213,6 +213,9 @@ button.link { border: 0; background: none; color: var(--accent); padding: 4px 6p
 .date-calendar-day.outside { opacity: .38; }
 .date-calendar-day.selected { background: var(--accent-soft); border-color: var(--accent); }
 .date-calendar-day.today > span:first-child { color: var(--accent); font-weight: 800; }
+.date-calendar-day.holiday > span:first-child { color: var(--danger); }
+.date-calendar-day.workday > span:first-child { color: var(--text); }
+.date-calendar-day.today.holiday > span:first-child { color: var(--danger); }
 .date-calendar-day:disabled { opacity: .22; }
 .date-calendar-marks { min-height: 7px; display: flex; align-items: center; justify-content: center; gap: 3px; width: 100%; }
 .date-calendar-marks i { display: block; background: var(--mark-color); flex: none; }

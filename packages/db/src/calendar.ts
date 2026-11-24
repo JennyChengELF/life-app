@@ -4,6 +4,7 @@
  */
 import type { Backend, RowUpdate, RowValues, TableRow } from './backend';
 import { newId } from './ids';
+import { TAIWAN_CALENDAR_GROUP_NAME, TAIWAN_CALENDAR_GROUP_SOURCE, taiwanSpecialDays } from './taiwan-calendar';
 
 export const DEFAULT_CALENDAR_TIME_ZONE = 'Asia/Taipei';
 export const DEFAULT_CALENDAR_COLOR = '#1f6fd1';
@@ -56,6 +57,8 @@ export interface CalendarEvent extends CalendarEventInput {
   updatedAt: number;
   /** 原始標題空白；畫面顯示「未命名行程」，並提醒之後補齊 */
   titleMissing: boolean;
+  /** 由系統資料產生的唯讀行程；一般行程為 null。 */
+  systemSource: string | null;
 }
 
 export interface CalendarIssue {
@@ -78,6 +81,12 @@ export interface TripChildAction {
   /** action = move 時的新日期 */
   startDate?: string;
   endDate?: string;
+}
+
+export interface TripAttachAction {
+  event: Pick<CalendarEvent, 'rowNumber' | 'id' | 'timeType' | 'parentEventId' | 'systemSource'>;
+  startDate: string;
+  endDate: string;
 }
 
 const str = (v: unknown) => (v == null || String(v).trim() === '' ? null : String(v).trim());
@@ -158,9 +167,16 @@ export class CalendarStore {
 
   async load(now = Date.now()): Promise<CalendarSnapshot> {
     let groupRows = await this.b.read('calendarGroups');
-    if (!groupRows.some((r) => !r.empty && !deleted(r))) {
+    if (!groupRows.some((r) => !r.empty && !deleted(r) && str(r.values.kind) !== 'system')) {
       await this.b.append('calendarGroups', [
         { name: '一般', color: DEFAULT_CALENDAR_COLOR, kind: 'user', sort: 1, hidden: false, archived: false, id: newId(now), createdAt: now, updatedAt: now },
+      ]);
+      groupRows = await this.b.read('calendarGroups');
+    }
+    // （2026-11-24 使用者決定：國定假日、補假與補班放在同一個「台灣休假與補班」系統群組。）
+    if (!groupRows.some((r) => !r.empty && !deleted(r) && str(r.values.sourceType) === TAIWAN_CALENDAR_GROUP_SOURCE)) {
+      await this.b.append('calendarGroups', [
+        { name: TAIWAN_CALENDAR_GROUP_NAME, color: '#d64545', kind: 'system', sourceType: TAIWAN_CALENDAR_GROUP_SOURCE, sort: 999, hidden: false, archived: false, id: newId(now + 1), createdAt: now, updatedAt: now },
       ]);
       groupRows = await this.b.read('calendarGroups');
     }
@@ -170,13 +186,18 @@ export class CalendarStore {
     const groups: CalendarGroup[] = [];
     for (const r of groupRows) {
       if (r.empty || deleted(r)) continue;
-      const name = str(r.values.name);
-      if (!name) {
+      const sourceType = str(r.values.sourceType);
+      let name = str(r.values.name);
+      const patch: RowValues = {};
+      if (sourceType === TAIWAN_CALENDAR_GROUP_SOURCE) {
+        if (name !== TAIWAN_CALENDAR_GROUP_NAME) patch.name = TAIWAN_CALENDAR_GROUP_NAME;
+        if (str(r.values.kind) !== 'system') patch.kind = 'system';
+        name = TAIWAN_CALENDAR_GROUP_NAME;
+      } else if (!name) {
         issues.push({ table: 'calendarGroups', rowNumber: r.rowNumber, text: '群組缺少名稱' });
         continue;
       }
       const id = str(r.values.id) ?? newId(now);
-      const patch: RowValues = {};
       if (!r.values.id) Object.assign(patch, { id, createdAt: now, updatedAt: now });
       if (!str(r.values.color)) patch.color = DEFAULT_CALENDAR_COLOR;
       if (!str(r.values.kind)) patch.kind = 'user';
@@ -187,8 +208,8 @@ export class CalendarStore {
         id,
         name,
         color: str(r.values.color) ?? DEFAULT_CALENDAR_COLOR,
-        kind: str(r.values.kind) === 'system' ? 'system' : 'user',
-        sourceType: str(r.values.sourceType),
+        kind: sourceType === TAIWAN_CALENDAR_GROUP_SOURCE || str(r.values.kind) === 'system' ? 'system' : 'user',
+        sourceType,
         sort: num(r.values.sort, groups.length + 1),
         hidden: bool(r.values.hidden),
         archived: bool(r.values.archived),
@@ -200,7 +221,7 @@ export class CalendarStore {
     const settingRows = await this.b.read('calendarSettings');
     const setting = settingRows.find((r) => !r.empty && str(r.values.key) === DEFAULT_GROUP_KEY);
     const configured = setting ? str(setting.values.value) : null;
-    const defaultGroupId = groups.some((g) => g.id === configured && !g.archived) ? configured! : groups.find((g) => !g.archived)?.id ?? groups[0].id;
+    const defaultGroupId = groups.some((g) => g.id === configured && !g.archived && g.kind === 'user') ? configured! : groups.find((g) => !g.archived && g.kind === 'user')?.id ?? groups[0].id;
     if (configured !== defaultGroupId) await this.saveSetting(setting ?? null, DEFAULT_GROUP_KEY, defaultGroupId);
 
     const eventRows = await this.b.read('calendarEvents');
@@ -270,9 +291,41 @@ export class CalendarStore {
         createdAt: num(r.values.createdAt, now),
         updatedAt: num(r.values.updatedAt, now),
         titleMissing,
+        systemSource: null,
       });
     }
     if (eventFixes.length) await this.b.update('calendarEvents', eventFixes);
+    const taiwanGroup = groups.find((g) => g.sourceType === TAIWAN_CALENDAR_GROUP_SOURCE && !g.archived);
+    if (taiwanGroup) {
+      for (const day of taiwanSpecialDays()) {
+        events.push({
+          rowNumber: 0,
+          id: `system:${TAIWAN_CALENDAR_GROUP_SOURCE}:${day.date}`,
+          title: day.title ?? (day.type === 'workday' ? '補班日' : '休假日'),
+          groupId: taiwanGroup.id,
+          parentEventId: null,
+          timeType: 'allDay',
+          startDate: day.date,
+          startTime: null,
+          startTimeZone: null,
+          endDate: day.date,
+          endTime: null,
+          endTimeZone: null,
+          timeMode: 'fixedZone',
+          locationType: null,
+          startPlace: null,
+          endPlace: null,
+          url: null,
+          note: day.type === 'workday' ? '依台灣政府行政機關辦公日曆，此日為補班日。' : '依台灣政府行政機關辦公日曆顯示。',
+          status: 'scheduled',
+          createdVia: TAIWAN_CALENDAR_GROUP_SOURCE,
+          createdAt: 0,
+          updatedAt: 0,
+          titleMissing: false,
+          systemSource: TAIWAN_CALENDAR_GROUP_SOURCE,
+        });
+      }
+    }
     return { loadedAt: now, groups, events: sortCalendarEvents(events), defaultGroupId, issues };
   }
 
@@ -288,6 +341,9 @@ export class CalendarStore {
   }
 
   async updateGroup(group: Pick<CalendarGroup, 'rowNumber' | 'id'>, patch: Partial<Pick<CalendarGroup, 'name' | 'color' | 'hidden' | 'archived' | 'sort'>>) {
+    const current = (await this.load()).groups.find((item) => item.id === group.id);
+    if (!current) throw new Error('找不到群組');
+    if (current.kind === 'system' && (patch.name !== undefined || patch.archived !== undefined)) throw new Error('系統群組只能調整顏色、排序與顯示');
     const values: RowValues = { updatedAt: Date.now() };
     if (patch.name !== undefined) {
       const n = patch.name.trim();
@@ -302,6 +358,8 @@ export class CalendarStore {
   }
 
   async setDefaultGroup(id: string) {
+    const group = (await this.load()).groups.find((item) => item.id === id);
+    if (!group || group.kind !== 'user' || group.archived) throw new Error('系統群組不能設為預設群組');
     const rows = await this.b.read('calendarSettings');
     const row = rows.find((r) => !r.empty && str(r.values.key) === DEFAULT_GROUP_KEY) ?? null;
     await this.saveSetting(row, DEFAULT_GROUP_KEY, id);
@@ -315,7 +373,7 @@ export class CalendarStore {
   async addEvent(input: CalendarEventInput, id = newId()) {
     validateEvent(input);
     const snap = await this.load();
-    if (!snap.groups.some((g) => g.id === input.groupId && !g.archived)) throw new Error('請選擇可用的行事曆群組');
+    if (!snap.groups.some((g) => g.id === input.groupId && !g.archived && g.kind === 'user')) throw new Error('請選擇可用的行事曆群組');
     if (input.parentEventId) {
       const parent = snap.events.find((e) => e.id === input.parentEventId);
       if (!parent) throw new Error('找不到主行程');
@@ -328,6 +386,7 @@ export class CalendarStore {
   }
 
   async updateEvent(event: Pick<CalendarEvent, 'rowNumber' | 'id'>, input: CalendarEventInput) {
+    if ((event as CalendarEvent).systemSource) throw new Error('系統行程不能在這裡修改');
     validateEvent(input);
     if (input.parentEventId) {
       const snap = await this.load();
@@ -375,8 +434,36 @@ export class CalendarStore {
     await this.b.update('calendarEvents', [{ rowNumber: event.rowNumber, values: { parentEventId: null, updatedAt: Date.now() }, expectId: event.id }]);
   }
 
+  /** 把一或多筆既有一般行程加入主行程；日期可在確認畫面修正，但儲存時必須完整落在期間內。 */
+  async attachEventsToTrip(parent: CalendarEvent, actions: TripAttachAction[]) {
+    if (parent.parentEventId || parent.endDate <= parent.startDate || parent.systemSource) throw new Error('這筆不是可用的主行程');
+    const snap = await this.load();
+    const now = Date.now();
+    const updates: RowUpdate[] = [];
+    for (const action of actions) {
+      const current = snap.events.find((item) => item.id === action.event.id);
+      if (!current || current.systemSource || current.parentEventId || current.id === parent.id) throw new Error('選取的行程已不能加入');
+      const endDate = current.timeType === 'point' ? action.startDate : action.endDate;
+      if (!DATE_RE.test(action.startDate) || !DATE_RE.test(endDate) || endDate < action.startDate) throw new Error(`「${current.title}」的日期不正確`);
+      if (action.startDate < parent.startDate || endDate > parent.endDate) throw new Error(`「${current.title}」的日期必須在主行程的 ${parent.startDate}～${parent.endDate} 之內`);
+      updates.push({ rowNumber: current.rowNumber, values: { parentEventId: parent.id, startDate: action.startDate, endDate, updatedAt: now }, expectId: current.id });
+    }
+    if (updates.length) await this.b.update('calendarEvents', updates);
+  }
+
+  /** 細項移到另一個主行程時只改關聯，不改日期或其他內容。 */
+  async moveEventToTrip(event: CalendarEvent, parentId: string) {
+    if (!event.parentEventId || event.systemSource) throw new Error('這筆不是可移動的細項');
+    const snap = await this.load();
+    const parent = snap.events.find((item) => item.id === parentId);
+    if (!parent || parent.parentEventId || parent.endDate <= parent.startDate || parent.systemSource || parent.status !== 'scheduled') throw new Error('找不到可用的主行程');
+    if (event.startDate < parent.startDate || event.endDate > parent.endDate) throw new Error(`細項日期必須在主行程的 ${parent.startDate}～${parent.endDate} 之內`);
+    await this.b.update('calendarEvents', [{ rowNumber: event.rowNumber, values: { parentEventId: parent.id, updatedAt: Date.now() }, expectId: event.id }]);
+  }
+
   /** 取消整趟會連同細項；只取消主行程會解除細項。（2026-11-19 使用者決定） */
   async cancelEvent(event: CalendarEvent, wholeTrip: boolean) {
+    if (event.systemSource) throw new Error('系統行程不能取消');
     const snap = await this.load();
     const updates: RowUpdate[] = [{ rowNumber: event.rowNumber, values: { status: 'cancelled', updatedAt: Date.now() }, expectId: event.id }];
     const children = snap.events.filter((e) => e.parentEventId === event.id);
@@ -387,10 +474,12 @@ export class CalendarStore {
   }
 
   async restoreEvent(event: Pick<CalendarEvent, 'rowNumber' | 'id'>) {
+    if ((event as CalendarEvent).systemSource) throw new Error('系統行程不能修改');
     await this.b.update('calendarEvents', [{ rowNumber: event.rowNumber, values: { status: 'scheduled', updatedAt: Date.now() }, expectId: event.id }]);
   }
 
   async deleteEvent(event: CalendarEvent) {
+    if (event.systemSource) throw new Error('系統行程不能刪除');
     const snap = await this.load();
     if (snap.events.some((e) => e.parentEventId === event.id)) throw new Error('請先解除所有細項，再刪除主行程');
     const now = Date.now();

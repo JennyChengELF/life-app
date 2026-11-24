@@ -6,6 +6,9 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  # 每月重新抓官方辦公日曆；只更新部署成品，不自動 commit。
+  schedule:
+    - cron: '0 18 1 * *'
 
 permissions:
   contents: read
@@ -28,6 +31,9 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
+      - name: Update Taiwan office calendar
+        continue-on-error: true
+        run: node scripts/update-taiwan-calendar.mjs
       # 用戶端 ID 不是密碼（本來就會出現在網頁裡），存在 GitHub 的 Variables
       - name: Build hub
         run: pnpm --filter hub build

@@ -10,12 +10,14 @@ import {
   dateInRange,
   eventOnDate,
   sortCalendarEvents,
+  taiwanDayInfo,
   todayKey,
   type CalendarEvent,
   type CalendarEventInput,
   type CalendarGroup,
   type CalendarSnapshot,
   type TripChildAction,
+  type TripAttachAction,
 } from '@life/db';
 import { useCalendar, type CalendarApi } from './useCalendar';
 import { AppSwitcher } from '@life/ui/app-switcher';
@@ -33,6 +35,8 @@ const tabOf = (tab: Tab): MainTab => tab === 'add' || tab === 'calendar' || tab 
 type Open =
   | { kind: 'detail'; id: string }
   | { kind: 'form'; eventId: string | null; date: string; parentId: string | null }
+  | { kind: 'join-trip'; parentId: string }
+  | { kind: 'move-child'; eventId: string }
   | { kind: 'trip-change'; event: CalendarEvent; input: CalendarEventInput; step: 'scope' | 'children'; choices: Record<string, ChildChoice> };
 type ChildChoice = { action: 'move' | 'detach' | 'cancel'; startDate: string; endDate: string };
 
@@ -114,7 +118,7 @@ export function App() {
   const snap = api.snap;
   const activeGroups = new Set(snap.groups.filter((g) => !g.hidden).map((g) => g.id));
   const visibleEvents = snap.events.filter((e) => activeGroups.has(e.groupId));
-  const openedId = open?.kind === 'detail' ? open.id : open?.kind === 'form' ? open.eventId : null;
+  const openedId = open?.kind === 'detail' ? open.id : open?.kind === 'form' ? open.eventId : open?.kind === 'move-child' ? open.eventId : open?.kind === 'join-trip' ? open.parentId : null;
   const openedEvent = openedId ? snap.events.find((e) => e.id === openedId) ?? null : null;
 
   const saveEvent = async (input: CalendarEventInput, current: CalendarEvent | null) => {
@@ -158,7 +162,11 @@ export function App() {
           else { setOpen(null); setTab('calendar'); }
         }} onSave={saveEvent} /></>
       ) : open?.kind === 'detail' && openedEvent ? (
-        <EventDetail api={api} snap={snap} event={openedEvent} onBack={() => setOpen(null)} onEdit={() => setOpen({ kind: 'form', eventId: openedEvent.id, date: openedEvent.startDate, parentId: openedEvent.parentEventId })} onOpen={(id) => setOpen({ kind: 'detail', id })} onAddChild={() => setOpen({ kind: 'form', eventId: null, date: openedEvent.startDate, parentId: openedEvent.id })} />
+        <EventDetail api={api} snap={snap} event={openedEvent} onBack={() => setOpen(null)} onEdit={() => setOpen({ kind: 'form', eventId: openedEvent.id, date: openedEvent.startDate, parentId: openedEvent.parentEventId })} onOpen={(id) => setOpen({ kind: 'detail', id })} onAddChild={() => setOpen({ kind: 'form', eventId: null, date: openedEvent.startDate, parentId: openedEvent.id })} onJoinExisting={() => setOpen({ kind: 'join-trip', parentId: openedEvent.id })} onMoveChild={() => setOpen({ kind: 'move-child', eventId: openedEvent.id })} />
+      ) : open?.kind === 'join-trip' && openedEvent ? (
+        <JoinTripView api={api} snap={snap} parent={openedEvent} onCancel={() => setOpen({ kind: 'detail', id: openedEvent.id })} onDone={() => setOpen({ kind: 'detail', id: openedEvent.id })} />
+      ) : open?.kind === 'move-child' && openedEvent ? (
+        <MoveChildView api={api} snap={snap} event={openedEvent} onCancel={() => setOpen({ kind: 'detail', id: openedEvent.id })} onDone={() => setOpen({ kind: 'detail', id: openedEvent.id })} />
       ) : open?.kind === 'trip-change' ? (
         <TripChangeView api={api} data={open} onChange={setOpen} onDone={() => setOpen({ kind: 'detail', id: open.event.id })} />
       ) : (
@@ -195,10 +203,12 @@ function Shell({ api, tab, goTab, date, confirmLeave = false, children }: { api:
 
 function MonthView({ snap, events, selected, setDate, openEvent }: { snap: CalendarSnapshot; events: CalendarEvent[]; selected: string; setDate: (date: string) => void; openEvent: (id: string) => void }) {
   const selectedEvents = sortCalendarEvents(events.filter((e) => eventOnDate(e, selected)));
+  const selectedTaiwanDay = taiwanDayInfo(selected);
   const unnamed = events.filter((e) => e.titleMissing).length;
   const info = (date: string) => {
     const rows = sortCalendarEvents(events.filter((event) => eventOnDate(event, date)));
-    if (!rows.length) return null;
+    const taiwan = taiwanDayInfo(date);
+    if (!rows.length) return { tone: taiwan.type, label: taiwan.source === 'official' ? undefined : taiwan.source === 'provisional' ? '台灣辦公日：暫定，官方尚未公布' : '台灣辦公日：依週一至週五推算' };
     const shown = rows.slice(0, rows.length > 2 ? 2 : 3);
     const marks: MonthCalendarMark[] = shown.map((event) => ({
       kind: event.startDate === event.endDate ? 'dot' : 'bar',
@@ -206,13 +216,13 @@ function MonthView({ snap, events, selected, setDate, openEvent }: { snap: Calen
       label: event.title,
     }));
     if (rows.length > 2) marks.push({ kind: 'text', text: `+${rows.length - 2}`, color: 'var(--muted)', label: `另有 ${rows.length - 2} 筆` });
-    return { marks, label: `${rows.length} 筆行程：${rows.map((event) => event.title).join('、')}` };
+    return { marks, tone: taiwan.type, label: `${rows.length} 筆行程：${rows.map((event) => event.title).join('、')}${taiwan.source === 'official' ? '' : taiwan.source === 'provisional' ? '；辦公日為暫定' : '；辦公日為推算'}` };
   };
   return (
     <>
       {unnamed > 0 && <div className="msg warn">有 {unnamed} 筆未命名行程，之後可以點開補上標題。</div>}
       <MonthCalendar selected={selected} setDate={setDate} dayInfo={info} />
-      <section className="card day-list"><h2>{dateLabel(selected)}</h2>{selectedEvents.length ? selectedEvents.map((e) => <EventRow key={e.id} snap={snap} event={e} onClick={() => openEvent(e.id)} />) : <p className="muted empty">這天沒有行程</p>}</section>
+      <section className="card day-list"><h2>{dateLabel(selected)}</h2>{selectedTaiwanDay.source !== 'official' && <p className="calendar-estimate">{selectedTaiwanDay.source === 'provisional' ? '官方辦公日曆尚未公布，目前按週一至週五暫定。' : '這個年份沒有內建官方資料，目前按週一至週五推算。'}</p>}{selectedEvents.length ? selectedEvents.map((e) => <EventRow key={e.id} snap={snap} event={e} onClick={() => openEvent(e.id)} />) : <p className="muted empty">這天沒有行程</p>}</section>
     </>
   );
 }
@@ -318,7 +328,7 @@ function EventForm({ snap, event, initialDate, parentId, busy, hideStartDate = f
   const selectedParent = form.parentEventId ? snap.events.find((e) => e.id === form.parentEventId) ?? null : null;
   const effectiveEndDate = form.timeType === 'point' ? form.startDate : form.endDate;
   const parents = snap.events.filter((candidate) => {
-    if (candidate.parentEventId || candidate.id === event?.id || candidate.endDate <= candidate.startDate || candidate.status !== 'scheduled') return false;
+    if (candidate.parentEventId || candidate.id === event?.id || candidate.endDate <= candidate.startDate || candidate.status !== 'scheduled' || candidate.systemSource) return false;
     if (candidate.id === form.parentEventId) return true;
     return dateInRange(form.startDate, candidate.startDate, candidate.endDate) || dateInRange(effectiveEndDate, candidate.startDate, candidate.endDate);
   });
@@ -344,14 +354,14 @@ function EventForm({ snap, event, initialDate, parentId, busy, hideStartDate = f
     <div className="type-choice">{([['range', '時段'], ['point', '時間點'], ['allDay', '全天']] as const).map(([value, label]) => <button type="button" key={value} className={form.timeType === value ? 'active' : ''} onClick={() => setForm((current) => ({ ...current, timeType: value, startTime: value === 'allDay' ? null : current.startTime ?? '09:00', endDate: value === 'point' ? current.startDate : current.endDate, endTime: value === 'range' ? current.endTime ?? '10:00' : null }))}>{label}</button>)}</div>
     {hideStartDate && <div className="selected-start-date"><span>開始日期</span><strong>{slashDateLabel(form.startDate)}</strong></div>}
     <div className="form-grid">{!hideStartDate && <label className="field">開始日期<input type="date" value={form.startDate} onChange={(e) => setStartDate(e.target.value)} required /></label>}{form.timeType !== 'allDay' && <TimeField label="開始時間" value={form.startTime ?? ''} onChange={(value) => set('startTime', value)} />}{form.timeType !== 'point' && <label className="field">結束日期<input type="date" value={form.endDate} onChange={(e) => set('endDate', e.target.value)} required /></label>}{form.timeType === 'range' && <TimeField label="結束時間" value={form.endTime ?? ''} onChange={(value) => set('endTime', value)} />}</div>
-    <label className="field">行事曆群組<select value={form.groupId} onChange={(e) => set('groupId', e.target.value)}>{snap.groups.filter((group) => !group.archived).map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
+    <label className="field">行事曆群組<select value={form.groupId} onChange={(e) => set('groupId', e.target.value)}>{snap.groups.filter((group) => !group.archived && group.kind === 'user').map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
     <button type="button" className="more-toggle" onClick={() => setMore(!more)}>{more ? '收起更多設定' : '更多設定'}</button>
     {more && <div className="more-fields"><label className="field">地點類型<select value={form.locationType ?? ''} onChange={(e) => set('locationType', (e.target.value || null) as CalendarEventInput['locationType'])}><option value="">不填</option><option value="place">一般地點</option><option value="route">起點與終點</option><option value="online">線上</option></select></label>{form.locationType && form.locationType !== 'online' && <label className="field">{form.locationType === 'route' ? '起點' : '地點'}<input value={form.startPlace ?? ''} onChange={(e) => set('startPlace', e.target.value || null)} /></label>}{form.locationType === 'route' && <label className="field">終點<input value={form.endPlace ?? ''} onChange={(e) => set('endPlace', e.target.value || null)} /></label>}{form.locationType === 'online' && <label className="field">網址<input type="url" value={form.url ?? ''} onChange={(e) => set('url', e.target.value || null)} placeholder="https://" /></label>}<label className="field">備註<textarea value={form.note ?? ''} onChange={(e) => set('note', e.target.value || null)} rows={4} /></label><p className="muted small">完整時區、重複、提醒、人物與標籤會在第二輪加入；資料欄位已先保留。</p></div>}
     <div className="form-actions"><button type="button" onClick={onCancel}>取消</button><button className="primary" disabled={busy}>儲存</button></div>
   </form>;
 }
 
-function EventDetail({ api, snap, event, onBack, onEdit, onOpen, onAddChild }: { api: CalendarApi; snap: CalendarSnapshot; event: CalendarEvent; onBack: () => void; onEdit: () => void; onOpen: (id: string) => void; onAddChild: () => void }) {
+function EventDetail({ api, snap, event, onBack, onEdit, onOpen, onAddChild, onJoinExisting, onMoveChild }: { api: CalendarApi; snap: CalendarSnapshot; event: CalendarEvent; onBack: () => void; onEdit: () => void; onOpen: (id: string) => void; onAddChild: () => void; onJoinExisting: () => void; onMoveChild: () => void }) {
   const [cancel, setCancel] = useState(false);
   const children = sortCalendarEvents(snap.events.filter((e) => e.parentEventId === event.id));
   const childDays = children.reduce((map, child) => {
@@ -367,7 +377,33 @@ function EventDetail({ api, snap, event, onBack, onEdit, onOpen, onAddChild }: {
     const ok = await api.run((s) => s.deleteEvent(event).then(() => true));
     if (ok) onBack();
   };
-  return <section className={`card detail ${event.status === 'cancelled' ? 'cancelled' : ''}`}><div className="detail-head"><button className="icon-btn" onClick={onBack} aria-label="返回"><Icon name="left" /></button><button onClick={onEdit}><Icon name="pencil" size={17} /> 編輯</button></div>{event.status === 'cancelled' && <div className="cancel-badge">已取消</div>}<h2>{event.title}</h2><p className="detail-time">{rangeText(event)}・{timeText(event)}</p><p className="muted small">{groupOf(snap, event)?.name}</p>{parent && <button className="parent-link" onClick={() => onOpen(parent.id)}>主行程：{parent.title}<Icon name="right" size={16} /></button>}{event.startPlace && <p><b>{event.locationType === 'route' ? '路線' : '地點'}：</b>{event.startPlace}{event.endPlace ? ` → ${event.endPlace}` : ''}</p>}{event.url && <p><b>網址：</b><a href={event.url} target="_blank" rel="noreferrer">{event.url}</a></p>}{event.note && <div className="note-block"><b>備註</b><p>{event.note}</p></div>}{(canHaveChildren || children.length > 0) && <div className="itinerary"><div className="section-head"><h3>行程安排</h3>{event.status !== 'cancelled' && <button className="link" onClick={onAddChild}><Icon name="plus" size={16} /> 新增細項</button>}</div>{children.length ? <div className="itinerary-days">{[...childDays.entries()].map(([date, list]) => <div className="itinerary-day" key={date}><h4>第 {dateDiffDays(event.startDate, date) + 1} 天・{dateLabel(date)}</h4>{list.map((child) => <EventRow key={child.id} snap={snap} event={child} nested onClick={() => onOpen(child.id)} />)}</div>)}</div> : <p className="muted small">還沒有細項，可以加入交通、餐廳或景點。</p>}</div>}<div className="detail-actions">{event.status === 'cancelled' ? <button onClick={() => api.run((s) => s.restoreEvent(event)).then(() => undefined)}>恢復行程</button> : <button className="danger" onClick={() => setCancel(true)}>取消行程</button>}{event.parentEventId && <button onClick={() => api.run((s) => s.detachEvent(event))}>移出主行程</button>}<button className="danger" disabled={children.length > 0} onClick={remove}>刪除</button></div>{children.length > 0 && <p className="muted small">主行程仍有細項時不能刪除，請先將細項移出。</p>}{cancel && <div className="choice-panel"><b>要取消哪個範圍？</b>{children.length ? <><button className="danger" onClick={() => api.run((s) => s.cancelEvent(event, true)).then(() => setCancel(false))}>取消整趟（包含所有細項）</button><button onClick={() => api.run((s) => s.cancelEvent(event, false)).then(() => setCancel(false))}>只取消主行程，細項移出</button></> : <button className="danger" onClick={() => api.run((s) => s.cancelEvent(event, false)).then(() => setCancel(false))}>確認取消</button>}<button onClick={() => setCancel(false)}>返回</button></div>}</section>;
+  return <section className={`card detail ${event.status === 'cancelled' ? 'cancelled' : ''}`}><div className="detail-head"><button className="icon-btn" onClick={onBack} aria-label="返回"><Icon name="left" /></button>{!event.systemSource && <button onClick={onEdit}><Icon name="pencil" size={17} /> 編輯</button>}</div>{event.status === 'cancelled' && <div className="cancel-badge">已取消</div>}<h2>{event.title}</h2><p className="detail-time">{rangeText(event)}・{timeText(event)}</p><p className="muted small">{groupOf(snap, event)?.name}{event.systemSource && '・系統資料'}</p>{parent && <button className="parent-link" onClick={() => onOpen(parent.id)}>主行程：{parent.title}<Icon name="right" size={16} /></button>}{event.startPlace && <p><b>{event.locationType === 'route' ? '路線' : '地點'}：</b>{event.startPlace}{event.endPlace ? ` → ${event.endPlace}` : ''}</p>}{event.url && <p><b>網址：</b><a href={event.url} target="_blank" rel="noreferrer">{event.url}</a></p>}{event.note && <div className="note-block"><b>備註</b><p>{event.note}</p></div>}{(canHaveChildren || children.length > 0) && <div className="itinerary"><div className="section-head"><h3>行程安排</h3>{event.status !== 'cancelled' && <span className="itinerary-buttons"><button className="link" onClick={onAddChild}><Icon name="plus" size={16} /> 新增細項</button><button className="link" onClick={onJoinExisting}>加入既有行程</button></span>}</div>{children.length ? <div className="itinerary-days">{[...childDays.entries()].map(([date, list]) => <div className="itinerary-day" key={date}><h4>第 {dateDiffDays(event.startDate, date) + 1} 天・{dateLabel(date)}</h4>{list.map((child) => <EventRow key={child.id} snap={snap} event={child} nested onClick={() => onOpen(child.id)} />)}</div>)}</div> : <p className="muted small">還沒有細項，可以新增或加入既有的交通、餐廳或景點。</p>}</div>}{!event.systemSource && <div className="detail-actions">{event.status === 'cancelled' ? <button onClick={() => api.run((s) => s.restoreEvent(event)).then(() => undefined)}>恢復行程</button> : <button className="danger" onClick={() => setCancel(true)}>取消行程</button>}{event.parentEventId && <><button onClick={onMoveChild}>移到其他主行程</button><button onClick={() => api.run((s) => s.detachEvent(event))}>移出主行程</button></>}<button className="danger" disabled={children.length > 0} onClick={remove}>刪除</button></div>}{children.length > 0 && <p className="muted small">主行程仍有細項時不能刪除，請先將細項移出。</p>}{cancel && <div className="choice-panel"><b>要取消哪個範圍？</b>{children.length ? <><button className="danger" onClick={() => api.run((s) => s.cancelEvent(event, true)).then(() => setCancel(false))}>取消整趟（包含所有細項）</button><button onClick={() => api.run((s) => s.cancelEvent(event, false)).then(() => setCancel(false))}>只取消主行程，細項移出</button></> : <button className="danger" onClick={() => api.run((s) => s.cancelEvent(event, false)).then(() => setCancel(false))}>確認取消</button>}<button onClick={() => setCancel(false)}>返回</button></div>}</section>;
+}
+
+function JoinTripView({ api, snap, parent, onCancel, onDone }: { api: CalendarApi; snap: CalendarSnapshot; parent: CalendarEvent; onCancel: () => void; onDone: () => void }) {
+  const [query, setQuery] = useState('');
+  const [showOtherDates, setShowOtherDates] = useState(false);
+  const [showCancelled, setShowCancelled] = useState(false);
+  const [selected, setSelected] = useState<Record<string, { startDate: string; endDate: string }>>({});
+  const childParents = new Set(snap.events.filter((item) => item.parentEventId).map((item) => item.parentEventId));
+  const overlaps = (item: CalendarEvent) => item.startDate <= parent.endDate && item.endDate >= parent.startDate;
+  const candidates = sortCalendarEvents(snap.events.filter((item) => !item.parentEventId && item.id !== parent.id && !item.systemSource && !childParents.has(item.id) && (showCancelled || item.status !== 'cancelled') && (showOtherDates || overlaps(item)) && (!query.trim() || item.title.includes(query.trim()))));
+  const grouped = candidates.reduce((map, item) => { const list = map.get(item.startDate) ?? []; list.push(item); map.set(item.startDate, list); return map; }, new Map<string, CalendarEvent[]>());
+  const toggle = (item: CalendarEvent) => setSelected((old) => { const next = { ...old }; if (next[item.id]) delete next[item.id]; else next[item.id] = { startDate: item.startDate, endDate: item.endDate }; return next; });
+  const setDateValue = (id: string, key: 'startDate' | 'endDate', value: string) => setSelected((old) => ({ ...old, [id]: { ...old[id], [key]: value } }));
+  const save = async () => {
+    const actions: TripAttachAction[] = Object.entries(selected).map(([id, dates]) => ({ event: snap.events.find((item) => item.id === id)!, ...dates }));
+    const ok = await api.run((store) => store.attachEventsToTrip(parent, actions).then(() => true));
+    if (ok) onDone();
+  };
+  return <section className="card chooser"><div className="form-head"><button className="icon-btn" onClick={onCancel} aria-label="返回"><Icon name="left" /></button><div><h2>加入既有行程</h2><p className="muted small">{parent.title}・{parent.startDate}～{parent.endDate}</p></div></div><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜尋行程標題" aria-label="搜尋行程標題" /><div className="chooser-options"><label><input type="checkbox" checked={showOtherDates} onChange={(e) => setShowOtherDates(e.target.checked)} /> 顯示其他日期</label><label><input type="checkbox" checked={showCancelled} onChange={(e) => setShowCancelled(e.target.checked)} /> 顯示已取消</label></div>{grouped.size ? [...grouped.entries()].map(([date, list]) => <div className="chooser-day" key={date}><h3>{dateLabel(date, true)}</h3>{list.map((item) => { const dates = selected[item.id]; const outside = dates && (dates.startDate < parent.startDate || (item.timeType === 'point' ? dates.startDate : dates.endDate) > parent.endDate); return <div className={`chooser-item ${item.status === 'cancelled' ? 'cancelled' : ''}`} key={item.id}><label><input type="checkbox" checked={!!dates} onChange={() => toggle(item)} /><span><b>{item.title}</b><small>{rangeText(item)}・{timeText(item)}{item.status === 'cancelled' ? '・已取消' : ''}</small></span></label>{dates && outside && <div className="join-date-fix"><p>日期超出主行程，請先調整才能加入。</p><div className="row"><input type="date" value={dates.startDate} onChange={(e) => setDateValue(item.id, 'startDate', e.target.value)} /><span>～</span>{item.timeType === 'point' ? <span>{dates.startDate}</span> : <input type="date" value={dates.endDate} onChange={(e) => setDateValue(item.id, 'endDate', e.target.value)} />}</div></div>}</div>; })}</div>) : <p className="muted center">沒有符合的既有行程</p>}<div className="form-actions"><button onClick={onCancel}>取消</button><button className="primary" disabled={!Object.keys(selected).length || api.busy} onClick={save}>加入 {Object.keys(selected).length} 筆</button></div></section>;
+}
+
+function MoveChildView({ api, snap, event, onCancel, onDone }: { api: CalendarApi; snap: CalendarSnapshot; event: CalendarEvent; onCancel: () => void; onDone: () => void }) {
+  const [parentId, setParentId] = useState('');
+  const parents = snap.events.filter((item) => !item.parentEventId && item.id !== event.parentEventId && item.endDate > item.startDate && !item.systemSource && item.status === 'scheduled' && event.startDate >= item.startDate && event.endDate <= item.endDate);
+  const save = async () => { const ok = await api.run((store) => store.moveEventToTrip(event, parentId).then(() => true)); if (ok) onDone(); };
+  return <section className="card chooser"><div className="form-head"><button className="icon-btn" onClick={onCancel} aria-label="返回"><Icon name="left" /></button><h2>移到其他主行程</h2></div><p><b>{event.title}</b></p><p className="muted small">只列出完整包含細項日期（{event.startDate}～{event.endDate}）的主行程；移動後不會改變日期或其他內容。</p><label className="field">新的主行程<select value={parentId} onChange={(e) => setParentId(e.target.value)}><option value="">請選擇</option>{parents.map((item) => <option key={item.id} value={item.id}>{item.title}（{item.startDate}～{item.endDate}）</option>)}</select></label>{!parents.length && <p className="form-error">目前沒有日期符合的其他主行程。</p>}<div className="form-actions"><button onClick={onCancel}>取消</button><button className="primary" disabled={!parentId || api.busy} onClick={save}>確認移動</button></div></section>;
 }
 
 function TripChangeView({ api, data, onChange, onDone }: { api: CalendarApi; data: Extract<Open, { kind: 'trip-change' }>; onChange: (o: Open) => void; onDone: () => void }) {
@@ -406,6 +442,6 @@ function GroupRow({ api, snap, group, first, last, move }: { api: CalendarApi; s
   const [edit, setEdit] = useState(false);
   const [name, setName] = useState(group.name);
   const [color, setColor] = useState(group.color);
-  const save = async () => { const ok = await api.run((s) => s.updateGroup(group, { name, color }).then(() => true)); if (ok) setEdit(false); };
-  return <div className={`group-row ${group.archived ? 'archived' : ''}`}>{edit ? <><input type="color" value={color} onChange={(e) => setColor(e.target.value)} /><input value={name} onChange={(e) => setName(e.target.value)} /><button className="primary" onClick={save}>儲存</button><button onClick={() => setEdit(false)}>取消</button></> : <><span className="group-dot" style={{ background: group.color }} /><span className="group-name"><b>{group.name}</b>{snap.defaultGroupId === group.id && <small>預設</small>}{group.archived && <small>已停用</small>}</span>{!group.archived && <><label className="switch"><input type="checkbox" checked={!group.hidden} onChange={() => api.run((s) => s.updateGroup(group, { hidden: !group.hidden }))} />顯示</label><button className="icon-small" disabled={first} onClick={() => move(group, -1)} aria-label="往前">↑</button><button className="icon-small" disabled={last} onClick={() => move(group, 1)} aria-label="往後">↓</button><button onClick={() => api.run((s) => s.setDefaultGroup(group.id))} disabled={snap.defaultGroupId === group.id}>設為預設</button><button onClick={() => setEdit(true)}>編輯</button><button className="danger" onClick={() => api.run((s) => s.updateGroup(group, { archived: true, hidden: true }))}>停用</button></>}{group.archived && <button onClick={() => api.run((s) => s.updateGroup(group, { archived: false, hidden: false }))}>恢復</button>}</>}</div>;
+  const save = async () => { const ok = await api.run((s) => s.updateGroup(group, group.kind === 'system' ? { color } : { name, color }).then(() => true)); if (ok) setEdit(false); };
+  return <div className={`group-row ${group.archived ? 'archived' : ''}`}>{edit ? <><input type="color" value={color} onChange={(e) => setColor(e.target.value)} />{group.kind === 'user' && <input value={name} onChange={(e) => setName(e.target.value)} />}<button className="primary" onClick={save}>儲存</button><button onClick={() => setEdit(false)}>取消</button></> : <><span className="group-dot" style={{ background: group.color }} /><span className="group-name"><b>{group.name}</b>{group.kind === 'system' && <small>系統</small>}{snap.defaultGroupId === group.id && <small>預設</small>}{group.archived && <small>已停用</small>}</span>{!group.archived && <><label className="switch"><input type="checkbox" checked={!group.hidden} onChange={() => api.run((s) => s.updateGroup(group, { hidden: !group.hidden }))} />顯示</label><button className="icon-small" disabled={first} onClick={() => move(group, -1)} aria-label="往前">↑</button><button className="icon-small" disabled={last} onClick={() => move(group, 1)} aria-label="往後">↓</button>{group.kind === 'user' && <button onClick={() => api.run((s) => s.setDefaultGroup(group.id))} disabled={snap.defaultGroupId === group.id}>設為預設</button>}<button onClick={() => setEdit(true)}>{group.kind === 'system' ? '改顏色' : '編輯'}</button>{group.kind === 'user' && <button className="danger" onClick={() => api.run((s) => s.updateGroup(group, { archived: true, hidden: true }))}>停用</button>}</>}{group.archived && <button onClick={() => api.run((s) => s.updateGroup(group, { archived: false, hidden: false }))}>恢復</button>}</>}</div>;
 }

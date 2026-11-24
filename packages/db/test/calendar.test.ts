@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CalendarStore, LocalBackend, memoryStorage } from '../src';
+import { CalendarStore, LocalBackend, memoryStorage, taiwanDayInfo } from '../src';
 
 const base = (groupId: string) => ({
   title: '台南旅遊',
@@ -22,15 +22,23 @@ const base = (groupId: string) => ({
 });
 
 describe('行事曆資料', () => {
+  it('台灣辦公日以官方例外優先，舊年份與未公布年份只按週間推算', () => {
+    expect(taiwanDayInfo('2025-02-08')).toMatchObject({ type: 'workday', source: 'official', title: '補班日' });
+    expect(taiwanDayInfo('2026-10-09')).toMatchObject({ type: 'holiday', source: 'official', title: '國慶日補假' });
+    expect(taiwanDayInfo('1983-01-01')).toMatchObject({ type: 'holiday', source: 'inferred', title: null });
+    expect(taiwanDayInfo('2028-01-03')).toMatchObject({ type: 'workday', source: 'provisional', title: null });
+  });
+
   it('第一次使用建立一般群組；標題可空白並補成未命名行程', async () => {
     const b = new LocalBackend(memoryStorage());
     const s = new CalendarStore(b);
     let snap = await s.load();
-    expect(snap.groups).toHaveLength(1);
-    expect(snap.groups[0]).toMatchObject({ name: '一般', archived: false, hidden: false });
+    expect(snap.groups).toHaveLength(2);
+    expect(snap.groups.find((item) => item.name === '一般')).toMatchObject({ kind: 'user', archived: false, hidden: false });
+    expect(snap.groups.find((item) => item.name === '台灣休假與補班')).toMatchObject({ kind: 'system', sourceType: 'taiwanOfficeCalendar' });
     await s.addEvent({ ...base(snap.defaultGroupId), title: '', startDate: '2026-11-20', endDate: '2026-11-20' }, 'E1');
     snap = await s.load();
-    expect(snap.events[0]).toMatchObject({ id: 'E1', title: '未命名行程', titleMissing: true, timeType: 'allDay' });
+    expect(snap.events.find((item) => item.id === 'E1')).toMatchObject({ id: 'E1', title: '未命名行程', titleMissing: true, timeType: 'allDay' });
   });
 
   it('試算表直接輸入會補系統欄位、群組、類型與時區', async () => {
@@ -39,8 +47,9 @@ describe('行事曆資料', () => {
     await s.load();
     await b.appendRaw('calendarEvents', { title: '看醫生', startDate: '2026-12-01', startTime: '14:00' });
     const snap = await s.load(1000);
-    expect(snap.events[0]).toMatchObject({ title: '看醫生', timeType: 'point', startDate: '2026-12-01', endDate: '2026-12-01', startTimeZone: 'Asia/Taipei' });
-    expect(snap.events[0].id).toBeTruthy();
+    const event = snap.events.find((item) => item.title === '看醫生');
+    expect(event).toMatchObject({ title: '看醫生', timeType: 'point', startDate: '2026-12-01', endDate: '2026-12-01', startTimeZone: 'Asia/Taipei' });
+    expect(event?.id).toBeTruthy();
   });
 
   it('時間點只保存開始時間，結束日期自動等於開始日期', async () => {
@@ -78,7 +87,7 @@ describe('行事曆資料', () => {
     const all = await make();
     let trip = (await all.load()).events.find((e) => e.id === 'TRIP')!;
     await all.cancelEvent(trip, true);
-    expect((await all.load()).events.map((e) => e.status)).toEqual(['cancelled', 'cancelled']);
+    expect((await all.load()).events.filter((e) => !e.systemSource).map((e) => e.status)).toEqual(['cancelled', 'cancelled']);
 
     const only = await make();
     trip = (await only.load()).events.find((e) => e.id === 'TRIP')!;
@@ -102,5 +111,39 @@ describe('行事曆資料', () => {
     const group = (await s.load()).defaultGroupId;
     await s.addEvent(base(group), 'TRIP');
     await expect(s.addEvent({ ...base(group), title: '跨出旅程', parentEventId: 'TRIP', startDate: '2026-11-23', endDate: '2026-11-24' }, 'OUTSIDE')).rejects.toThrow('2026-11-21～2026-11-23');
+  });
+
+  it('可把既有行程加入主行程，並在加入時修正日期', async () => {
+    const s = new CalendarStore(new LocalBackend(memoryStorage()));
+    const group = (await s.load()).defaultGroupId;
+    await s.addEvent(base(group), 'TRIP');
+    await s.addEvent({ ...base(group), title: '先買車票', startDate: '2026-11-19', endDate: '2026-11-19' }, 'TICKET');
+    let snap = await s.load();
+    const trip = snap.events.find((item) => item.id === 'TRIP')!;
+    const ticket = snap.events.find((item) => item.id === 'TICKET')!;
+    await expect(s.attachEventsToTrip(trip, [{ event: ticket, startDate: '2026-11-19', endDate: '2026-11-19' }])).rejects.toThrow('2026-11-21～2026-11-23');
+    await s.attachEventsToTrip(trip, [{ event: ticket, startDate: '2026-11-21', endDate: '2026-11-21' }]);
+    snap = await s.load();
+    expect(snap.events.find((item) => item.id === 'TICKET')).toMatchObject({ parentEventId: 'TRIP', startDate: '2026-11-21', endDate: '2026-11-21' });
+  });
+
+  it('細項可移到日期完整包含它的另一個主行程，只改關聯', async () => {
+    const s = new CalendarStore(new LocalBackend(memoryStorage()));
+    const group = (await s.load()).defaultGroupId;
+    await s.addEvent(base(group), 'TRIP1');
+    await s.addEvent({ ...base(group), title: '另一趟旅遊', startDate: '2026-11-20', endDate: '2026-11-25' }, 'TRIP2');
+    await s.addEvent({ ...base(group), title: '景點', parentEventId: 'TRIP1', startDate: '2026-11-22', endDate: '2026-11-22' }, 'SPOT');
+    let snap = await s.load();
+    await s.moveEventToTrip(snap.events.find((item) => item.id === 'SPOT')!, 'TRIP2');
+    snap = await s.load();
+    expect(snap.events.find((item) => item.id === 'SPOT')).toMatchObject({ parentEventId: 'TRIP2', startDate: '2026-11-22', title: '景點' });
+  });
+
+  it('台灣官方特殊日期會成為唯讀系統行程；一般週末不建立行程', async () => {
+    const s = new CalendarStore(new LocalBackend(memoryStorage()));
+    const snap = await s.load();
+    expect(snap.events.find((item) => item.startDate === '2026-10-09')).toMatchObject({ title: '國慶日補假', systemSource: 'taiwanOfficeCalendar' });
+    expect(snap.events.find((item) => item.startDate === '2025-02-08')).toMatchObject({ title: '補班日', systemSource: 'taiwanOfficeCalendar' });
+    expect(snap.events.some((item) => item.startDate === '2026-11-22')).toBe(false);
   });
 });
