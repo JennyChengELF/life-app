@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Backend, BowelSnapshot, CalendarSnapshot, HealthSnapshot, HubSnapshot, MoneySnapshot, PersonAnniversarySettings, TaiwanCalendarResource, WaterSnapshot } from '@life/db';
+import type { Backend, BowelSnapshot, CalendarSnapshot, HealthSnapshot, HubSnapshot, HubTimelineKind, MoneySnapshot, PersonAnniversarySettings, TaiwanCalendarResource, WaterSnapshot } from '@life/db';
 import { AuthError, BowelStore, CalendarStore, GoogleAuth, HealthStore, HubStore, installTaiwanCalendarResource, LocalBackend, MoneyStore, SheetsBackend, WaterStore } from '@life/db';
 
 const CLIENT_ID = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined)?.trim() ?? '';
@@ -123,25 +123,13 @@ export function useHub() {
     };
   }, [status, refresh]);
 
-  /** 儲存首頁的常用按鈕；成功回傳 true */
-  const savePinned = useCallback(
-    async (keys: string[]) => {
-      setBusy(true);
-      try {
-        await hubStore.savePinned(keys);
-        setHubSnap(await hubStore.load());
-        return true;
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
-        return false;
-      } finally {
-        setBusy(false);
-      }
-    },
-    [hubStore],
-  );
+  const saveTimelineKinds = useCallback(async (kinds: HubTimelineKind[]) => {
+    await hubStore.saveTimelineKinds(kinds);
+    setHubSnap((snap) => snap && { ...snap, settings: { ...snap.settings, timelineKinds: kinds } });
+  }, [hubStore]);
 
+  const loadPeople = useCallback(() => hubStore.loadPeople(), [hubStore]);
   const loadPersonAnniversaries = useCallback(() => hubStore.loadPersonAnniversaryProfiles(), [hubStore]);
   const savePersonAnniversaries = useCallback((id: string, settings: PersonAnniversarySettings) => hubStore.savePersonAnniversaryProfile(id, settings), [hubStore]);
-  return { mode: backend.kind, status, waterSnap, healthSnap, bowelSnap, moneySnap, hubSnap, calendarSnap, calendarError, error, busy, connect, refresh, savePinned, loadPersonAnniversaries, savePersonAnniversaries };
+  return { mode: backend.kind, status, waterSnap, healthSnap, bowelSnap, moneySnap, hubSnap, calendarSnap, calendarError, error, busy, connect, refresh, saveTimelineKinds, loadPeople, loadPersonAnniversaries, savePersonAnniversaries, fileUrl: () => backend.fileUrl('hub') };
 }

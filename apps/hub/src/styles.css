@@ -1,6 +1,5 @@
 @import '@life/ui/base.css';
 
-.person-anniversary-settings h2 { margin: 8px 0 12px; }
 .person-anniversary-settings .field { display: block; margin-bottom: 10px; }
 .person-anniversary-settings .field input, .person-anniversary-settings .field select { display: block; width: 100%; margin-top: 4px; }
 .anniversary-fields { display: grid; gap: 8px 14px; }
@@ -9,6 +8,16 @@
 @media (min-width: 560px) { .anniversary-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 .hub { max-width: 640px; }
+.hub-more-row { width: 100%; display: grid; grid-template-columns: 34px 1fr 24px; align-items: center; gap: 8px; text-align: left; background: var(--card); border-color: var(--line); padding: 13px 12px; margin-bottom: 8px; }
+.hub-more-row > .icon:first-child { color: var(--accent); }
+.hub-more-row > .icon:last-child { color: var(--muted); }
+.hub-more-back { margin-bottom: 8px; display: inline-flex; align-items: center; gap: 4px; }
+.hub-timeline-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(125px, 1fr)); gap: 10px; border: 1px solid var(--line); border-radius: 8px; margin: 0 0 12px; }
+.hub-timeline-options label { display: flex; align-items: center; gap: 6px; }
+.hub-timeline-options input { width: auto; }
+.hub-people-table { width: 100%; border-collapse: collapse; text-align: left; overflow-wrap: anywhere; }
+.hub-people-table th, .hub-people-table td { border-bottom: 1px solid var(--line); padding: 8px; }
+.hub-people-table th:last-child, .hub-people-table td:last-child { white-space: nowrap; }
 
 /* 喝水總量 */
 .water-sum { display: flex; align-items: center; gap: 10px; padding: 8px 4px 10px; border-bottom: 1px solid var(--line); text-decoration: none; color: var(--text); }

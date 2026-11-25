@@ -4,13 +4,21 @@ import type { TimelineEntry } from '@life/db';
 import { bowelEntries, bowelHomeMessage, editHash, fmtMoney, depositsDue, healthEntries, loanReminders, moneyDayTotals, moneyEntries, stocktakeStatus, sortEntries, todayKey, waterEntries, waterSummary } from '@life/db';
 import { DateNav, Timeline } from '@life/ui/timeline';
 import { AppSwitcher } from '@life/ui/app-switcher';
+import { AppTabs, type AppTabItem } from '@life/ui/app-tabs';
 import { CalendarReminderList } from '@life/ui/calendar-reminder-list';
 import { useHub } from './useHub';
-import { PersonAnniversaries } from './PersonAnniversaries';
+import { HubMore, type EditState } from './HubMore';
 
 const HOME_URL = import.meta.env.DEV ? `http://${location.hostname}:5172/` : './';
 
 type AppKey = 'water' | 'health' | 'bowel' | 'money' | 'calendar' | 'period';
+type Tab = 'home' | 'more';
+
+// （2026-11-25 使用者決定：綜合首頁新增「更多」，集中管理資料與設定。）
+const TABS: AppTabItem<Tab>[] = [
+  { key: 'home', label: '首頁', icon: 'home' },
+  { key: 'more', label: '更多', icon: 'more' },
+];
 
 /**
  * 各 APP 的網址：上線時在同一個網站的子路徑（water/、health/、bowel/）；
@@ -33,15 +41,24 @@ function requestedDate() {
 export function App() {
   const hub = useHub();
   const [date, setDate] = useState(requestedDate);
-  const [people, setPeople] = useState(false);
+  const [tab, setTab] = useState<Tab>('home');
+  const [editState, setEditState] = useState<EditState>('clean');
+  const canLeave = () => editState !== 'saving' &&
+    (editState === 'clean' || confirm('有尚未儲存的設定，確定要離開？'));
+  const goTab = (next: Tab) => {
+    if (tab === next || !canLeave()) return;
+    setEditState('clean');
+    setTab(next);
+  };
 
   return (
     <div className="app hub">
       <header className="topbar">
-        <AppSwitcher current="hub" homeUrl={HOME_URL} date={date} />
+        <AppSwitcher current="hub" homeUrl={HOME_URL} date={date} confirmLeave={editState !== 'clean'} />
         <h1>生活</h1>
+        {hub.status === 'ready' && <AppTabs items={TABS} current={tab} onChange={goTab} placement="top" />}
         {hub.status === 'ready' && (
-          <button className="icon-btn" onClick={hub.refresh} disabled={hub.busy} title="重新整理（讀取試算表最新資料）" aria-label="重新整理">
+          <button className="icon-btn" onClick={hub.refresh} disabled={hub.busy || editState === 'saving'} title="重新整理（讀取試算表最新資料）" aria-label="重新整理">
             <span className={hub.busy ? 'spin' : ''}>
               <Icon name="refresh" />
             </span>
@@ -50,15 +67,11 @@ export function App() {
       </header>
       {hub.mode === 'local' && <div className="mode-banner">本機測試模式：資料只存在這個瀏覽器，還沒接上 Google 試算表</div>}
       <main>
-        {hub.status === 'ready' && people ? (
-          <PersonAnniversaries load={hub.loadPersonAnniversaries} save={hub.savePersonAnniversaries} onBack={() => setPeople(false)} />
-        ) : (
-          <>
-            {hub.status === 'ready' && <button type="button" className="link" onClick={() => setPeople(true)}><Icon name="user" size={18} /> 人物紀念日</button>}
-            <Day hub={hub} date={date} setDate={setDate} />
-          </>
-        )}
+        {hub.status === 'ready' && hub.hubSnap && tab === 'more'
+          ? <HubMore hub={hub} timelineKinds={hub.hubSnap.settings.timelineKinds} canLeave={canLeave} onEditState={setEditState} />
+          : <Day hub={hub} date={date} setDate={setDate} />}
       </main>
+      {hub.status === 'ready' && <AppTabs items={TABS} current={tab} onChange={goTab} placement="bottom" />}
     </div>
   );
 }
@@ -86,12 +99,13 @@ function Day({ hub, date, setDate }: { hub: ReturnType<typeof useHub>; date: str
     );
 
   const w = waterSummary(hub.waterSnap, date);
+  const timelineKinds = hub.hubSnap?.settings.timelineKinds;
   const entries = sortEntries([
     ...healthEntries(hub.healthSnap, date),
     ...waterEntries(hub.waterSnap, date),
     ...bowelEntries(hub.bowelSnap, date),
     ...moneyEntries(hub.moneySnap, date),
-  ]);
+  ].filter((entry) => !timelineKinds || timelineKinds.includes(entry.ref.kind)));
   const money = moneyDayTotals(hub.moneySnap, date);
   // 借出太久沒還（天數在記帳 APP 設定，2026-11-18）
   const loans = loanReminders(hub.moneySnap);
@@ -176,7 +190,9 @@ function Day({ hub, date, setDate }: { hub: ReturnType<typeof useHub>; date: str
             )}
           </a>
         )}
-        <Timeline entries={entries} onPick={pick} />
+        {timelineKinds?.length === 0
+          ? <p className="muted small">時間軸目前未選取任何紀錄。可到「更多 → 首頁設定」調整。</p>
+          : <Timeline entries={entries} onPick={pick} />}
       </section>
     </>
   );

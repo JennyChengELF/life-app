@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { PERSON_ANNIVERSARY_FIELDS, type PersonAnniversaryProfile, type PersonAnniversarySettings } from '@life/db';
+import type { EditState } from './HubMore';
 
-export function PersonAnniversaries({ load, save, onBack }: {
+export function PersonAnniversaries({ load, save, onEditState }: {
   load: () => Promise<PersonAnniversaryProfile[]>;
   save: (id: string, settings: PersonAnniversarySettings) => Promise<void>;
-  onBack: () => void;
+  onEditState: (state: EditState) => void;
 }) {
   const [profiles, setProfiles] = useState<PersonAnniversaryProfile[] | null>(null);
   const [personId, setPersonId] = useState('');
@@ -23,26 +24,30 @@ export function PersonAnniversaries({ load, save, onBack }: {
 
   const canLeave = () => !draft || confirm('紀念日尚未儲存，確定離開？');
   const settings = draft ?? profile?.settings;
+  const changeDraft = (next: PersonAnniversarySettings | null) => {
+    setDraft(next);
+    onEditState(next ? 'dirty' : 'clean');
+  };
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!draft || !profile || busy) return;
     setBusy(true);
+    onEditState('saving');
     setError(null);
     try {
       await save(profile.id, draft);
       setProfiles(await load());
-      setDraft(null);
+      changeDraft(null);
       setSaved(true);
     } catch (e) {
+      onEditState('dirty');
       setError(e instanceof Error ? e.message : '儲存失敗');
     } finally {
       setBusy(false);
     }
   };
 
-  return <section className="card person-anniversary-settings">
-    <button type="button" className="link" disabled={busy} onClick={() => { if (canLeave()) onBack(); }}>‹ 返回首頁</button>
-    <h2>人物紀念日</h2>
+  return <div className="person-anniversary-settings">
     {error && <p className="msg warn" role="alert">{error}</p>}
     {saved && !draft && <p className="msg info" role="status">已儲存，可在行事曆查看。</p>}
     {!profiles && !error && <p className="muted">讀取人物中⋯⋯</p>}
@@ -50,7 +55,7 @@ export function PersonAnniversaries({ load, save, onBack }: {
     {!!profiles?.length && <label className="field">人物
       <select value={personId} disabled={busy} onChange={(e) => {
         if (!canLeave()) return;
-        setPersonId(e.target.value); setDraft(null); setError(null); setSaved(false);
+        setPersonId(e.target.value); changeDraft(null); setError(null); setSaved(false);
       }}>
         <option value="">請選擇人物</option>
         {profiles.map((person) => <option value={person.id} key={person.id}>{person.nickname}{person.fullName ? `（${person.fullName}）` : ''}</option>)}
@@ -64,11 +69,11 @@ export function PersonAnniversaries({ load, save, onBack }: {
           return <div key={field}>
             <label className="field">{label}
               <input value={settings.dates[field]} disabled={busy} placeholder="月/日 或 西元年/月/日" onChange={(e) => {
-                setDraft({ ...settings, dates: { ...settings.dates, [field]: e.target.value } });
+                changeDraft({ ...settings, dates: { ...settings.dates, [field]: e.target.value } });
               }} />
             </label>
             {leapField && !!settings.dates[field].trim() && <label className="field">農曆月份
-              <select value={settings[leapField]} disabled={busy} onChange={(e) => setDraft({ ...settings, [leapField]: e.target.value as PersonAnniversarySettings[typeof leapField] })}>
+              <select value={settings[leapField]} disabled={busy} onChange={(e) => changeDraft({ ...settings, [leapField]: e.target.value as PersonAnniversarySettings[typeof leapField] })}>
                 <option value="regular">普通月</option>
                 <option value="fallback">閏月，沒有同名閏月時用普通月</option>
                 <option value="only">只在同名閏月顯示</option>
@@ -78,9 +83,9 @@ export function PersonAnniversaries({ load, save, onBack }: {
         })}
       </div>
       <label className="anniversary-contact">
-        <input type="checkbox" checked={settings.noLongerInContact} disabled={busy} onChange={(e) => setDraft({ ...settings, noLongerInContact: e.target.checked })} /> 不再聯繫，隱藏此人的生日和祭日
+        <input type="checkbox" checked={settings.noLongerInContact} disabled={busy} onChange={(e) => changeDraft({ ...settings, noLongerInContact: e.target.checked })} /> 不再聯繫，隱藏此人的生日和祭日
       </label>
       <button className="primary" disabled={!draft || busy}>儲存紀念日</button>
     </form>}
-  </section>;
+  </div>;
 }
