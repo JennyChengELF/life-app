@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CalendarStore, dueCalendarReminders, expandCalendarEvents, LocalBackend, memoryStorage, taiwanDayInfo } from '../src';
+import { CalendarStore, dueCalendarReminders, expandCalendarEvents, LocalBackend, memoryStorage, MoneyStore, taiwanDayInfo } from '../src';
 
 const base = (groupId: string) => ({
   title: '台南旅遊',
@@ -22,6 +22,36 @@ const base = (groupId: string) => ({
 });
 
 describe('行事曆資料', () => {
+  it('行事曆沿用共用人物的暱稱和 id，新增的人物也可供其他 APP 取得', async () => {
+    const backend = new LocalBackend(memoryStorage());
+    const s = new CalendarStore(backend);
+    await backend.append('hubPeople', [{ name: '舊人物' }]);
+    const { defaultGroupId, people } = await s.load();
+    const old = people[0];
+    expect(old).toMatchObject({ nickname: '舊人物', fullName: null });
+    const id = await s.addPerson(' 朋友 ', ' 測試姓名 ');
+    expect((await new MoneyStore(backend).load()).people.find((person) => person.id === id)?.name).toBe('朋友');
+    await expect(s.addPerson('朋友')).rejects.toThrow('已經有暱稱');
+    await s.addEvent({ ...base(defaultGroupId), peopleIds: [old.id, id, id] }, 'TRIP');
+    const newRow = (await backend.read('hubPeople')).find((row) => row.values.id === id)!;
+    await backend.update('hubPeople', [{ rowNumber: newRow.rowNumber, expectId: id, values: { name: '新暱稱', archived: true } }]);
+    const snap = await s.load();
+    expect(snap.events.find((e) => e.id === 'TRIP')?.peopleIds).toEqual([old.id, id]);
+    expect(snap.people.find((person) => person.id === id)).toMatchObject({ nickname: '新暱稱', fullName: '測試姓名', archived: true });
+  });
+
+  it('新增細項預設帶入主行程人物，明確清空可保留空名單', async () => {
+    const s = new CalendarStore(new LocalBackend(memoryStorage()));
+    const { defaultGroupId } = await s.load();
+    const personId = await s.addPerson('同行人');
+    await s.addEvent({ ...base(defaultGroupId), peopleIds: [personId] }, 'PARENT');
+    await s.addEvent({ ...base(defaultGroupId), parentEventId: 'PARENT' }, 'CHILD');
+    await s.addEvent({ ...base(defaultGroupId), parentEventId: 'PARENT', peopleIds: [] }, 'EMPTY-CHILD');
+    const snap = await s.load();
+    expect(snap.events.find((event) => event.id === 'CHILD')?.peopleIds).toEqual([personId]);
+    expect(snap.events.find((event) => event.id === 'EMPTY-CHILD')?.peopleIds).toEqual([]);
+  });
+
   it('保存多個提醒，並按每次重複行程的時區計算到期時間及取消例外', async () => {
     const s = new CalendarStore(new LocalBackend(memoryStorage()));
     await s.setCurrentTimeZone('Asia/Taipei');

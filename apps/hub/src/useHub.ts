@@ -46,7 +46,8 @@ export function useHub() {
           if (response.ok) installTaiwanCalendarResource(await response.json() as TaiwanCalendarResource);
         }).catch(() => { /* 沿用內建辦公日曆。 */ });
     }
-    const calendarResult = calendar.load().then((snapshot) => ({ snapshot, failed: false }), () => ({ snapshot: null, failed: true }));
+    const calendarResult = calendar.load(Date.now(), { includePeople: false })
+      .then((snapshot) => ({ snapshot, failed: false }), () => ({ snapshot: null, failed: true }));
     const [w, h, b, s, m, reminders] = await Promise.all([water.load(), health.load(), bowel.load(), hubStore.load(), money.load(), calendarResult]);
     await taiwanCalendarPromise.current;
     setCalendarSnap(reminders.snapshot);

@@ -77,6 +77,7 @@ export interface CalendarEventInput {
   recurrenceInstanceKey?: string | null;
   recurrenceExceptions?: string[];
   reminders?: CalendarReminder[];
+  peopleIds?: string[];
 }
 
 export interface CalendarEvent extends CalendarEventInput {
@@ -105,9 +106,16 @@ export interface CalendarEvent extends CalendarEventInput {
 }
 
 export interface CalendarIssue {
-  table: 'calendarGroups' | 'calendarEvents';
+  table: 'calendarGroups' | 'calendarEvents' | 'hubPeople';
   rowNumber: number;
   text: string;
+}
+
+export interface CalendarPerson {
+  id: string;
+  nickname: string;
+  fullName: string | null;
+  archived: boolean;
 }
 
 export interface CalendarSnapshot {
@@ -115,6 +123,7 @@ export interface CalendarSnapshot {
   groups: CalendarGroup[];
   events: CalendarEvent[];
   recurrenceMasters: CalendarEvent[];
+  people: CalendarPerson[];
   defaultGroupId: string;
   homeTimeZone: string;
   currentTimeZone: string;
@@ -139,6 +148,7 @@ export interface TripAttachAction {
 }
 
 const str = (v: unknown) => (v == null || String(v).trim() === '' ? null : String(v).trim());
+const uniquePersonIds = (ids: string[]) => [...new Set(ids.map((id) => id.trim()).filter(Boolean))];
 const num = (v: unknown, fallback = 0) => (typeof v === 'number' && Number.isFinite(v) ? v : Number(v) || fallback);
 const bool = (v: unknown) => v === true || String(v).toLowerCase() === 'true';
 const deleted = (r: TableRow) => r.values.deletedAt != null;
@@ -275,6 +285,7 @@ function eventValues(input: CalendarEventInput): RowValues {
     note: input.note?.trim() || null,
     status: input.status,
     reminders: reminders.length ? JSON.stringify(reminders) : null,
+    ...(input.peopleIds === undefined ? {} : { peopleIds: uniquePersonIds(input.peopleIds).join(',') || null }),
     recurrence: serializeCalendarRecurrence(input.recurrence ?? null),
     recurrenceParentId: input.recurrenceParentId ?? null,
     recurrenceInstanceKey: input.recurrenceInstanceKey ?? null,
@@ -338,7 +349,42 @@ export class CalendarStore {
     private via = 'calendar',
   ) {}
 
-  async load(now = Date.now()): Promise<CalendarSnapshot> {
+  private async loadPeople(now: number, issues: CalendarIssue[]) {
+    const rows = await this.b.read('hubPeople');
+    const people: CalendarPerson[] = [];
+    const fixes: RowUpdate[] = [];
+    const seenNicknames = new Set<string>();
+    for (const row of rows) {
+      if (row.empty || deleted(row)) continue;
+      // （2026-11-25 使用者確認：既有 name 當作唯一暱稱，姓名另存，行程透過 id 連結。）
+      const nickname = str(row.values.name);
+      if (!nickname || seenNicknames.has(nickname)) {
+        issues.push({ table: 'hubPeople', rowNumber: row.rowNumber, text: nickname ? `人物暱稱「${nickname}」重複` : '人物缺少暱稱' });
+      }
+      if (!nickname) continue;
+      seenNicknames.add(nickname);
+      const currentId = str(row.values.id);
+      const id = currentId ?? newId(now);
+      if (!currentId) fixes.push({ rowNumber: row.rowNumber, expectId: '', values: { id, createdAt: now, updatedAt: now } });
+      people.push({ id, nickname, fullName: str(row.values.fullName), archived: bool(row.values.archived) });
+    }
+    if (fixes.length) await this.b.update('hubPeople', fixes);
+    return people.sort((a, b) => a.nickname.localeCompare(b.nickname, 'zh-Hant'));
+  }
+
+  async addPerson(nickname: string, fullName = '') {
+    const name = nickname.trim();
+    if (!name) throw new Error('請填暱稱');
+    const rows = (await this.b.read('hubPeople')).filter((row) => !row.empty && !deleted(row));
+    if (rows.some((row) => str(row.values.name) === name)) throw new Error(`已經有暱稱「${name}」`);
+    const now = Date.now();
+    const id = newId(now);
+    const sort = rows.reduce((max, row) => Math.max(max, num(row.values.sort, 0)), 0) + 1;
+    await this.b.append('hubPeople', [{ id, name, fullName: fullName.trim() || null, sort, createdAt: now, updatedAt: now }]);
+    return id;
+  }
+
+  async load(now = Date.now(), { includePeople = true } = {}): Promise<CalendarSnapshot> {
     let groupRows = await this.b.read('calendarGroups');
     if (!groupRows.some((r) => !r.empty && !deleted(r) && str(r.values.kind) !== 'system')) {
       await this.b.append('calendarGroups', [
@@ -417,7 +463,7 @@ export class CalendarStore {
     const today = convertCalendarInstant(now, homeTimeZone).date;
     let timeZoneRulesUpdated = 0;
 
-    const eventRows = await this.b.read('calendarEvents');
+    const [eventRows, people] = await Promise.all([this.b.read('calendarEvents'), includePeople ? this.loadPeople(now, issues) : Promise.resolve([])]);
     const eventFixes: RowUpdate[] = [];
     const loadedEvents: CalendarEvent[] = [];
     for (const r of eventRows) {
@@ -586,6 +632,7 @@ export class CalendarStore {
         note: str(r.values.note),
         status: str(r.values.status) === 'cancelled' ? 'cancelled' : 'scheduled',
         reminders,
+        peopleIds: uniquePersonIds((str(r.values.peopleIds) ?? '').split(',')),
         createdVia: str(r.values.createdVia) ?? 'sheet',
         createdAt: num(r.values.createdAt, now),
         updatedAt: num(r.values.updatedAt, now),
@@ -657,7 +704,7 @@ export class CalendarStore {
         });
       }
     }
-    return { loadedAt: now, groups, events: sortCalendarEvents(events), recurrenceMasters, defaultGroupId, homeTimeZone, currentTimeZone, lastDetectedTimeZone, recentTimeZones, timeZoneRulesUpdated, issues };
+    return { loadedAt: now, groups, events: sortCalendarEvents(events), recurrenceMasters, people, defaultGroupId, homeTimeZone, currentTimeZone, lastDetectedTimeZone, recentTimeZones, timeZoneRulesUpdated, issues };
   }
 
   async addGroup(name: string, color = DEFAULT_CALENDAR_COLOR) {
@@ -748,6 +795,7 @@ export class CalendarStore {
       if (!parent) throw new Error('找不到主行程');
       const endDate = prepared.timeType === 'point' ? prepared.startDate : prepared.endDate;
       if (prepared.startDate < parent.startDate || endDate > parent.endDate) throw new Error(`細項日期必須在主行程的 ${parent.startDate}～${parent.endDate} 之內`);
+      prepared.peopleIds ??= parent.peopleIds;
     }
     const now = Date.now();
     await this.b.append('calendarEvents', [{ ...eventValues(prepared), createdVia: this.via, id, createdAt: now, updatedAt: now }]);

@@ -18,8 +18,9 @@
  * 13：新增生理期 APP、健康共用身體狀況（2026-11-20）
  * 14：身體量測增加時段分類（起床後、日間、睡前）（2026-11-21）
  * 15：血糖增加餐別（早餐、午餐、晚餐、其他）（2026-11-22）
+ * 16：共用人物增加選填姓名（2026-11-25）
  */
-export const SCHEMA_VERSION = 15;
+export const SCHEMA_VERSION = 16;
 
 export type ColType = 'datetime' | 'date' | 'number' | 'text' | 'bool' | 'any';
 
@@ -363,14 +364,15 @@ export const TABLES = {
   },
   hubPeople: {
     file: 'hub',
-    description: '人物（和我相關的人）。分帳、借款會用到。可以直接新增一列，只要填 name。改名請在 APP 裡改（用到的紀錄會一起改）。',
+    description: '共用人物，供行事曆、分帳與借款使用。直接新增時只要填 name（暱稱）。請在 APP 裡改暱稱，讓用到的紀錄一起更新。',
     columns: [
-      { name: 'name', type: 'text', label: '名稱（必填，不可重複）' },
+      { name: 'name', type: 'text', label: '暱稱（必填，不可重複）' },
       { name: 'isSelf', type: 'bool', label: '是不是我自己（TRUE；全部只有一筆）' },
       { name: 'sort', type: 'number', label: '排序' },
       { name: 'archived', type: 'bool', label: '停用（TRUE = 選單不再出現，舊紀錄保留）' },
       { name: 'note', type: 'text', label: '備註' },
       ...systemCols,
+      { name: 'fullName', type: 'text', label: '姓名（選填）' },
     ],
   },
   hubOrganizations: {
@@ -420,7 +422,7 @@ export const TABLES = {
       { name: 'endDisambiguation', type: 'text', label: '結束時間為重複時刻時選第一次 / 第二次' },
       { name: 'timeMode', type: 'text', label: 'fixedZone（固定時區）/ floatingLocal（跟著所在地）' },
       { name: 'timeZoneInferred', type: 'bool', label: '舊資料缺少時區、由主要時區推定（TRUE）' },
-      { name: 'peopleIds', type: 'text', label: '相關人物 id（第二輪；多個用逗號）' },
+      { name: 'peopleIds', type: 'text', label: '共用人物 id（多個用逗號）' },
       { name: 'tagIds', type: 'text', label: '共用標籤 id（第二輪；多個用逗號）' },
       { name: 'locationType', type: 'text', label: 'place（地點）/ route（起訖）/ online（線上）' },
       { name: 'startPlace', type: 'text', label: '地點或起點' },
