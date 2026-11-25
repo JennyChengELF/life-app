@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Backend, BowelSnapshot, CalendarSnapshot, HealthSnapshot, HubSnapshot, MoneySnapshot, TaiwanCalendarResource, WaterSnapshot } from '@life/db';
+import type { Backend, BowelSnapshot, CalendarSnapshot, HealthSnapshot, HubSnapshot, MoneySnapshot, PersonAnniversarySettings, TaiwanCalendarResource, WaterSnapshot } from '@life/db';
 import { AuthError, BowelStore, CalendarStore, GoogleAuth, HealthStore, HubStore, installTaiwanCalendarResource, LocalBackend, MoneyStore, SheetsBackend, WaterStore } from '@life/db';
 
 const CLIENT_ID = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined)?.trim() ?? '';
@@ -141,5 +141,7 @@ export function useHub() {
     [hubStore],
   );
 
-  return { mode: backend.kind, status, waterSnap, healthSnap, bowelSnap, moneySnap, hubSnap, calendarSnap, calendarError, error, busy, connect, refresh, savePinned };
+  const loadPersonAnniversaries = useCallback(() => hubStore.loadPersonAnniversaryProfiles(), [hubStore]);
+  const savePersonAnniversaries = useCallback((id: string, settings: PersonAnniversarySettings) => hubStore.savePersonAnniversaryProfile(id, settings), [hubStore]);
+  return { mode: backend.kind, status, waterSnap, healthSnap, bowelSnap, moneySnap, hubSnap, calendarSnap, calendarError, error, busy, connect, refresh, savePinned, loadPersonAnniversaries, savePersonAnniversaries };
 }

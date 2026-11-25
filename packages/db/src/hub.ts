@@ -3,6 +3,14 @@
  * 目前只有設定；之後人物、商店等共用資料也放這份（2026-11-18 使用者決定）。
  */
 import type { Backend, RowUpdate, RowValues, TableRow } from './backend';
+import { personAnniversaryValues, readPersonAnniversaries, type PersonAnniversarySettings } from './person-anniversaries';
+
+export interface PersonAnniversaryProfile {
+  id: string;
+  nickname: string;
+  fullName: string;
+  settings: PersonAnniversarySettings;
+}
 
 export interface HubSettings {
   /** 首頁「常用」的按鈕（依順序）；null = 還沒設定過，用預設 */
@@ -50,6 +58,22 @@ export class HubStore {
       const v: RowValues = { key: PINNED_KEY, value };
       await this.b.append('hubSettings', [v]);
     }
+  }
+
+  async loadPersonAnniversaryProfiles(): Promise<PersonAnniversaryProfile[]> {
+    const rows = await this.b.read('hubPeople');
+    return rows.flatMap((row) => {
+      const { id, name, fullName, deletedAt } = row.values;
+      if (row.empty || deletedAt != null || !id || !String(name ?? '').trim()) return [];
+      return [{ id: String(id), nickname: String(name).trim(), fullName: String(fullName ?? '').trim(), settings: readPersonAnniversaries(row.values) }];
+    }).sort((a, b) => a.nickname.localeCompare(b.nickname, 'zh-Hant'));
+  }
+
+  async savePersonAnniversaryProfile(id: string, settings: PersonAnniversarySettings) {
+    const values = personAnniversaryValues(settings);
+    const row = (await this.b.read('hubPeople')).find((item) => item.values.id === id && item.values.deletedAt == null);
+    if (!row) throw new Error('找不到這筆共用人物');
+    await this.b.update('hubPeople', [{ rowNumber: row.rowNumber, expectId: id, values: { ...values, updatedAt: Date.now() } }]);
   }
 
   private find(rows: TableRow[], key: string) {

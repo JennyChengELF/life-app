@@ -6,6 +6,7 @@ import { DateNav, Timeline } from '@life/ui/timeline';
 import { AppSwitcher } from '@life/ui/app-switcher';
 import { CalendarReminderList } from '@life/ui/calendar-reminder-list';
 import { useHub } from './useHub';
+import { PersonAnniversaries } from './PersonAnniversaries';
 
 const HOME_URL = import.meta.env.DEV ? `http://${location.hostname}:5172/` : './';
 
@@ -32,6 +33,7 @@ function requestedDate() {
 export function App() {
   const hub = useHub();
   const [date, setDate] = useState(requestedDate);
+  const [people, setPeople] = useState(false);
 
   return (
     <div className="app hub">
@@ -48,7 +50,14 @@ export function App() {
       </header>
       {hub.mode === 'local' && <div className="mode-banner">本機測試模式：資料只存在這個瀏覽器，還沒接上 Google 試算表</div>}
       <main>
-        <Day hub={hub} date={date} setDate={setDate} />
+        {hub.status === 'ready' && people ? (
+          <PersonAnniversaries load={hub.loadPersonAnniversaries} save={hub.savePersonAnniversaries} onBack={() => setPeople(false)} />
+        ) : (
+          <>
+            {hub.status === 'ready' && <button type="button" className="link" onClick={() => setPeople(true)}><Icon name="user" size={18} /> 人物紀念日</button>}
+            <Day hub={hub} date={date} setDate={setDate} />
+          </>
+        )}
       </main>
     </div>
   );

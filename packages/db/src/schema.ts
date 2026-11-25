@@ -20,8 +20,9 @@
  * 15：血糖增加餐別（早餐、午餐、晚餐、其他）（2026-11-22）
  * 16：共用人物增加選填姓名（2026-11-25）
  * 17：共用標籤、記帳交易新增標籤 id（2026-11-25）
+ * 19：共用人物增加國曆／農曆生日、祭日與聯繫狀態（2026-11-25）
  */
-export const SCHEMA_VERSION = 18;
+export const SCHEMA_VERSION = 19;
 
 export type ColType = 'datetime' | 'date' | 'number' | 'text' | 'bool' | 'any';
 
@@ -385,6 +386,13 @@ export const TABLES = {
       { name: 'note', type: 'text', label: '備註' },
       ...systemCols,
       { name: 'fullName', type: 'text', label: '姓名（選填）' },
+      { name: 'solarBirthday', type: 'text', label: '國曆生日（MM/DD 或 YYYY/MM/DD）' },
+      { name: 'lunarBirthday', type: 'text', label: '農曆生日（MM/DD 或 YYYY/MM/DD）' },
+      { name: 'solarMemorial', type: 'text', label: '國曆祭日（MM/DD 或 YYYY/MM/DD）' },
+      { name: 'lunarMemorial', type: 'text', label: '農曆祭日（MM/DD 或 YYYY/MM/DD）' },
+      { name: 'lunarBirthdayLeap', type: 'text', label: '農曆生日閏月（fallback = 無閏月時用普通月；only = 只在同閏月）' },
+      { name: 'lunarMemorialLeap', type: 'text', label: '農曆祭日閏月（fallback = 無閏月時用普通月；only = 只在同閏月）' },
+      { name: 'noLongerInContact', type: 'bool', label: '不再聯繫（TRUE = 行事曆不顯示人物紀念日）' },
     ],
   },
   hubOrganizations: {

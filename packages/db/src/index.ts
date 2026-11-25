@@ -17,6 +17,7 @@ export * from './calendar-time';
 export * from './calendar-recurrence';
 export * from './calendar-reminders';
 export * from './shared-tags';
+export * from './person-anniversaries';
 export * from './taiwan-calendar';
 export * from './period';
 export * from './conditions';

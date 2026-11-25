@@ -21,9 +21,11 @@ import {
 import { TAIWAN_CALENDAR_GROUP_NAME, TAIWAN_CALENDAR_GROUP_SOURCE, taiwanSpecialDays } from './taiwan-calendar';
 import { calendarReminderLeadDays, calendarReminderTime, parseCalendarReminders, type CalendarReminder } from './calendar-reminders';
 import { addSharedTag, loadSharedTags, readTagIds, writeTagIds, type SharedTag } from './shared-tags';
+import { personAnniversaryOccurrences, readPersonAnniversaries, type PersonAnniversarySettings } from './person-anniversaries';
 
 export const DEFAULT_CALENDAR_TIME_ZONE = 'Asia/Taipei';
 export const DEFAULT_CALENDAR_COLOR = '#1f6fd1';
+export const PERSON_ANNIVERSARY_SOURCE = 'personAnniversary';
 const DEFAULT_GROUP_KEY = 'calendar.defaultGroupId';
 const HOME_TIME_ZONE_KEY = 'calendar.homeTimeZone';
 const CURRENT_TIME_ZONE_KEY = 'calendar.currentTimeZone';
@@ -118,6 +120,7 @@ export interface CalendarPerson {
   nickname: string;
   fullName: string | null;
   archived: boolean;
+  anniversaries: PersonAnniversarySettings;
 }
 
 export interface CalendarSnapshot {
@@ -231,6 +234,25 @@ export function expandCalendarEvents(snapshot: CalendarSnapshot, fromDate: strin
 export function recurrenceMasterOf(snapshot: CalendarSnapshot, event: CalendarEvent) {
   if (!event.recurrenceParentId) return null;
   return snapshot.recurrenceMasters.find((master) => master.id === event.recurrenceParentId) ?? null;
+}
+
+export function expandPersonAnniversaries(snapshot: CalendarSnapshot, from: string, to: string): CalendarEvent[] {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) return [];
+  const group = snapshot.groups.find((item) => item.sourceType === PERSON_ANNIVERSARY_SOURCE && !item.archived);
+  if (!group) return [];
+  return snapshot.people.flatMap((person) => person.archived ? [] :
+    personAnniversaryOccurrences(person.anniversaries, person.nickname, from, to).map(({ field, date, title }): CalendarEvent => ({
+      id: `anniversary:${person.id}:${field}:${date}`, rowNumber: 0, title, groupId: group.id, parentEventId: null,
+      timeType: 'allDay', startDate: date, endDate: date, startTime: null, endTime: null,
+      startTimeZone: null, endTimeZone: null, startUtcOffset: null, endUtcOffset: null,
+      startDisambiguation: 'earlier', endDisambiguation: 'earlier', timeMode: 'fixedZone', timeZoneInferred: false,
+      locationType: null, startPlace: null, endPlace: null, url: null,
+      note: '在綜合 APP 的「人物紀念日」修改這個日期。',
+      status: 'scheduled', createdVia: PERSON_ANNIVERSARY_SOURCE, createdAt: 0, updatedAt: 0,
+      titleMissing: false, systemSource: PERSON_ANNIVERSARY_SOURCE,
+      recurrence: null, recurrenceParentId: null, recurrenceInstanceKey: null, recurrenceExceptions: [],
+      isRecurrenceInstance: false, recurrenceOverride: false, peopleIds: [person.id],
+    })));
 }
 
 export function dueCalendarReminders(snapshot: CalendarSnapshot, now = Date.now()) {
@@ -370,7 +392,7 @@ export class CalendarStore {
       const currentId = str(row.values.id);
       const id = currentId ?? newId(now);
       if (!currentId) fixes.push({ rowNumber: row.rowNumber, expectId: '', values: { id, createdAt: now, updatedAt: now } });
-      people.push({ id, nickname, fullName: str(row.values.fullName), archived: bool(row.values.archived) });
+      people.push({ id, nickname, fullName: str(row.values.fullName), archived: bool(row.values.archived), anniversaries: readPersonAnniversaries(row.values) });
     }
     if (fixes.length) await this.b.update('hubPeople', fixes);
     return people.sort((a, b) => a.nickname.localeCompare(b.nickname, 'zh-Hant'));
@@ -476,6 +498,15 @@ export class CalendarStore {
       includePeople ? this.loadPeople(now, issues) : [],
       includeTags ? loadSharedTags(this.b, now) : [],
     ]);
+    if (people.some((person) => Object.values(person.anniversaries.dates).some(Boolean)) &&
+        !groups.some((group) => group.sourceType === PERSON_ANNIVERSARY_SOURCE)) {
+      const id = newId(now);
+      const sort = 998;
+      const entry = { id, name: '人物紀念日', color: '#9258af', sort, sourceType: PERSON_ANNIVERSARY_SOURCE, kind: 'system' as const, archived: false, hidden: false };
+      const [rowNumber] = await this.b.append('calendarGroups', [{ ...entry, createdAt: now, updatedAt: now }]);
+      groups.push({ ...entry, rowNumber });
+      groups.sort((a, b) => a.sort - b.sort);
+    }
     const eventFixes: RowUpdate[] = [];
     const loadedEvents: CalendarEvent[] = [];
     for (const r of eventRows) {

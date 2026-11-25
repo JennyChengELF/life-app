@@ -22,6 +22,8 @@ import {
   dateInRange,
   eventOnDate,
   expandCalendarEvents,
+  expandPersonAnniversaries,
+  PERSON_ANNIVERSARY_SOURCE,
   formatConvertedCalendarTime,
   isValidTimeZone,
   parseCalendarReminders,
@@ -158,11 +160,17 @@ export function App() {
   const recurrenceStart = snap.recurrenceMasters.map((event) => event.startDate).sort()[0] ?? selectedDate;
   const selectedMonthEnd = addDateDays(`${shiftMonth(selectedDate.slice(0, 7), 1)}-01`, -1);
   const recurrenceEnd = [addDateDays(todayKey(), 370), addDateDays(selectedMonthEnd, 14)].sort().at(-1)!;
-  const expandedEvents = expandCalendarEvents(snap, recurrenceStart, recurrenceEnd);
+  const expandedEvents = [
+    ...expandCalendarEvents(snap, recurrenceStart, recurrenceEnd),
+    ...expandPersonAnniversaries(snap, addDateDays(selectedDate, -6), addDateDays(selectedDate, 6)),
+  ];
   const activeGroups = new Set(snap.groups.filter((g) => !g.hidden).map((g) => g.id));
   const visibleEvents = expandedEvents.filter((e) => activeGroups.has(e.groupId));
   const openedId = open?.kind === 'detail' ? open.id : open?.kind === 'form' ? open.eventId : open?.kind === 'move-child' ? open.eventId : open?.kind === 'join-trip' ? open.parentId : null;
-  const openedEvent = openedId ? expandedEvents.find((e) => e.id === openedId) ?? null : null;
+  const anniversaryDate = openedId?.startsWith('anniversary:') ? openedId.slice(-10) : null;
+  const openedEvent = openedId ? expandedEvents.find((e) => e.id === openedId)
+    ?? (anniversaryDate ? expandPersonAnniversaries(snap, anniversaryDate, anniversaryDate).find((e) => e.id === openedId) : undefined)
+    ?? null : null;
 
   const saveEvent = async (input: CalendarEventInput, current: CalendarEvent | null) => {
     if (input.timeType === 'point') input = { ...input, endDate: input.startDate, endTime: null };
@@ -359,8 +367,17 @@ function MonthView({ snap, events, selected, setDate, openEvent }: DateViewProps
   const selectedEvents = sortCalendarEvents(events.filter((e) => eventOnDate(e, selected)));
   const selectedTaiwanDay = taiwanDayInfo(selected);
   const unnamed = events.filter((e) => e.titleMissing).length;
+  const ordinary = events.filter((event) => event.systemSource !== PERSON_ANNIVERSARY_SOURCE);
+  const anniversaryMonths = new Map<string, CalendarEvent[]>();
   const info = (date: string) => {
-    const rows = sortCalendarEvents(events.filter((event) => eventOnDate(event, date)));
+    const month = date.slice(0, 7);
+    let anniversaries = anniversaryMonths.get(month);
+    if (!anniversaries) {
+      anniversaries = expandPersonAnniversaries(snap, `${month}-01`, addDateDays(`${shiftMonth(month, 1)}-01`, -1))
+        .filter((event) => !groupOf(snap, event)?.hidden);
+      anniversaryMonths.set(month, anniversaries);
+    }
+    const rows = sortCalendarEvents([...ordinary, ...anniversaries].filter((event) => eventOnDate(event, date)));
     const taiwan = taiwanDayInfo(date);
     if (!rows.length) return { tone: taiwan.type, label: taiwan.source === 'official' ? undefined : taiwan.source === 'provisional' ? '台灣辦公日：暫定，官方尚未公布' : '台灣辦公日：依週一至週五推算' };
     const shown = rows.slice(0, rows.length > 2 ? 2 : 3);
@@ -462,23 +479,24 @@ function AgendaView({ snap, events, selectedMonth, openEvent }: { snap: Calendar
   const [month, setMonth] = useState(selectedMonth);
   // （2026-11-20 使用者決定：有細項的主行程在行程表預設收合，避免資料太長。）
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(events.flatMap((event) => event.parentEventId ? [event.parentEventId] : [])));
-  const usableEvents = events.filter((e) => showCancelled || e.status !== 'cancelled');
+  const usableEvents = events.filter((e) => e.systemSource !== PERSON_ANNIVERSARY_SOURCE && (showCancelled || e.status !== 'cancelled'));
   const ids = new Set(usableEvents.map((e) => e.id));
   const roots = sortCalendarEvents(usableEvents.filter((e) => !e.parentEventId || !ids.has(e.parentEventId)));
   const historical = roots.filter((e) => e.endDate < todayKey());
-  const decades = [...new Set(historical.map((e) => Math.floor(Number(e.startDate.slice(0, 4)) / 10) * 10))].sort((a, b) => b - a);
+  const currentYear = Number(todayKey().slice(0, 4));
+  const anniversaryGroup = snap.groups.find((group) => group.sourceType === PERSON_ANNIVERSARY_SOURCE && !group.hidden && !group.archived);
+  const historyYears = new Set(historical.map((event) => Number(event.startDate.slice(0, 4))));
+  if (anniversaryGroup) historyYears.add(currentYear);
+  const decades = [...new Set([...historyYears].map((year) => Math.floor(year / 10) * 10))].sort((a, b) => b - a);
   const [decade, setDecade] = useState(() => decades[0] ?? Math.floor(new Date().getFullYear() / 10) * 10);
-  const years = [...new Set(historical.filter((e) => Number(e.startDate.slice(0, 4)) >= decade && Number(e.startDate.slice(0, 4)) <= decade + 9).map((e) => Number(e.startDate.slice(0, 4))))].sort((a, b) => b - a);
+  const years = [...historyYears].filter((value) => value >= decade && value <= decade + 9).sort((a, b) => b - a);
   const [year, setYear] = useState(() => years[0] ?? new Date().getFullYear());
   const toggle = (id: string) => setCollapsed((old) => { const next = new Set(old); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   const overlaps = (event: CalendarEvent, start: string, end: string) => event.startDate <= end && event.endDate >= start;
-  let shown = roots.filter((e) => overlaps(e, todayKey(), addDateDays(todayKey(), 92)));
-  if (mode === 'history') shown = roots.filter((e) => overlaps(e, `${year}-01-01`, `${year}-12-31`) && e.endDate < todayKey());
-  if (mode === 'month') {
-    const start = `${month}-01`;
-    const end = addDateDays(`${shiftMonth(month, 1)}-01`, -1);
-    shown = roots.filter((e) => overlaps(e, start, end));
-  }
+  const start = mode === 'history' ? `${year}-01-01` : mode === 'month' ? `${month}-01` : todayKey();
+  const end = mode === 'history' ? `${year}-12-31` : mode === 'month' ? addDateDays(`${shiftMonth(month, 1)}-01`, -1) : addDateDays(todayKey(), 92);
+  const anniversaries = anniversaryGroup ? expandPersonAnniversaries(snap, start, end) : [];
+  const shown = sortCalendarEvents([...roots, ...anniversaries].filter((e) => overlaps(e, start, end) && (mode !== 'history' || e.endDate < todayKey())));
   const monthGroups = shown.reduce((map, event) => {
     const key = event.startDate.slice(0, 7);
     const list = map.get(key) ?? [];
@@ -488,7 +506,7 @@ function AgendaView({ snap, events, selectedMonth, openEvent }: { snap: Calendar
   }, new Map<string, CalendarEvent[]>());
   const chooseDecade = (value: number) => {
     setDecade(value);
-    const first = [...new Set(historical.filter((e) => Number(e.startDate.slice(0, 4)) >= value && Number(e.startDate.slice(0, 4)) <= value + 9).map((e) => Number(e.startDate.slice(0, 4))))].sort((a, b) => b - a)[0];
+    const first = [...historyYears].filter((year) => year >= value && year <= value + 9).sort((a, b) => b - a)[0];
     if (first) setYear(first);
   };
   return <section className="agenda">

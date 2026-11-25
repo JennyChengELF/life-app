@@ -1,5 +1,13 @@
 @import '@life/ui/base.css';
 
+.person-anniversary-settings h2 { margin: 8px 0 12px; }
+.person-anniversary-settings .field { display: block; margin-bottom: 10px; }
+.person-anniversary-settings .field input, .person-anniversary-settings .field select { display: block; width: 100%; margin-top: 4px; }
+.anniversary-fields { display: grid; gap: 8px 14px; }
+.anniversary-contact { display: flex; align-items: center; gap: 8px; margin: 8px 0 12px; }
+.anniversary-contact input { width: auto; }
+@media (min-width: 560px) { .anniversary-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
 .hub { max-width: 640px; }
 
 /* 喝水總量 */
