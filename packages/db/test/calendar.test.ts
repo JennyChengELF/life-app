@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CalendarStore, dueCalendarReminders, expandCalendarEvents, LocalBackend, memoryStorage, MoneyStore, taiwanDayInfo } from '../src';
+import { CalendarStore, dueCalendarReminders, emptyForm, expandCalendarEvents, formToTxn, LocalBackend, memoryStorage, MoneyStore, taiwanDayInfo } from '../src';
 
 const base = (groupId: string) => ({
   title: '台南旅遊',
@@ -22,6 +22,31 @@ const base = (groupId: string) => ({
 });
 
 describe('行事曆資料', () => {
+  it('行事曆與記帳用同一份標籤 id，改名後兩邊仍保留關聯', async () => {
+    const backend = new LocalBackend(memoryStorage());
+    const calendar = new CalendarStore(backend);
+    const money = new MoneyStore(backend);
+    await backend.append('moneyAccounts', [{ name: '測試現金', type: '現金', currency: 'TWD' }]);
+    await money.ensureCategories(['食 / 三餐'], '支出');
+    const travel = await calendar.addTag('#旅遊');
+    const food = await money.addTag('餐費');
+    await expect(money.addTag('旅遊')).rejects.toThrow('已經有標籤');
+    const { defaultGroupId } = await calendar.load();
+    await calendar.addEvent({ ...base(defaultGroupId), tagIds: [travel, food, food] }, 'TRIP');
+    await calendar.addEvent({ ...base(defaultGroupId), parentEventId: 'TRIP' }, 'CHILD');
+    await money.saveTxn(formToTxn({
+      ...emptyForm('支出'), account: '測試現金', cats: [{ category: '食 / 三餐', amount: 50 }], tagIds: [travel, food],
+    }));
+    const tag = (await backend.read('hubTags')).find((row) => row.values.id === travel)!;
+    await backend.update('hubTags', [{ rowNumber: tag.rowNumber, expectId: travel, values: { name: '旅行', archived: true } }]);
+    const [c, m] = await Promise.all([calendar.load(), money.load()]);
+    expect(c.sharedTags).toEqual(m.sharedTags);
+    expect(c.sharedTags.find((item) => item.id === travel)).toMatchObject({ name: '旅行', archived: true });
+    expect(c.events.find((event) => event.id === 'TRIP')?.tagIds).toEqual([travel, food]);
+    expect(c.events.find((event) => event.id === 'CHILD')?.tagIds).toEqual([travel, food]);
+    expect(m.txns[0].tagIds).toEqual([travel, food]);
+  });
+
   it('行事曆沿用共用人物的暱稱和 id，新增的人物也可供其他 APP 取得', async () => {
     const backend = new LocalBackend(memoryStorage());
     const s = new CalendarStore(backend);

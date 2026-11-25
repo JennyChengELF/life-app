@@ -12,7 +12,6 @@ import {
   cardPaymentTotal,
   personBalances,
   splitEven,
-  splitTags,
   startOfDay,
   toDateKey,
   toHHmm,
@@ -36,6 +35,7 @@ import { Icon } from '@life/ui/icon';
 import { BudgetSelect } from './BudgetSelect';
 import { TimeField } from '@life/ui/time-field';
 import { WeekDateStrip } from '@life/ui/week-date-strip';
+import { TagPicker } from '@life/ui/tag-picker';
 
 /** 金額輸入：自己記住打到一半的文字（例：「12.」） */
 export function AmountInput({
@@ -763,10 +763,7 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
               ))}
             </div>
           )}
-          <label className="field">
-            標籤（多個用「、」分開，例：2026東京）
-            <input defaultValue={f.tags.join('、')} onChange={(e) => set({ tags: splitTags(e.target.value) })} />
-          </label>
+          <TagPicker tags={snap.sharedTags} selected={f.tagIds} busy={api.busy} onChange={(tagIds) => set({ tagIds })} onAdd={(name) => api.run((store) => store.addTag(name))} />
         </>
       )}
 

@@ -183,7 +183,7 @@ export function AccountDetail({
                         {txnTitle(t)}
                         {status && <span className={`tag ${status === '已繳' ? 'ok' : status === '未出帳' ? 'dim' : 'warn'}`}>{status}</span>}
                       </div>
-                      <div className="tx-sub">{subText(t)}</div>
+                      <div className="tx-sub">{subText(t, snap.sharedTags)}</div>
                     </div>
                     <div className={`tx-amt ${more ? 'amt-in' : 'amt-out'}`}>
                       {more ? '+' : '−'}

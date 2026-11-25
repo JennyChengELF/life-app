@@ -19,8 +19,9 @@
  * 14：身體量測增加時段分類（起床後、日間、睡前）（2026-11-21）
  * 15：血糖增加餐別（早餐、午餐、晚餐、其他）（2026-11-22）
  * 16：共用人物增加選填姓名（2026-11-25）
+ * 17：共用標籤、記帳交易新增標籤 id（2026-11-25）
  */
-export const SCHEMA_VERSION = 16;
+export const SCHEMA_VERSION = 17;
 
 export type ColType = 'datetime' | 'date' | 'number' | 'text' | 'bool' | 'any';
 
@@ -362,6 +363,17 @@ export const TABLES = {
       ...systemCols,
     ],
   },
+  hubTags: {
+    file: 'hub',
+    description: '行事曆與記帳的共用標籤。直接新增只需填 name。',
+    columns: [
+      { name: 'name', type: 'text', label: '標籤名稱（必填，不含 #，不可重複）' },
+      { name: 'color', type: 'text', label: '顏色（選填）' },
+      { name: 'order', type: 'number', label: '排序（選填）' },
+      { name: 'archived', type: 'bool', label: '停用（TRUE = 選單不顯示，保留既有紀錄）' },
+      ...systemCols,
+    ],
+  },
   hubPeople: {
     file: 'hub',
     description: '共用人物，供行事曆、分帳與借款使用。直接新增時只要填 name（暱稱）。請在 APP 裡改暱稱，讓用到的紀錄一起更新。',
@@ -423,7 +435,7 @@ export const TABLES = {
       { name: 'timeMode', type: 'text', label: 'fixedZone（固定時區）/ floatingLocal（跟著所在地）' },
       { name: 'timeZoneInferred', type: 'bool', label: '舊資料缺少時區、由主要時區推定（TRUE）' },
       { name: 'peopleIds', type: 'text', label: '共用人物 id（多個用逗號）' },
-      { name: 'tagIds', type: 'text', label: '共用標籤 id（第二輪；多個用逗號）' },
+      { name: 'tagIds', type: 'text', label: '共用標籤 id（多個用逗號）' },
       { name: 'locationType', type: 'text', label: 'place（地點）/ route（起訖）/ online（線上）' },
       { name: 'startPlace', type: 'text', label: '地點或起點' },
       { name: 'endPlace', type: 'text', label: '終點（交通行程）' },
@@ -500,7 +512,6 @@ export const TABLES = {
       { name: 'branch', type: 'text', label: '分店（選填）' },
       { name: 'statementText', type: 'text', label: '帳單名稱（帳單上印的文字，對帳用）' },
       { name: 'note', type: 'text', label: '備註' },
-      { name: 'tags', type: 'text', label: '標籤（多個用「、」分開）' },
       { name: 'category', type: 'text', label: '快速輸入：在試算表直接記帳時填分類（例：樂 / 數位內容），APP 打開時自動建立明細，這格會清空' },
       { name: 'budget', type: 'text', label: '快速輸入：預算（和 category 一起用）' },
       { name: 'date', type: 'date', label: '日期（APP 依 time 自動填）' },
@@ -508,6 +519,7 @@ export const TABLES = {
       ...systemCols,
       { name: 'postedDate', type: 'date', label: '入帳日（對帳時 APP 自動填）' },
       { name: 'statement', type: 'text', label: '繳卡費的轉帳：繳哪一期帳單（moneyStatements 的 id；APP 自動填）' },
+      { name: 'tagIds', type: 'text', label: '共用標籤 id（多個用逗號）' },
     ],
   },
   moneyLines: {

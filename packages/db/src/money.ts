@@ -9,6 +9,7 @@ import type { Backend, RowUpdate, RowValues, TableRow } from './backend';
 import { newId } from './ids';
 import type { TableName } from './schema';
 import { startOfDay, toDateKey } from './time';
+import { addSharedTag, loadSharedTags, readTagIds, writeTagIds, type SharedTag } from './shared-tags';
 
 // ───────────── 選項 ─────────────
 
@@ -143,7 +144,7 @@ export interface TxnInput {
   /** 帳單上印的文字（對帳用） */
   statementText: string | null;
   note: string | null;
-  tags: string[];
+  tagIds: string[];
   lines: LineInput[];
   /** 同一家發卡機構的多卡／多期繳款分配；有值時不用 toAccount。 */
   cardPayments?: CardPaymentInput[];
@@ -201,7 +202,7 @@ export function orphanTxn(lines: LineInput[], head: OrphanHead): TxnInput {
     branch: head.store?.trim() ? head.branch?.trim() || null : null,
     statementText: null,
     note: head.note?.trim() || null,
-    tags: [],
+    tagIds: [],
     toAccount: null,
     toAmount: null,
     currency: null,
@@ -305,6 +306,7 @@ export interface MoneySnapshot {
   categories: Category[];
   people: Person[];
   orgs: Org[];
+  sharedTags: SharedTag[];
   /** 新 → 舊 */
   txns: Txn[];
   budgets: Budget[];
@@ -556,12 +558,6 @@ export function noteSuggestions(txns: Txn[], categories: string[], n = 8, min = 
   return out.slice(0, n);
 }
 
-export function splitTags(v: unknown): string[] {
-  const s = str(v);
-  if (!s) return [];
-  return [...new Set(s.split(/[、,，;；]+/).map((x) => x.trim().replace(/^#/, '')).filter(Boolean))];
-}
-
 const bySort = <T extends { sort: number | null; rowNumber: number }>(a: T, b: T) =>
   (a.sort ?? 1e9) - (b.sort ?? 1e9) || a.rowNumber - b.rowNumber;
 
@@ -723,7 +719,7 @@ function toTxn(r: TableRow, lines: Line[], cardPayments: CardPayment[] = []): Tx
     branch: str(v.branch),
     statementText: str(v.statementText),
     note: str(v.note),
-    tags: splitTags(v.tags),
+    tagIds: readTagIds(v.tagIds),
     createdVia: str(v.createdVia),
     postedDate: str(v.postedDate),
     statement: str(v.statement),
@@ -770,7 +766,7 @@ export function lineBalance(lines: Pick<LineInput, 'kind' | 'amount'>[]) {
  * allowNoCategory：明細沒選分類也可以（2026-11-19 使用者要求：整批補齊時先讓我過，回到記帳再補；
  * 試算表讀進來的也一樣）。在 APP 裡記一筆、修改時還是要選。
  */
-export function checkTxn(t: Omit<TxnInput, 'tags'> & { tags?: string[] }, refs: MoneyRefs, opts: { allowNoCategory?: boolean } = {}): string[] {
+export function checkTxn(t: Omit<TxnInput, 'tagIds'> & { tagIds?: string[] }, refs: MoneyRefs, opts: { allowNoCategory?: boolean } = {}): string[] {
   const p: string[] = [];
   if (!Number.isFinite(t.time)) p.push('沒有填時間');
   const accName = (n: string | null) => n != null && refs.accounts.some((a) => a.name === n);
@@ -1086,7 +1082,7 @@ export interface EntryForm {
   branch: string | null;
   statementText: string | null;
   note: string | null;
-  tags: string[];
+  tagIds: string[];
   /** 轉帳到信用卡：繳哪一期（帳單 id） */
   statement?: string | null;
 }
@@ -1111,7 +1107,7 @@ export const emptyForm = (mode: EntryForm['mode'] = '支出', time = Date.now())
   branch: null,
   statementText: null,
   note: null,
-  tags: [],
+  tagIds: [],
 });
 
 const sum = (xs: (number | null)[]) => xs.reduce<number>((a, b) => a + (b ?? 0), 0);
@@ -1125,7 +1121,7 @@ export const cardPaymentTotal = (f: Pick<EntryForm, 'cardPayments'>) => sum(f.ca
 
 /** 表單 → 要存的交易（不檢查；存之前用 checkTxn 檢查） */
 export function formToTxn(f: EntryForm): TxnInput {
-  const base = { time: f.time, store: f.store?.trim() || null, branch: f.store?.trim() ? f.branch?.trim() || null : null, statementText: f.statementText?.trim() || null, note: f.note?.trim() || null, tags: f.tags, toAccount: null, toAmount: null, paidBy: null, currency: null };
+  const base = { time: f.time, store: f.store?.trim() || null, branch: f.store?.trim() ? f.branch?.trim() || null : null, statementText: f.statementText?.trim() || null, note: f.note?.trim() || null, tagIds: f.tagIds, toAccount: null, toAmount: null, paidBy: null, currency: null };
   const cats = (items: EntryForm['cats'], kind: '支出' | '收入'): LineInput[] =>
     items
       .filter((c) => c.category || c.amount != null)
@@ -1290,7 +1286,7 @@ export function installmentTxns(tx: TxnInput, n: number, accounts: Pick<Account,
 
 /** 交易 → 表單（看不出是哪一種的 → mode「其他」，畫面只能刪除或到試算表改） */
 export function txnToForm(t: Txn): EntryForm {
-  const f: EntryForm = { ...emptyForm('其他', t.time), store: t.store, branch: t.branch, statementText: t.statementText, note: t.note, tags: t.tags, account: t.account, currency: t.currency, cats: [] };
+  const f: EntryForm = { ...emptyForm('其他', t.time), store: t.store, branch: t.branch, statementText: t.statementText, note: t.note, tagIds: t.tagIds, account: t.account, currency: t.currency, cats: [] };
   const L = t.lines;
   const only = (...kinds: LineKind[]) => L.length > 0 && L.every((l) => kinds.includes(l.kind));
   const has = (kind: LineKind) => L.some((l) => l.kind === kind);
@@ -1367,7 +1363,7 @@ export function canCopyTxn(t: Txn): boolean {
  */
 export function copyTxnForm(t: Txn, time: number): EntryForm {
   if (!canCopyTxn(t)) throw new Error('這筆是系統產生的交易，不能複製');
-  return { ...txnToForm(t), time, statement: null, statementText: null, tags: [] };
+  return { ...txnToForm(t), time, statement: null, statementText: null, tagIds: [] };
 }
 
 /** 一筆交易的標題（例：食 / 三餐、轉帳 → 悠遊卡、借給 小明） */
@@ -1438,7 +1434,7 @@ export class MoneyStore {
   }
 
   private async loadNow(now: number): Promise<MoneySnapshot> {
-    const [accRows, catRows, txRows, lineRows, cardPaymentRows, peopleRows, orgRows, setRows, budgetRows, allocRows, depRows, stmtRows, itemRows, checkRows] = await Promise.all([
+    const [accRows, catRows, txRows, lineRows, cardPaymentRows, peopleRows, orgRows, setRows, budgetRows, allocRows, depRows, stmtRows, itemRows, checkRows, sharedTags] = await Promise.all([
       this.b.read('moneyAccounts'),
       this.b.read('moneyCategories'),
       this.b.read('moneyTransactions'),
@@ -1453,6 +1449,7 @@ export class MoneyStore {
       this.b.read('moneyStatements'),
       this.b.read('moneyStatementItems'),
       this.b.read('moneyBalanceChecks'),
+      loadSharedTags(this.b, now),
     ]);
     const issues: MoneyIssue[] = [];
     const fixes = new Map<TableName, RowUpdate[]>();
@@ -1632,7 +1629,7 @@ export class MoneyStore {
             branch: t.branch,
             statementText: t.statementText,
             note: t.note,
-            tags: t.tags,
+            tagIds: t.tagIds,
             cats: [{ category: quickCat && categories.some((x) => x.path === quickCat) ? quickCat : null, amount: rawAmt, budget: quickBudget }],
           };
         }
@@ -1813,7 +1810,7 @@ export class MoneyStore {
     const late = fixes.get('moneyBalanceChecks');
     if (late) await this.b.update('moneyBalanceChecks', late);
 
-    const snap: MoneySnapshot = { loadedAt: now, accounts, categories, people, orgs, txns, budgets, allocations, deposits, statements, statementItems, balanceChecks, settings: parseMoneySettings(setRows), issues };
+    const snap: MoneySnapshot = { loadedAt: now, accounts, categories, people, orgs, sharedTags, txns, budgets, allocations, deposits, statements, statementItems, balanceChecks, settings: parseMoneySettings(setRows), issues };
     this.last = snap;
     return snap;
   }
@@ -1849,7 +1846,7 @@ export class MoneyStore {
       branch: input.branch,
       statementText: input.statementText,
       note: input.note,
-      tags: input.tags.length ? input.tags.join('、') : null,
+      tagIds: writeTagIds(input.tagIds),
       updatedAt: now,
     };
     // 繳哪一期：只有轉到信用卡才留
@@ -2123,6 +2120,10 @@ export class MoneyStore {
 
   // ── 人物、機構（在綜合 APP 的試算表） ──
 
+  addTag(name: string) {
+    return addSharedTag(this.b, name);
+  }
+
   async addPerson(name: string): Promise<string> {
     const snap = await this.fresh();
     const n = name.trim();
@@ -2208,7 +2209,7 @@ export class MoneyStore {
       branch: null,
       statementText: null,
       note: input.note ? `開定存：${input.note}` : '開定存',
-      tags: [],
+      tagIds: [],
       lines: [],
     });
     const now = Date.now();
@@ -2247,7 +2248,7 @@ export class MoneyStore {
       branch: null,
       statementText: null,
       note: `定存利息（本金 ${dep.principal.toLocaleString()}）`,
-      tags: [],
+      tagIds: [],
       lines: [{ kind: '收入', amount: interest, category: cat.path }],
     });
   }
@@ -2270,7 +2271,7 @@ export class MoneyStore {
       branch: null,
       statementText: null,
       note: '定存到期解約',
-      tags: [],
+      tagIds: [],
       lines: [],
     });
     if (input.interest > 0) await this.interestTxn(snap, input.toAccount, input.interest, input.date, dep);
@@ -2574,7 +2575,7 @@ export class MoneyStore {
       branch: null,
       statementText: null,
       note: '盤點調整（找不到原因的差額）',
-      tags: [],
+      tagIds: [],
       lines: [{ kind: '調整', amount: Math.abs(delta) }],
     });
   }

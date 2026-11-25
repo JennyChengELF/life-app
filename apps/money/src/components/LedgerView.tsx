@@ -1,6 +1,7 @@
-import type { MoneySnapshot, Txn } from '@life/db';
+import type { MoneySnapshot, SharedTag, Txn } from '@life/db';
 import { emptyForm, fmtMoney, isRecordOnlyTxn, monthStats, startOfDay, todayKey, toHHmm, topCategory, txnCurrency, txnMissingCategory, txnMyNet, txnTitle } from '@life/db';
 import { MonthCalendar } from '@life/ui/month-calendar';
+import { tagLabel } from '@life/ui/tag-picker';
 import { Icon, type IconName } from '@life/ui/icon';
 import type { Editing } from '../App';
 
@@ -80,7 +81,7 @@ function TxBadges({ t }: { t: Txn }) {
   );
 }
 
-export function subText(t: Txn, withBadges = true) {
+export function subText(t: Txn, tags: SharedTag[], withBadges = true) {
   const parts: string[] = [];
   if (t.direction === '轉帳') parts.push(t.cardPayments.length ? `${t.account} → ${[...new Set(t.cardPayments.map((x) => x.account))].join('、')}` : `${t.account} → ${t.toAccount}`);
   else if (t.account) parts.push(t.account);
@@ -95,7 +96,7 @@ export function subText(t: Txn, withBadges = true) {
   // 明細的備註（拆成多個分類時每一行可以有自己的備註）
   const lineNotes = t.lines.map((l) => l.note).filter((x): x is string => !!x && x !== t.note);
   if (lineNotes.length) parts.push(lineNotes.join('／'));
-  if (t.tags.length) parts.push(t.tags.map((x) => `#${x}`).join(' '));
+  if (t.tagIds.length) parts.push(t.tagIds.map((id) => tagLabel(tags, id)).join(' '));
   if (withBadges && !isRecordOnlyTxn(t) && t.lines.some((l) => l.kind === '支出' && !l.budget)) parts.unshift('⚠️ 沒有預算');
   if (withBadges && txnMissingCategory(t)) parts.unshift('⚠️ 沒有分類');
   return parts.join('・');
@@ -111,7 +112,7 @@ export function TxList({ list, snap, onEdit }: { list: Txn[]; snap: MoneySnapsho
             <div className="tx-title">
               {txnTitle(t)} <TxBadges t={t} />
             </div>
-            <div className="tx-sub">{[toHHmm(t.time), subText(t, false)].filter(Boolean).join('・')}</div>
+            <div className="tx-sub">{[toHHmm(t.time), subText(t, snap.sharedTags, false)].filter(Boolean).join('・')}</div>
           </div>
           <TxAmount t={t} snap={snap} />
         </li>

@@ -7,6 +7,7 @@ import { TimeField } from '@life/ui/time-field';
 import { CalendarReminderList } from '@life/ui/calendar-reminder-list';
 import { ReminderFields } from './ReminderFields';
 import { PeopleFields, personLabel } from './PeopleFields';
+import { TagPicker, tagLabel } from '@life/ui/tag-picker';
 import {
   addDateDays,
   analyzeCalendarLocalTime,
@@ -116,6 +117,7 @@ const eventInput = (e: CalendarEvent): CalendarEventInput => ({
   recurrenceExceptions: e.recurrenceExceptions,
   reminders: e.reminders ?? [],
   peopleIds: e.peopleIds ?? [],
+  tagIds: e.tagIds ?? [],
 });
 
 function requestedDate() {
@@ -216,7 +218,7 @@ export function App() {
           setSelectedDate(value);
           setOpen({ ...open, date: value });
         }} />}
-        <EventForm key={`${open.eventId ?? 'new'}-${open.date}`} snap={snap} event={openedEvent} initialDate={open.date} parentId={open.parentId} busy={api.busy} onAddPerson={(nickname, fullName) => api.run((store) => store.addPerson(nickname, fullName))} hideStartDate={tab === 'add' && !open.eventId && !open.parentId} onCancel={() => {
+        <EventForm key={`${open.eventId ?? 'new'}-${open.date}`} snap={snap} event={openedEvent} initialDate={open.date} parentId={open.parentId} busy={api.busy} onAddPerson={(nickname, fullName) => api.run((store) => store.addPerson(nickname, fullName))} onAddTag={(name) => api.run((store) => store.addTag(name))} hideStartDate={tab === 'add' && !open.eventId && !open.parentId} onCancel={() => {
           if (open.eventId) setOpen({ kind: 'detail', id: open.eventId });
           else { setOpen(null); setTab('calendar'); }
         }} onSave={saveEvent} /></>
@@ -538,7 +540,7 @@ function RecurrenceFields({ form, setForm, locked }: { form: CalendarEventInput;
   return <div className="recurrence-fields"><label className="field">重複<select value={rule?.frequency ?? ''} disabled={locked} onChange={(event) => choose(event.target.value)}><option value="">不重複</option><option value="daily">每天</option><option value="workday">每個台灣工作日</option><option value="weekly">每週指定星期</option><option value="monthlyDate">每月指定日期</option><option value="monthlyWeekday">每月第幾個星期</option><option value="monthlyLastDay">每月最後一天</option><option value="yearly">每年</option><option value="custom">自訂間隔</option></select>{locked && <small className="field-help">主行程／細項不能同時使用重複規則。</small>}</label>{rule && <>{rule.frequency === 'weekly' && <fieldset className="weekday-choice"><legend>每週哪幾天</legend>{WEEK_OPTIONS.map((label, day) => { const active = rule.weekDays?.includes(day) ?? false; return <button type="button" className={active ? 'active' : ''} key={day} onClick={() => { const days = active ? rule.weekDays!.filter((item) => item !== day) : [...(rule.weekDays ?? []), day].sort(); if (days.length) setRule({ weekDays: days }); }}>{label}</button>; })}</fieldset>}{rule.frequency === 'monthlyDate' && <label className="field">每月日期<input type="number" min="1" max="31" value={rule.monthDay ?? 1} onChange={(event) => setRule({ monthDay: Number(event.target.value) })} /><small className="field-help">沒有這一天的月份會跳過。</small></label>}{rule.frequency === 'monthlyWeekday' && <div className="form-grid"><label className="field">第幾個<select value={rule.weekOrdinal ?? 1} onChange={(event) => setRule({ weekOrdinal: Number(event.target.value) as CalendarRecurrence['weekOrdinal'] })}><option value="1">第一個</option><option value="2">第二個</option><option value="3">第三個</option><option value="4">第四個</option><option value="5">第五個</option><option value="-1">最後一個</option></select></label><label className="field">星期<select value={rule.weekDay ?? 1} onChange={(event) => setRule({ weekDay: Number(event.target.value) })}>{WEEK_OPTIONS.map((label, day) => <option key={day} value={day}>星期{label}</option>)}</select></label></div>}{rule.frequency === 'custom' && <div className="form-grid"><label className="field">每隔<input type="number" min="1" max="999" value={rule.interval} onChange={(event) => setRule({ interval: Number(event.target.value) })} /></label><label className="field">單位<select value={rule.customUnit ?? 'day'} onChange={(event) => setRule({ customUnit: event.target.value as CalendarRecurrence['customUnit'] })}><option value="day">天</option><option value="week">週</option><option value="month">個月</option><option value="year">年</option></select></label></div>}<label className="field">結束方式<select value={rule.end} onChange={(event) => { const end = event.target.value as CalendarRecurrence['end']; setRule(end === 'date' ? { end, until: form.startDate, count: undefined } : end === 'count' ? { end, count: 10, until: undefined } : { end, until: undefined, count: undefined }); }}><option value="never">不設定結束日期</option><option value="date">到指定日期</option><option value="count">指定次數</option></select></label>{rule.end === 'date' && <label className="field">重複到<input type="date" min={form.startDate} value={rule.until ?? form.startDate} onChange={(event) => setRule({ until: event.target.value })} /></label>}{rule.end === 'count' && <label className="field">總共幾次<input type="number" min="1" max="10000" value={rule.count ?? 10} onChange={(event) => setRule({ count: Number(event.target.value) })} /></label>}<p className="recurrence-summary">{calendarRecurrenceText(rule)}・{calendarRecurrenceEndText(rule)}</p></>}</div>;
 }
 
-function EventForm({ snap, event, initialDate, parentId, busy, hideStartDate = false, onCancel, onSave, onAddPerson }: {
+function EventForm({ snap, event, initialDate, parentId, busy, hideStartDate = false, onCancel, onSave, onAddPerson, onAddTag }: {
   snap: CalendarSnapshot;
   event: CalendarEvent | null;
   initialDate: string;
@@ -548,6 +550,7 @@ function EventForm({ snap, event, initialDate, parentId, busy, hideStartDate = f
   onCancel: () => void;
   onSave: (input: CalendarEventInput, event: CalendarEvent | null) => Promise<boolean>;
   onAddPerson: (nickname: string, fullName: string) => Promise<string | undefined>;
+  onAddTag: (name: string) => Promise<string | undefined>;
 }) {
   const initialParent = parentId ? snap.events.find((e) => e.id === parentId) : null;
   const [form, setForm] = useState<CalendarEventInput>(() => event ? eventInput(event) : {
@@ -572,7 +575,11 @@ function EventForm({ snap, event, initialDate, parentId, busy, hideStartDate = f
   const submit = async (ev: React.FormEvent) => {
     ev.preventDefault();
     const dates = form.timeType === 'point' ? { endDate: form.startDate, endTime: null } : {};
-    const input = { ...form, ...dates, peopleIds: form.peopleIds ?? selectedParent?.peopleIds ?? [] };
+    const input = {
+      ...form, ...dates,
+      peopleIds: form.peopleIds ?? selectedParent?.peopleIds ?? [],
+      tagIds: form.tagIds ?? selectedParent?.tagIds ?? [],
+    };
     if (startAnalysis?.kind === 'nonexistent' || endAnalysis?.kind === 'nonexistent') {
       setTimeError('選擇的當地時間因日光節約調整而不存在，請先使用下方建議時間或自行修改。');
       return;
@@ -635,7 +642,7 @@ function EventForm({ snap, event, initialDate, parentId, busy, hideStartDate = f
     {timeError && <p className="form-error">{timeError}</p>}
     <label className="field">行事曆群組<select value={form.groupId} onChange={(e) => set('groupId', e.target.value)}>{snap.groups.filter((group) => !group.archived && group.kind === 'user').map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
     <button type="button" className="more-toggle" onClick={() => setMore(!more)}>{more ? '收起更多設定' : '更多設定'}</button>
-    {more && <div className="more-fields"><RecurrenceFields form={form} setForm={setForm} locked={!!form.parentEventId} /><label className="field">地點類型<select value={form.locationType ?? ''} onChange={(e) => setForm((current) => ({ ...current, locationType: (e.target.value || null) as CalendarEventInput['locationType'], endTimeZone: e.target.value === 'route' ? current.endTimeZone ?? current.startTimeZone : current.startTimeZone, endUtcOffset: null }))}><option value="">不填</option><option value="place">一般地點</option><option value="route">起點與終點</option><option value="online">線上</option></select></label>{form.locationType && form.locationType !== 'online' && <label className="field">{form.locationType === 'route' ? '起點' : '地點'}<input value={form.startPlace ?? ''} onChange={(e) => set('startPlace', e.target.value || null)} /></label>}{form.locationType === 'route' && <label className="field">終點<input value={form.endPlace ?? ''} onChange={(e) => set('endPlace', e.target.value || null)} /></label>}{form.locationType === 'online' && <label className="field">網址<input type="url" value={form.url ?? ''} onChange={(e) => set('url', e.target.value || null)} placeholder="https://" /></label>}<label className="field">備註<textarea value={form.note ?? ''} onChange={(e) => set('note', e.target.value || null)} rows={4} /></label><p className="muted small">共用標籤會在後續階段加入。</p></div>}
+    {more && <div className="more-fields"><RecurrenceFields form={form} setForm={setForm} locked={!!form.parentEventId} /><label className="field">地點類型<select value={form.locationType ?? ''} onChange={(e) => setForm((current) => ({ ...current, locationType: (e.target.value || null) as CalendarEventInput['locationType'], endTimeZone: e.target.value === 'route' ? current.endTimeZone ?? current.startTimeZone : current.startTimeZone, endUtcOffset: null }))}><option value="">不填</option><option value="place">一般地點</option><option value="route">起點與終點</option><option value="online">線上</option></select></label>{form.locationType && form.locationType !== 'online' && <label className="field">{form.locationType === 'route' ? '起點' : '地點'}<input value={form.startPlace ?? ''} onChange={(e) => set('startPlace', e.target.value || null)} /></label>}{form.locationType === 'route' && <label className="field">終點<input value={form.endPlace ?? ''} onChange={(e) => set('endPlace', e.target.value || null)} /></label>}{form.locationType === 'online' && <label className="field">網址<input type="url" value={form.url ?? ''} onChange={(e) => set('url', e.target.value || null)} placeholder="https://" /></label>}<label className="field">備註<textarea value={form.note ?? ''} onChange={(e) => set('note', e.target.value || null)} rows={4} /></label></div>}
     <PeopleFields
       people={snap.people}
       selected={form.peopleIds ?? selectedParent?.peopleIds ?? []}
@@ -643,6 +650,7 @@ function EventForm({ snap, event, initialDate, parentId, busy, hideStartDate = f
       onAdd={onAddPerson}
       busy={busy}
     />
+    <TagPicker tags={snap.sharedTags} selected={form.tagIds ?? selectedParent?.tagIds ?? []} busy={busy} onChange={(ids) => set('tagIds', ids)} onAdd={onAddTag} />
     <ReminderFields rules={form.reminders ?? []} allDay={form.timeType === 'allDay'} startDate={form.startDate} startTime={form.startTime} onChange={(rules) => set('reminders', rules)} />
     <div className="form-actions"><button type="button" onClick={onCancel}>取消</button><button className="primary" disabled={busy}>儲存</button></div>
   </form>;
@@ -663,6 +671,14 @@ function EventPeople({ event, snap }: { event: CalendarEvent; snap: CalendarSnap
     <ul className="selected-people">
       {event.peopleIds.map((id) => <li key={id}>{personLabel(snap.people.find((person) => person.id === id))}</li>)}
     </ul>
+  </div>;
+}
+
+function EventTags({ event, snap }: { event: CalendarEvent; snap: CalendarSnapshot }) {
+  if (!event.tagIds?.length) return null;
+  return <div className="note-block">
+    <b>共用標籤</b>
+    <ul className="shared-tag-chips">{event.tagIds.map((id) => <li key={id}>{tagLabel(snap.sharedTags, id)}</li>)}</ul>
   </div>;
 }
 
@@ -699,7 +715,7 @@ function EventDetail({ api, snap, event, onBack, onEdit, onOpen, onAddChild, onJ
     const ok = await api.run((s) => s.deleteEvent(event).then(() => true));
     if (ok) onBack();
   };
-  return <section className={`card detail ${event.status === 'cancelled' ? 'cancelled' : ''}`}><div className="detail-head"><button className="icon-btn" onClick={onBack} aria-label="返回"><Icon name="left" /></button>{!event.systemSource && <button onClick={onEdit}><Icon name="pencil" size={17} /> 編輯</button>}</div>{event.status === 'cancelled' && <div className="cancel-badge">已取消</div>}<h2>{event.title}</h2><p className="detail-time">{rangeText(event)}・{timeText(event)}</p><EventTimeZoneDetails snap={snap} event={event} /><EventReminderDetails event={event} /><EventPeople event={event} snap={snap} /><p className="muted small">{groupOf(snap, event)?.name}{event.systemSource && '・系統資料'}</p>{event.recurrence && <div className="recurrence-detail"><b>{calendarRecurrenceText(event.recurrence)}</b><span>{calendarRecurrenceEndText(event.recurrence)}</span>{event.recurrenceOverride && <span>這一次有個別修改</span>}</div>}{parent && <button className="parent-link" onClick={() => onOpen(parent.id)}>主行程：{parent.title}<Icon name="right" size={16} /></button>}{event.startPlace && <p><b>{event.locationType === 'route' ? '路線' : '地點'}：</b>{event.startPlace}{event.endPlace ? ` → ${event.endPlace}` : ''}</p>}{event.url && <p><b>網址：</b><a href={event.url} target="_blank" rel="noreferrer">{event.url}</a></p>}{event.note && <div className="note-block"><b>備註</b><p>{event.note}</p></div>}{(canHaveChildren || children.length > 0) && <div className="itinerary"><div className="section-head"><h3>行程安排</h3>{event.status !== 'cancelled' && <span className="itinerary-buttons"><button className="link" onClick={onAddChild}><Icon name="plus" size={16} /> 新增細項</button><button className="link" onClick={onJoinExisting}>加入既有行程</button></span>}</div>{children.length ? <div className="itinerary-days">{[...childDays.entries()].map(([date, list]) => <div className="itinerary-day" key={date}><h4>第 {dateDiffDays(event.startDate, date) + 1} 天・{dateLabel(date)}</h4>{list.map((child) => <EventRow key={child.id} snap={snap} event={child} nested onClick={() => onOpen(child.id)} />)}</div>)}</div> : <p className="muted small">還沒有細項，可以新增或加入既有的交通、餐廳或景點。</p>}</div>}{!event.systemSource && <div className="detail-actions">{event.status === 'cancelled' ? <button onClick={() => event.recurrence ? onRecurrenceAction('restore') : api.run((s) => s.restoreEvent(event)).then(() => undefined)}>恢復行程</button> : <button className="danger" onClick={() => event.recurrence ? onRecurrenceAction('cancel') : setCancel(true)}>取消行程</button>}{event.parentEventId && <><button onClick={onMoveChild}>移到其他主行程</button><button onClick={() => api.run((s) => s.detachEvent(event))}>移出主行程</button></>}<button className="danger" disabled={children.length > 0} onClick={remove}>刪除</button></div>}{children.length > 0 && <p className="muted small">主行程仍有細項時不能刪除，請先將細項移出。</p>}{cancel && <div className="choice-panel"><b>要取消哪個範圍？</b>{children.length ? <><button className="danger" onClick={() => api.run((s) => s.cancelEvent(event, true)).then(() => setCancel(false))}>取消整趟（包含所有細項）</button><button onClick={() => api.run((s) => s.cancelEvent(event, false)).then(() => setCancel(false))}>只取消主行程，細項移出</button></> : <button className="danger" onClick={() => api.run((s) => s.cancelEvent(event, false)).then(() => setCancel(false))}>確認取消</button>}<button onClick={() => setCancel(false)}>返回</button></div>}</section>;
+  return <section className={`card detail ${event.status === 'cancelled' ? 'cancelled' : ''}`}><div className="detail-head"><button className="icon-btn" onClick={onBack} aria-label="返回"><Icon name="left" /></button>{!event.systemSource && <button onClick={onEdit}><Icon name="pencil" size={17} /> 編輯</button>}</div>{event.status === 'cancelled' && <div className="cancel-badge">已取消</div>}<h2>{event.title}</h2><p className="detail-time">{rangeText(event)}・{timeText(event)}</p><EventTimeZoneDetails snap={snap} event={event} /><EventReminderDetails event={event} /><EventPeople event={event} snap={snap} /><EventTags event={event} snap={snap} /><p className="muted small">{groupOf(snap, event)?.name}{event.systemSource && '・系統資料'}</p>{event.recurrence && <div className="recurrence-detail"><b>{calendarRecurrenceText(event.recurrence)}</b><span>{calendarRecurrenceEndText(event.recurrence)}</span>{event.recurrenceOverride && <span>這一次有個別修改</span>}</div>}{parent && <button className="parent-link" onClick={() => onOpen(parent.id)}>主行程：{parent.title}<Icon name="right" size={16} /></button>}{event.startPlace && <p><b>{event.locationType === 'route' ? '路線' : '地點'}：</b>{event.startPlace}{event.endPlace ? ` → ${event.endPlace}` : ''}</p>}{event.url && <p><b>網址：</b><a href={event.url} target="_blank" rel="noreferrer">{event.url}</a></p>}{event.note && <div className="note-block"><b>備註</b><p>{event.note}</p></div>}{(canHaveChildren || children.length > 0) && <div className="itinerary"><div className="section-head"><h3>行程安排</h3>{event.status !== 'cancelled' && <span className="itinerary-buttons"><button className="link" onClick={onAddChild}><Icon name="plus" size={16} /> 新增細項</button><button className="link" onClick={onJoinExisting}>加入既有行程</button></span>}</div>{children.length ? <div className="itinerary-days">{[...childDays.entries()].map(([date, list]) => <div className="itinerary-day" key={date}><h4>第 {dateDiffDays(event.startDate, date) + 1} 天・{dateLabel(date)}</h4>{list.map((child) => <EventRow key={child.id} snap={snap} event={child} nested onClick={() => onOpen(child.id)} />)}</div>)}</div> : <p className="muted small">還沒有細項，可以新增或加入既有的交通、餐廳或景點。</p>}</div>}{!event.systemSource && <div className="detail-actions">{event.status === 'cancelled' ? <button onClick={() => event.recurrence ? onRecurrenceAction('restore') : api.run((s) => s.restoreEvent(event)).then(() => undefined)}>恢復行程</button> : <button className="danger" onClick={() => event.recurrence ? onRecurrenceAction('cancel') : setCancel(true)}>取消行程</button>}{event.parentEventId && <><button onClick={onMoveChild}>移到其他主行程</button><button onClick={() => api.run((s) => s.detachEvent(event))}>移出主行程</button></>}<button className="danger" disabled={children.length > 0} onClick={remove}>刪除</button></div>}{children.length > 0 && <p className="muted small">主行程仍有細項時不能刪除，請先將細項移出。</p>}{cancel && <div className="choice-panel"><b>要取消哪個範圍？</b>{children.length ? <><button className="danger" onClick={() => api.run((s) => s.cancelEvent(event, true)).then(() => setCancel(false))}>取消整趟（包含所有細項）</button><button onClick={() => api.run((s) => s.cancelEvent(event, false)).then(() => setCancel(false))}>只取消主行程，細項移出</button></> : <button className="danger" onClick={() => api.run((s) => s.cancelEvent(event, false)).then(() => setCancel(false))}>確認取消</button>}<button onClick={() => setCancel(false)}>返回</button></div>}</section>;
 }
 
 function RecurrenceScopeView({ api, data, onCancel, onDone }: { api: CalendarApi; data: Extract<Open, { kind: 'recurrence-scope' }>; onCancel: () => void; onDone: (date: string) => void }) {

@@ -45,7 +45,7 @@ function spend(time: string, amount: number, account = '大戶卡', patch: Parti
     branch: null,
     statementText: null,
     note: null,
-    tags: [],
+    tagIds: [],
     lines: [{ kind: '支出', amount, category: '食 / 三餐' }],
     ...patch,
   };
@@ -249,7 +249,7 @@ describe('對帳', () => {
       branch: null,
       statementText: null,
       note: '信用卡合併扣款',
-      tags: [],
+      tagIds: [],
       lines: [],
       cardPayments: payments,
     });

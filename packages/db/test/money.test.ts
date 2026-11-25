@@ -226,7 +226,7 @@ describe('複製交易', () => {
       store: '早餐店',
       branch: '站前店',
       note: '整筆備註',
-      tags: ['旅行'],
+      tagIds: ['旅行'],
       cats: [{ category: '食 / 三餐', amount: 80, note: '蛋餅', budget: '日常' }],
       shares: [{ person: '小明', amount: 20, note: '幫忙買' }],
     })).txn;
@@ -242,7 +242,7 @@ describe('複製交易', () => {
       store: '早餐店',
       branch: '站前店',
       note: '整筆備註',
-      tags: [],
+      tagIds: [],
       statement: null,
       statementText: null,
       cats: [{ category: '食 / 三餐', amount: 80, note: '蛋餅', budget: '日常' }],
@@ -297,7 +297,7 @@ describe('計算', () => {
     branch: null,
     statementText: null,
     note: null,
-    tags: [],
+    tagIds: [],
     createdVia: 'money',
     postedDate: null,
     statement: null,
@@ -563,12 +563,12 @@ describe('退款（負數）、國外交易手續費', () => {
   });
   it('手續費另記一筆：分類跟著消費（依比例分）、店家記發卡銀行、標籤跟著', () => {
     const buy = formToTxn(
-      form({ account: '大戶信用卡', store: 'LYSN', tags: ['Super Junior'], cats: [{ category: '食 / 三餐', amount: 600 }, { category: '住 / 日用品', amount: 120 }] }),
+      form({ account: '大戶信用卡', store: 'LYSN', tagIds: ['Super Junior'], cats: [{ category: '食 / 三餐', amount: 600 }, { category: '住 / 日用品', amount: 120 }] }),
     );
     const fee = estimateFee(720, 1.5);
     expect(fee).toBe(11);
     const t = feeTxnFrom(buy, fee, '台新銀行');
-    expect(t).toMatchObject({ direction: '出', amount: 11, store: '台新銀行', tags: ['Super Junior'], note: 'LYSN 國外交易服務費' });
+    expect(t).toMatchObject({ direction: '出', amount: 11, store: '台新銀行', tagIds: ['Super Junior'], note: 'LYSN 國外交易服務費' });
     expect(t.lines.map((l) => [l.category, l.amount])).toEqual([
       ['食 / 三餐 / 國外交易手續費', 9],
       ['住 / 日用品 / 國外交易手續費', 2],

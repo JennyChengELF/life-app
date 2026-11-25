@@ -20,6 +20,7 @@ import {
 } from './calendar-recurrence';
 import { TAIWAN_CALENDAR_GROUP_NAME, TAIWAN_CALENDAR_GROUP_SOURCE, taiwanSpecialDays } from './taiwan-calendar';
 import { calendarReminderLeadDays, calendarReminderTime, parseCalendarReminders, type CalendarReminder } from './calendar-reminders';
+import { addSharedTag, loadSharedTags, readTagIds, writeTagIds, type SharedTag } from './shared-tags';
 
 export const DEFAULT_CALENDAR_TIME_ZONE = 'Asia/Taipei';
 export const DEFAULT_CALENDAR_COLOR = '#1f6fd1';
@@ -78,6 +79,7 @@ export interface CalendarEventInput {
   recurrenceExceptions?: string[];
   reminders?: CalendarReminder[];
   peopleIds?: string[];
+  tagIds?: string[];
 }
 
 export interface CalendarEvent extends CalendarEventInput {
@@ -124,6 +126,7 @@ export interface CalendarSnapshot {
   events: CalendarEvent[];
   recurrenceMasters: CalendarEvent[];
   people: CalendarPerson[];
+  sharedTags: SharedTag[];
   defaultGroupId: string;
   homeTimeZone: string;
   currentTimeZone: string;
@@ -286,6 +289,7 @@ function eventValues(input: CalendarEventInput): RowValues {
     status: input.status,
     reminders: reminders.length ? JSON.stringify(reminders) : null,
     ...(input.peopleIds === undefined ? {} : { peopleIds: uniquePersonIds(input.peopleIds).join(',') || null }),
+    ...(input.tagIds === undefined ? {} : { tagIds: writeTagIds(input.tagIds) }),
     recurrence: serializeCalendarRecurrence(input.recurrence ?? null),
     recurrenceParentId: input.recurrenceParentId ?? null,
     recurrenceInstanceKey: input.recurrenceInstanceKey ?? null,
@@ -384,7 +388,11 @@ export class CalendarStore {
     return id;
   }
 
-  async load(now = Date.now(), { includePeople = true } = {}): Promise<CalendarSnapshot> {
+  addTag(name: string) {
+    return addSharedTag(this.b, name);
+  }
+
+  async load(now = Date.now(), { includePeople = true, includeTags = true } = {}): Promise<CalendarSnapshot> {
     let groupRows = await this.b.read('calendarGroups');
     if (!groupRows.some((r) => !r.empty && !deleted(r) && str(r.values.kind) !== 'system')) {
       await this.b.append('calendarGroups', [
@@ -463,7 +471,11 @@ export class CalendarStore {
     const today = convertCalendarInstant(now, homeTimeZone).date;
     let timeZoneRulesUpdated = 0;
 
-    const [eventRows, people] = await Promise.all([this.b.read('calendarEvents'), includePeople ? this.loadPeople(now, issues) : Promise.resolve([])]);
+    const [eventRows, people, sharedTags] = await Promise.all([
+      this.b.read('calendarEvents'),
+      includePeople ? this.loadPeople(now, issues) : [],
+      includeTags ? loadSharedTags(this.b, now) : [],
+    ]);
     const eventFixes: RowUpdate[] = [];
     const loadedEvents: CalendarEvent[] = [];
     for (const r of eventRows) {
@@ -633,6 +645,7 @@ export class CalendarStore {
         status: str(r.values.status) === 'cancelled' ? 'cancelled' : 'scheduled',
         reminders,
         peopleIds: uniquePersonIds((str(r.values.peopleIds) ?? '').split(',')),
+        tagIds: readTagIds(r.values.tagIds),
         createdVia: str(r.values.createdVia) ?? 'sheet',
         createdAt: num(r.values.createdAt, now),
         updatedAt: num(r.values.updatedAt, now),
@@ -704,7 +717,7 @@ export class CalendarStore {
         });
       }
     }
-    return { loadedAt: now, groups, events: sortCalendarEvents(events), recurrenceMasters, people, defaultGroupId, homeTimeZone, currentTimeZone, lastDetectedTimeZone, recentTimeZones, timeZoneRulesUpdated, issues };
+    return { loadedAt: now, groups, events: sortCalendarEvents(events), recurrenceMasters, people, sharedTags, defaultGroupId, homeTimeZone, currentTimeZone, lastDetectedTimeZone, recentTimeZones, timeZoneRulesUpdated, issues };
   }
 
   async addGroup(name: string, color = DEFAULT_CALENDAR_COLOR) {
@@ -796,6 +809,7 @@ export class CalendarStore {
       const endDate = prepared.timeType === 'point' ? prepared.startDate : prepared.endDate;
       if (prepared.startDate < parent.startDate || endDate > parent.endDate) throw new Error(`細項日期必須在主行程的 ${parent.startDate}～${parent.endDate} 之內`);
       prepared.peopleIds ??= parent.peopleIds;
+      prepared.tagIds ??= parent.tagIds;
     }
     const now = Date.now();
     await this.b.append('calendarEvents', [{ ...eventValues(prepared), createdVia: this.via, id, createdAt: now, updatedAt: now }]);

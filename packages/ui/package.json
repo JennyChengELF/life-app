@@ -13,6 +13,7 @@
     "./time-field": "./src/TimeField.tsx",
     "./date-time-field": "./src/DateTimeField.tsx",
     "./calendar-reminder-list": "./src/CalendarReminderList.tsx",
+    "./tag-picker": "./src/TagPicker.tsx",
     "./icon": "./src/Icon.tsx"
   },
   "peerDependencies": {
