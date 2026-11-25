@@ -239,6 +239,9 @@ button.link { border: 0; background: none; color: var(--accent); padding: 4px 6p
 .week-strip-days button.selected small, .week-strip-days button.selected span { color: #fff; }
 .week-strip-today { display: block; margin: 5px auto -4px; }
 
+.calendar-reminder-list { display: grid; gap: 6px; margin-bottom: 12px; }
+.calendar-reminder-list a.msg { display: block; margin: 0; text-decoration: none; overflow-wrap: anywhere; }
+
 /* ── 共用 24 小時時間欄位（2026-11-22 使用者決定） ── */
 .time-field { border: 0; padding: 0; margin: 0 0 10px; display: flex; align-items: center; gap: 5px; }
 .time-field legend { font-size: .82rem; color: var(--muted); padding: 0; margin-bottom: 3px; width: 100%; }

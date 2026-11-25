@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CalendarStore, expandCalendarEvents, LocalBackend, memoryStorage, taiwanDayInfo } from '../src';
+import { CalendarStore, dueCalendarReminders, expandCalendarEvents, LocalBackend, memoryStorage, taiwanDayInfo } from '../src';
 
 const base = (groupId: string) => ({
   title: '台南旅遊',
@@ -22,6 +22,42 @@ const base = (groupId: string) => ({
 });
 
 describe('行事曆資料', () => {
+  it('保存多個提醒，並按每次重複行程的時區計算到期時間及取消例外', async () => {
+    const s = new CalendarStore(new LocalBackend(memoryStorage()));
+    await s.setCurrentTimeZone('Asia/Taipei');
+    const { defaultGroupId } = await s.load();
+    await s.addEvent({
+      ...base(defaultGroupId), title: '看診', timeType: 'point',
+      startDate: '2026-11-26', endDate: '2026-11-26', startTime: '09:00', startTimeZone: 'Asia/Tokyo',
+      recurrence: { frequency: 'daily', interval: 1, end: 'count', count: 2 },
+      reminders: [{ kind: 'before', amount: 1, unit: 'days' }, { kind: 'before', amount: 30, unit: 'minutes' }],
+    }, 'VISIT');
+    let snap = await s.load();
+    expect(snap.recurrenceMasters[0].reminders).toHaveLength(2);
+    const dueAt = (time: string) => dueCalendarReminders(snap, Date.parse(time));
+    expect(dueAt('2026-11-25T07:59:59+08:00')).toHaveLength(0);
+    expect(dueAt('2026-11-25T08:00:00+08:00').map(({ time, event }) => [time, event.startDate])).toEqual([['08:00', '2026-11-26']]);
+    expect(dueAt('2026-11-26T09:00:00+08:00').map(({ time, event }) => [time, event.startDate])).toEqual([['07:30', '2026-11-26'], ['08:00', '2026-11-27']]);
+    const first = dueAt('2026-11-26T09:00:00+08:00')[0].event;
+    await s.setRecurringEventStatus(first, 'cancelled', 'single');
+    snap = await s.load();
+    expect(dueAt('2026-11-26T09:00:00+08:00').map(({ event }) => event.startDate)).toEqual(['2026-11-27']);
+  });
+
+  it('全天指定提醒依主要時區，顯示到目前所在地當天結束', async () => {
+    const s = new CalendarStore(new LocalBackend(memoryStorage()));
+    await s.setHomeTimeZone('Asia/Taipei');
+    await s.setCurrentTimeZone('Asia/Tokyo');
+    const { defaultGroupId } = await s.load();
+    await s.addEvent({
+      ...base(defaultGroupId),
+      reminders: [{ kind: 'custom', dayOffset: 1, time: '23:30' }],
+    }, 'TRIP');
+    const snap = await s.load();
+    expect(dueCalendarReminders(snap, Date.parse('2026-11-23T00:30:00+09:00'))).toMatchObject([{ time: '00:30', event: { id: 'TRIP' } }]);
+    expect(dueCalendarReminders(snap, Date.parse('2026-11-24T00:00:00+09:00'))).toEqual([]);
+  });
+
   it('台灣辦公日以官方例外優先，舊年份與未公布年份只按週間推算', () => {
     expect(taiwanDayInfo('2025-02-08')).toMatchObject({ type: 'workday', source: 'official', title: '補班日' });
     expect(taiwanDayInfo('2026-10-09')).toMatchObject({ type: 'holiday', source: 'official', title: '國慶日補假' });

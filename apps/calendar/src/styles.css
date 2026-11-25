@@ -126,6 +126,9 @@ select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset:
 .selected-start-date { margin-top: 4px; padding: 8px 11px; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; font-size: 1rem; }
 .more-toggle { border: 0; background: none; color: var(--accent); padding-left: 0; margin-bottom: 8px; }
 .more-fields { border-top: 1px solid var(--line); padding-top: 12px; }
+.reminder-fields { border-top: 1px solid var(--line); padding-top: 8px; }
+.reminder-toggle { display: block; }
+.reminder-rule { margin: 8px 0; padding: 10px; border: 1px solid var(--line); border-radius: 10px; }
 .recurrence-fields { margin-bottom: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); }
 .recurrence-fields > :last-child { margin-bottom: 0; }
 .weekday-choice { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; margin: 0 0 12px; padding: 0; border: 0; }

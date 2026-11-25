@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Backend, BowelSnapshot, HealthSnapshot, HubSnapshot, MoneySnapshot, WaterSnapshot } from '@life/db';
-import { AuthError, BowelStore, GoogleAuth, HealthStore, HubStore, LocalBackend, MoneyStore, SheetsBackend, WaterStore } from '@life/db';
+import type { Backend, BowelSnapshot, CalendarSnapshot, HealthSnapshot, HubSnapshot, MoneySnapshot, TaiwanCalendarResource, WaterSnapshot } from '@life/db';
+import { AuthError, BowelStore, CalendarStore, GoogleAuth, HealthStore, HubStore, installTaiwanCalendarResource, LocalBackend, MoneyStore, SheetsBackend, WaterStore } from '@life/db';
 
 const CLIENT_ID = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined)?.trim() ?? '';
 /** 網址加 ?local 可強制用本機測試模式 */
@@ -13,10 +13,10 @@ export type Status = 'starting' | 'need-connect' | 'loading' | 'ready' | 'error'
  * 首頁只顯示（讀取時和各 APP 一樣會補齊試算表）；要新增 / 修改就跳到那個 APP。
  */
 export function useHub() {
-  const { backend, auth, water, health, bowel, money, hubStore } = useMemo(() => {
+  const { backend, auth, water, health, bowel, money, calendar, hubStore } = useMemo(() => {
     const auth = CLIENT_ID && !FORCE_LOCAL ? new GoogleAuth(CLIENT_ID) : null;
     const backend: Backend = auth ? new SheetsBackend(auth) : new LocalBackend();
-    return { backend, auth, water: new WaterStore(backend, 'hub'), health: new HealthStore(backend, 'hub'), bowel: new BowelStore(backend, 'hub'), money: new MoneyStore(backend, 'hub'), hubStore: new HubStore(backend) };
+    return { backend, auth, water: new WaterStore(backend, 'hub'), health: new HealthStore(backend, 'hub'), bowel: new BowelStore(backend, 'hub'), money: new MoneyStore(backend, 'hub'), calendar: new CalendarStore(backend), hubStore: new HubStore(backend) };
   }, []);
 
   const [status, setStatus] = useState<Status>('starting');
@@ -25,9 +25,12 @@ export function useHub() {
   const [bowelSnap, setBowelSnap] = useState<BowelSnapshot | null>(null);
   const [moneySnap, setMoneySnap] = useState<MoneySnapshot | null>(null);
   const [hubSnap, setHubSnap] = useState<HubSnapshot | null>(null);
+  const [calendarSnap, setCalendarSnap] = useState<CalendarSnapshot | null>(null);
+  const [calendarError, setCalendarError] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const initPromise = useRef<Promise<void> | null>(null);
+  const taiwanCalendarPromise = useRef<Promise<void> | null>(null);
 
   const load = useCallback(async () => {
     if (!initPromise.current) {
@@ -37,7 +40,17 @@ export function useHub() {
       });
     }
     await initPromise.current;
-    const [w, h, b, s, m] = await Promise.all([water.load(), health.load(), bowel.load(), hubStore.load(), money.load()]);
+    if (!import.meta.env.DEV && !taiwanCalendarPromise.current) {
+      taiwanCalendarPromise.current = fetch(`${import.meta.env.BASE_URL}calendar/taiwan-calendar.json`, { cache: 'no-cache' })
+        .then(async (response) => {
+          if (response.ok) installTaiwanCalendarResource(await response.json() as TaiwanCalendarResource);
+        }).catch(() => { /* 沿用內建辦公日曆。 */ });
+    }
+    const calendarResult = calendar.load().then((snapshot) => ({ snapshot, failed: false }), () => ({ snapshot: null, failed: true }));
+    const [w, h, b, s, m, reminders] = await Promise.all([water.load(), health.load(), bowel.load(), hubStore.load(), money.load(), calendarResult]);
+    await taiwanCalendarPromise.current;
+    setCalendarSnap(reminders.snapshot);
+    setCalendarError(reminders.failed);
     setMoneySnap(m);
     setHubSnap(s);
     setWaterSnap(w);
@@ -45,7 +58,7 @@ export function useHub() {
     setBowelSnap(b);
     setStatus('ready');
     setError(null);
-  }, [backend, water, health, bowel, money, hubStore]);
+  }, [backend, water, health, bowel, money, calendar, hubStore]);
 
   const fail = useCallback((e: unknown) => {
     if (e instanceof AuthError) {
@@ -127,5 +140,5 @@ export function useHub() {
     [hubStore],
   );
 
-  return { mode: backend.kind, status, waterSnap, healthSnap, bowelSnap, moneySnap, hubSnap, error, busy, connect, refresh, savePinned };
+  return { mode: backend.kind, status, waterSnap, healthSnap, bowelSnap, moneySnap, hubSnap, calendarSnap, calendarError, error, busy, connect, refresh, savePinned };
 }

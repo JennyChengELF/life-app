@@ -432,7 +432,7 @@ export const TABLES = {
       { name: 'recurrenceParentId', type: 'text', label: '重複行程原規則 id' },
       { name: 'recurrenceInstanceKey', type: 'text', label: '重複行程原發生日期 / 實例鍵' },
       { name: 'exceptions', type: 'text', label: '重複行程略過的發生日期' },
-      { name: 'reminders', type: 'text', label: '提醒設定 JSON（第二輪）' },
+      { name: 'reminders', type: 'text', label: '行程提醒設定 JSON' },
       { name: 'createdVia', type: 'text', label: '在哪裡輸入（calendar、sheet）' },
       ...systemCols,
     ],

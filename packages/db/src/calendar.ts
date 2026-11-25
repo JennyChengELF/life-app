@@ -19,6 +19,7 @@ import {
   type CalendarRecurrence,
 } from './calendar-recurrence';
 import { TAIWAN_CALENDAR_GROUP_NAME, TAIWAN_CALENDAR_GROUP_SOURCE, taiwanSpecialDays } from './taiwan-calendar';
+import { calendarReminderLeadDays, calendarReminderTime, parseCalendarReminders, type CalendarReminder } from './calendar-reminders';
 
 export const DEFAULT_CALENDAR_TIME_ZONE = 'Asia/Taipei';
 export const DEFAULT_CALENDAR_COLOR = '#1f6fd1';
@@ -75,6 +76,7 @@ export interface CalendarEventInput {
   recurrenceParentId?: string | null;
   recurrenceInstanceKey?: string | null;
   recurrenceExceptions?: string[];
+  reminders?: CalendarReminder[];
 }
 
 export interface CalendarEvent extends CalendarEventInput {
@@ -218,10 +220,37 @@ export function recurrenceMasterOf(snapshot: CalendarSnapshot, event: CalendarEv
   return snapshot.recurrenceMasters.find((master) => master.id === event.recurrenceParentId) ?? null;
 }
 
+export function dueCalendarReminders(snapshot: CalendarSnapshot, now = Date.now()) {
+  const today = convertCalendarInstant(now, snapshot.currentTimeZone).date;
+  const masters = snapshot.recurrenceMasters.filter((event) => event.status === 'scheduled' && event.reminders?.length);
+  const offsets = masters.flatMap((event) => event.reminders!.map(calendarReminderLeadDays));
+  const first = offsets.reduce((min, days) => Math.min(min, days), 0);
+  const last = offsets.reduce((max, days) => Math.max(max, days), 0);
+  const events = expandCalendarEvents({ ...snapshot, recurrenceMasters: masters }, addDateDays(today, first - 2), addDateDays(today, last + 3));
+  const groups = new Set(snapshot.groups.filter((group) => !group.hidden).map((group) => group.id));
+  const due: { id: string; event: CalendarEvent; time: string; at: number }[] = [];
+  for (const event of events) {
+    if (event.status !== 'scheduled' || !event.reminders?.length || !groups.has(event.groupId)) continue;
+    for (const [index, rule] of event.reminders.entries()) {
+      try {
+        const at = calendarReminderTime(event, rule, snapshot.homeTimeZone, snapshot.currentTimeZone);
+        // 網頁版只顯示目前所在地今天已到時間的提醒。
+        if (at > now || at < now - 27 * 3600000) continue;
+        const local = convertCalendarInstant(at, snapshot.currentTimeZone);
+        if (local.date === today) due.push({ id: `${event.id}:${index}`, event, time: local.time, at });
+      } catch {
+        // 略過當地不存在的時刻，例如重複行程的提醒碰上夏令時間跳時。
+      }
+    }
+  }
+  return due.sort((a, b) => a.at - b.at);
+}
+
 function eventValues(input: CalendarEventInput): RowValues {
   // （2026-11-20 使用者決定：時間點不顯示結束欄位；結束日期存開始日、結束時間留空。）
   const endDate = input.timeType === 'point' ? input.startDate : input.endDate;
   const fixedTimeZone = input.timeType !== 'allDay' && input.timeMode === 'fixedZone';
+  const reminders = parseCalendarReminders(input.reminders);
   return {
     title: input.title.trim() || null,
     groupId: input.groupId,
@@ -245,6 +274,7 @@ function eventValues(input: CalendarEventInput): RowValues {
     url: input.url?.trim() || null,
     note: input.note?.trim() || null,
     status: input.status,
+    reminders: reminders.length ? JSON.stringify(reminders) : null,
     recurrence: serializeCalendarRecurrence(input.recurrence ?? null),
     recurrenceParentId: input.recurrenceParentId ?? null,
     recurrenceInstanceKey: input.recurrenceInstanceKey ?? null,
@@ -289,6 +319,8 @@ function validateEvent(input: CalendarEventInput) {
   if (input.timeType === 'range' && input.startDate === input.endDate && input.endTime! <= input.startTime! && !separateRouteZones) throw new Error('同一天的結束時間必須晚於開始時間');
   if (input.recurrence) parseCalendarRecurrence(input.recurrence);
   if (input.recurrence && input.parentEventId) throw new Error('重複行程不能同時屬於主行程');
+  const reminders = parseCalendarReminders(input.reminders);
+  if (input.timeType === 'allDay' && reminders.some((rule) => rule.kind !== 'custom')) throw new Error('全天行程請用指定日期與時間的提醒');
 }
 
 function validatePreparedEvent(input: CalendarEventInput) {
@@ -520,6 +552,14 @@ export class CalendarStore {
       if (!str(r.values.status)) patch.status = 'scheduled';
       if (!str(r.values.timeMode)) patch.timeMode = 'fixedZone';
       if (Object.keys(patch).length) eventFixes.push({ rowNumber: r.rowNumber, values: patch, expectId: str(r.values.id) ?? '' });
+      let reminders: CalendarReminder[] = [];
+      try {
+        reminders = parseCalendarReminders(r.values.reminders);
+        if (timeType === 'allDay' && reminders.some((rule) => rule.kind !== 'custom')) throw new Error();
+      } catch {
+        issues.push({ table: 'calendarEvents', rowNumber: r.rowNumber, text: '提醒設定格式不正確，請在行事曆重新設定' });
+        reminders = reminders.filter((rule) => rule.kind === 'custom');
+      }
       loadedEvents.push({
         rowNumber: r.rowNumber,
         id,
@@ -545,6 +585,7 @@ export class CalendarStore {
         url: str(r.values.url),
         note: str(r.values.note),
         status: str(r.values.status) === 'cancelled' ? 'cancelled' : 'scheduled',
+        reminders,
         createdVia: str(r.values.createdVia) ?? 'sheet',
         createdAt: num(r.values.createdAt, now),
         updatedAt: num(r.values.updatedAt, now),

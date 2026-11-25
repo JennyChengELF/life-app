@@ -12,6 +12,7 @@
     "./week-date-strip": "./src/WeekDateStrip.tsx",
     "./time-field": "./src/TimeField.tsx",
     "./date-time-field": "./src/DateTimeField.tsx",
+    "./calendar-reminder-list": "./src/CalendarReminderList.tsx",
     "./icon": "./src/Icon.tsx"
   },
   "peerDependencies": {

@@ -4,6 +4,7 @@ import type { TimelineEntry } from '@life/db';
 import { bowelEntries, bowelHomeMessage, editHash, fmtMoney, depositsDue, healthEntries, loanReminders, moneyDayTotals, moneyEntries, stocktakeStatus, sortEntries, todayKey, waterEntries, waterSummary } from '@life/db';
 import { DateNav, Timeline } from '@life/ui/timeline';
 import { AppSwitcher } from '@life/ui/app-switcher';
+import { CalendarReminderList } from '@life/ui/calendar-reminder-list';
 import { useHub } from './useHub';
 
 const HOME_URL = import.meta.env.DEV ? `http://${location.hostname}:5172/` : './';
@@ -102,6 +103,8 @@ function Day({ hub, date, setDate }: { hub: ReturnType<typeof useHub>; date: str
 
   return (
     <>
+      {date === todayKey() && hub.calendarError && <div className="msg warn">暫時無法讀取行程提醒</div>}
+      {date === todayKey() && hub.calendarSnap && <CalendarReminderList snapshot={hub.calendarSnap} eventHref={(event) => appUrl('calendar', `#event/${encodeURIComponent(event.id)}`, event.startDate)} />}
       {stocktake && stocktake.pending.length > 0 && (
         <div className="messages">
           <a className="msg warn" href={appUrl('money', '#stocktake')}>
