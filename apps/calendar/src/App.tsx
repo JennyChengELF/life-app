@@ -40,6 +40,8 @@ const HOME_URL = import.meta.env.DEV ? `http://${location.hostname}:5172/` : '..
 type MainTab = 'add' | 'calendar' | 'more';
 type Tab = MainTab | 'agenda' | 'groups' | 'timezones' | 'data' | 'issues';
 type AgendaMode = 'upcoming' | 'history' | 'month';
+type CalendarView = 'month' | 'week' | 'day';
+const CALENDAR_VIEWS = [['month', '月'], ['week', '週'], ['day', '日']] as const;
 const TABS: AppTabItem<MainTab>[] = [
   { key: 'add', icon: 'plus', label: '新增' },
   { key: 'calendar', icon: 'calendar', label: '日曆' },
@@ -78,6 +80,7 @@ const shiftMonth = (month: string, delta: number) => {
 const groupOf = (snap: CalendarSnapshot, e: CalendarEvent) => snap.groups.find((g) => g.id === e.groupId);
 const timeText = (e: CalendarEvent) => e.timeType === 'allDay' ? '全天' : e.timeType === 'point' ? e.startTime! : `${e.startTime}～${e.endTime}`;
 const rangeText = (e: CalendarEvent) => e.startDate === e.endDate ? dateLabel(e.startDate, true) : `${slashDateLabel(e.startDate)}～${slashDateLabel(e.endDate)}`;
+const weekStart = (date: string) => addDateDays(date, -new Date(`${date}T00:00:00Z`).getUTCDay());
 const eventInput = (e: CalendarEvent): CalendarEventInput => ({
   title: e.title,
   groupId: e.groupId,
@@ -117,6 +120,8 @@ export function App() {
   const initialDate = requestedDate();
   const [tab, setTab] = useState<Tab>(() => location.hash === '#agenda' ? 'agenda' : location.hash === '#groups' ? 'groups' : location.hash === '#new' ? 'add' : 'calendar');
   const [selectedDate, setSelectedDate] = useState(initialDate);
+  // （2026-11-25 使用者確認：每次開啟行事曆先顯示月曆。）
+  const [calendarView, setCalendarView] = useState<CalendarView>('month');
   const [open, setOpen] = useState<Open | null>(() => {
     if (location.hash === '#new') return { kind: 'form', eventId: null, date: initialDate, parentId: null };
     if (location.hash.startsWith('#event/')) return { kind: 'detail', id: decodeURIComponent(location.hash.slice(7)) };
@@ -142,7 +147,7 @@ export function App() {
   const snap = api.snap;
   const recurrenceStart = snap.recurrenceMasters.map((event) => event.startDate).sort()[0] ?? selectedDate;
   const selectedMonthEnd = addDateDays(`${shiftMonth(selectedDate.slice(0, 7), 1)}-01`, -1);
-  const recurrenceEnd = [addDateDays(todayKey(), 370), selectedMonthEnd].sort().at(-1)!;
+  const recurrenceEnd = [addDateDays(todayKey(), 370), addDateDays(selectedMonthEnd, 14)].sort().at(-1)!;
   const expandedEvents = expandCalendarEvents(snap, recurrenceStart, recurrenceEnd);
   const activeGroups = new Set(snap.groups.filter((g) => !g.hidden).map((g) => g.id));
   const visibleEvents = expandedEvents.filter((e) => activeGroups.has(e.groupId));
@@ -207,7 +212,17 @@ export function App() {
         <RecurrenceScopeView api={api} data={open} onCancel={() => setOpen({ kind: 'detail', id: open.event.id })} onDone={(date) => { setSelectedDate(date); setTab('calendar'); setOpen(null); }} />
       ) : (
         <>
-          {tab === 'calendar' && <MonthView snap={snap} events={visibleEvents} selected={selectedDate} setDate={setDate} openEvent={(id) => setOpen({ kind: 'detail', id })} />}
+          {tab === 'calendar' && (
+            <CalendarDateView
+              view={calendarView}
+              setView={setCalendarView}
+              snap={snap}
+              events={visibleEvents}
+              selected={selectedDate}
+              setDate={setDate}
+              openEvent={(id) => setOpen({ kind: 'detail', id })}
+            />
+          )}
           {tab === 'more' && <MoreView issues={snap.issues.length} open={(next) => { setTab(next); window.scrollTo(0, 0); }} />}
           {tab === 'agenda' && <><MoreBack onClick={() => setTab('more')} /><AgendaView snap={snap} events={visibleEvents} selectedMonth={selectedDate.slice(0, 7)} openEvent={(id) => setOpen({ kind: 'detail', id })} /></>}
           {tab === 'groups' && <><MoreBack onClick={() => setTab('more')} /><GroupsView api={api} snap={snap} /></>}
@@ -238,7 +253,87 @@ function Shell({ api, tab, goTab, date, confirmLeave = false, children }: { api:
   );
 }
 
-function MonthView({ snap, events, selected, setDate, openEvent }: { snap: CalendarSnapshot; events: CalendarEvent[]; selected: string; setDate: (date: string) => void; openEvent: (id: string) => void }) {
+type DateViewProps = {
+  snap: CalendarSnapshot;
+  events: CalendarEvent[];
+  selected: string;
+  setDate: (date: string) => void;
+  openEvent: (id: string) => void;
+};
+
+function CalendarDateView(props: DateViewProps & { view: CalendarView; setView: (view: CalendarView) => void }) {
+  const { view, setView, selected, setDate } = props;
+  const span = view === 'week' ? 7 : 1;
+  const start = view === 'week' ? weekStart(selected) : selected;
+  const end = addDateDays(start, span - 1);
+  const heading = view === 'week' ? `${dateLabel(start, true)}～${dateLabel(end, start.slice(0, 4) !== end.slice(0, 4))}` : dateLabel(selected, true);
+  const unit = view === 'week' ? '週' : '天';
+
+  return <>
+    <div className="calendar-view-choice" role="group" aria-label="日曆檢視">
+      {CALENDAR_VIEWS.map(([value, label]) => (
+        <button type="button" key={value} aria-label={`${label}檢視`} aria-pressed={view === value} onClick={() => setView(value)}>{label}</button>
+      ))}
+    </div>
+    {view === 'month' ? <MonthView {...props} /> : <>
+      <div className="card calendar-period-nav">
+        <button type="button" className="icon-btn" aria-label={`上一${unit}`} onClick={() => setDate(addDateDays(selected, -span))}><Icon name="left" /></button>
+        <h2>{heading}</h2>
+        <button type="button" className="icon-btn" aria-label={`下一${unit}`} onClick={() => setDate(addDateDays(selected, span))}><Icon name="right" /></button>
+        <button type="button" className="link calendar-period-today" onClick={() => setDate(todayKey())}>回到今天</button>
+      </div>
+      {view === 'week' ? (
+        <WeekView {...props} start={start} openDay={(date) => { setDate(date); setView('day'); }} />
+      ) : <DayView {...props} />}
+    </>}
+  </>;
+}
+
+function dayTimeText(event: CalendarEvent, date: string) {
+  if (event.timeType !== 'range' || event.startDate === event.endDate) return timeText(event);
+  if (date === event.startDate) return `${event.startTime} 起`;
+  if (date === event.endDate) return `至 ${event.endTime}`;
+  return '跨日進行中';
+}
+
+function WeekView({ snap, events, selected, openEvent, start, openDay }: DateViewProps & { start: string; openDay: (date: string) => void }) {
+  const days = Array.from({ length: 7 }, (_, index) => addDateDays(start, index));
+  const today = todayKey();
+  return <div className="calendar-week">
+    {days.map((date) => {
+      const rows = sortCalendarEvents(events.filter((event) => eventOnDate(event, date)));
+      const holiday = taiwanDayInfo(date).type === 'holiday';
+      return <section className="card calendar-week-day" key={date}>
+        <h3>
+          <button type="button" className={`calendar-week-date ${holiday ? 'holiday' : ''} ${date === selected ? 'selected' : ''}`} onClick={() => openDay(date)} aria-current={date === today ? 'date' : undefined} aria-label={`查看 ${dateLabel(date, true)}的行程`}>
+            {dateLabel(date)}
+          </button>
+        </h3>
+        {rows.length ? rows.map((event) => (
+          <button type="button" className={`calendar-week-event ${event.status === 'cancelled' ? 'cancelled' : ''}`} key={event.id} onClick={() => openEvent(event.id)} style={{ borderInlineStartColor: groupOf(snap, event)?.color ?? 'var(--accent)' }}>
+            <small>{dayTimeText(event, date)}</small>
+            <b>{event.title}</b>
+          </button>
+        )) : <p className="muted small calendar-week-empty">沒有行程</p>}
+      </section>;
+    })}
+  </div>;
+}
+
+function DayView({ snap, events, selected, openEvent }: DateViewProps) {
+  const rows = sortCalendarEvents(events.filter((event) => eventOnDate(event, selected)));
+  const allDay = rows.filter((event) => event.timeType === 'allDay');
+  const timed = rows.filter((event) => event.timeType !== 'allDay');
+  const renderRow = (event: CalendarEvent) => <EventRow key={event.id} snap={snap} event={event} displayTime={dayTimeText(event, selected)} onClick={() => openEvent(event.id)} />;
+
+  if (!rows.length) return <div className="card center muted">這天沒有行程</div>;
+  return <>
+    {allDay.length > 0 && <section className="card day-list"><h3>全天行程</h3>{allDay.map(renderRow)}</section>}
+    {timed.length > 0 && <section className="card day-list"><h3>時間軸</h3>{timed.map(renderRow)}</section>}
+  </>;
+}
+
+function MonthView({ snap, events, selected, setDate, openEvent }: DateViewProps) {
   const selectedEvents = sortCalendarEvents(events.filter((e) => eventOnDate(e, selected)));
   const selectedTaiwanDay = taiwanDayInfo(selected);
   const unnamed = events.filter((e) => e.titleMissing).length;
@@ -332,10 +427,10 @@ function currentZoneText(snap: CalendarSnapshot, event: CalendarEvent) {
   }
 }
 
-function EventRow({ snap, event, onClick, nested = false }: { snap: CalendarSnapshot; event: CalendarEvent; onClick: () => void; nested?: boolean }) {
+function EventRow({ snap, event, onClick, nested = false, displayTime = timeText(event) }: { snap: CalendarSnapshot; event: CalendarEvent; onClick: () => void; nested?: boolean; displayTime?: string }) {
   const group = groupOf(snap, event);
   const converted = currentZoneText(snap, event);
-  return <button className={`event-row ${event.status === 'cancelled' ? 'cancelled' : ''} ${nested ? 'nested' : ''}`} onClick={onClick}><span className="event-color" style={{ background: group?.color ?? '#1f6fd1' }} /><span className="event-time">{timeText(event)}</span><span className="event-main"><b>{event.title}</b>{event.recurrence && <small className="recurrence-row-label">重複{event.recurrenceOverride ? '・本次已修改' : ''}</small>}{event.startPlace && <small>{event.startPlace}{event.endPlace ? ` → ${event.endPlace}` : ''}</small>}{converted && <small className="converted-time">{converted}</small>}</span><Icon name="right" size={17} /></button>;
+  return <button className={`event-row ${event.status === 'cancelled' ? 'cancelled' : ''} ${nested ? 'nested' : ''}`} onClick={onClick}><span className="event-color" style={{ background: group?.color ?? '#1f6fd1' }} /><span className="event-time">{displayTime}</span><span className="event-main"><b>{event.title}</b>{event.recurrence && <small className="recurrence-row-label">重複{event.recurrenceOverride ? '・本次已修改' : ''}</small>}{event.startPlace && <small>{event.startPlace}{event.endPlace ? ` → ${event.endPlace}` : ''}</small>}{converted && <small className="converted-time">{converted}</small>}</span><Icon name="right" size={17} /></button>;
 }
 
 function AgendaView({ snap, events, selectedMonth, openEvent }: { snap: CalendarSnapshot; events: CalendarEvent[]; selectedMonth: string; openEvent: (id: string) => void }) {
