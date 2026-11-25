@@ -200,6 +200,7 @@ export function App() {
               editing={editing}
               onClose={closeEditor}
               onSavedDate={setDate}
+              onEdit={(entry) => { if (entry.txn) setDate(entry.txn.date); edit(entry); }}
               hideModeSwitch
               onCopy={editing.txn && canCopyTxn(editing.txn) ? () => {
                 edit({ form: copyTxnForm(editing.txn!, timeForDate(date)), copied: true });

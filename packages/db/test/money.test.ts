@@ -3,6 +3,7 @@ import { addTestCategories } from './helpers';
 import type { Account, EntryForm, MoneySnapshot, Txn } from '../src';
 import {
   accountBalance,
+  accountDelta,
   accountLabel,
   canCopyTxn,
   categoryBreakdown,
@@ -39,6 +40,7 @@ import {
   txnMyNet,
   txnTitle,
   txnToForm,
+  twdRate,
 } from '../src';
 
 const at = (s: string) => parseDateTimeText(s)!;
@@ -77,6 +79,7 @@ function roundTrip(f: EntryForm) {
     postedDate: null,
     statement: t.statement ?? null,
     cardPayments: [],
+    payments: t.payments?.map((x, i) => ({ id: `P${i}`, rowNumber: i + 2, sort: i + 1, account: x.account!, amount: x.amount! })),
     lines: t.lines.map((l, i) => ({
       rowNumber: 2 + i,
       id: `L${i}`,
@@ -547,6 +550,95 @@ describe('店家 / 對象', () => {
     expect(snap.orgs.find((o) => o.name === 'LYSN')?.foreign).toBe(true);
     expect(snap.orgs.find((o) => o.name === '全聯')?.foreign).toBe(false);
     expect((await backend.read('healthLabReports'))[0]?.values.place).toBe('八方雲集鍋貼');
+  });
+});
+
+describe('外幣、混合付款與回饋', () => {
+  const day = '2026-11-18';
+  const discount = '小確幸收入 / 回饋收入 / 優惠折抵';
+  const reward = '小確幸收入 / 回饋收入 / 消費回饋';
+
+  async function setup() {
+    const backend = new LocalBackend(memoryStorage());
+    const store = new MoneyStore(backend);
+    await store.load();
+    await addTestCategories(store);
+    await store.ensureCategories(['小確幸收入', '小確幸收入 / 回饋收入', discount, reward], '收入');
+    const account = { currency: 'TWD', org: null, openingDate: '2026-11-01', openingBalance: 0, closingDay: null, dueDay: null, fxFeeRate: null, expiryDate: null, monthlyCheck: false, archived: false, note: null };
+    await store.saveAccount({ ...account, type: '信用卡', name: '刷卡' });
+    await store.saveAccount({ ...account, type: '回饋點數', name: '點數' });
+    return { backend, store };
+  }
+
+  it('外幣先記原幣，預估與實際沿用同一筆，原幣款不直接加進台幣餘額', async () => {
+    const { store } = await setup();
+    const id = await store.saveTxn(formToTxn(form({ account: '刷卡', origCurrency: 'JPY', cats: [
+      { category: '食 / 三餐', amount: 3050 }, { category: '住 / 日用品', amount: 6950 },
+    ] })));
+    let snap = await store.load();
+    let txn = snap.txns.find((t) => t.id === id)!;
+    expect(txn).toMatchObject({ origCurrency: 'JPY', amount: 10000, twdStatus: 'pending', twdAmount: null });
+    expect(accountDelta(txn, '刷卡')).toBe(0);
+    expect(moneyDayTotals(snap, day).expense).toBe(0);
+    expect(monthStats(snap.txns, snap.categories, snap.accounts, day)).toMatchObject([{ currency: 'JPY', expense: 10000 }]);
+
+    await store.saveTxn(formToTxn({ ...txnToForm(txn), twdAmount: 2150, twdStatus: 'estimated' }), txn);
+    snap = await store.load();
+    txn = snap.txns[0];
+    expect(moneyDayTotals(snap, day).expense).toBe(2150);
+    expect(accountDelta(txn, '刷卡')).toBe(-2150);
+
+    await store.saveTxn(formToTxn({ ...txnToForm(txn), twdAmount: 2175, twdStatus: 'final' }), txn);
+    snap = await store.load();
+    expect(snap.txns).toHaveLength(1);
+    expect(snap.txns[0]).toMatchObject({ id, amount: 10000, twdAmount: 2175, twdStatus: 'final' });
+    expect(twdRate(snap.txns[0])).toBeCloseTo(0.2175);
+    const stats = monthStats(snap.txns, snap.categories, snap.accounts, day);
+    expect(stats).toMatchObject([{ currency: 'TWD', expense: 2175 }]);
+    expect(stats[0].expenseByPath.get('食 / 三餐')).toBe(663);
+    expect(stats[0].expenseByPath.get('住 / 日用品')).toBe(1512);
+    const fee = feeTxnFrom(formToTxn(txnToForm(snap.txns[0])), 33, null);
+    expect(fee).toMatchObject({ amount: 33, origCurrency: null, twdAmount: null, twdStatus: null });
+    expect(snap.issues).toEqual([]);
+  });
+
+  it('分開付款保留一筆消費，各帳戶只扣自己的款項；回饋另記收入', async () => {
+    const { backend, store } = await setup();
+    const purchase = form({ cats: [{ category: '住 / 日用品', amount: 1964 }], payments: [
+      { account: '刷卡', amount: 1882 }, { account: '點數', amount: 82 },
+    ] });
+    await expect(store.saveTxn(formToTxn({ ...purchase, payments: [{ account: '刷卡', amount: 1881 }, purchase.payments![1]] }))).rejects.toThrow('加總');
+    const id = await store.saveTxn(formToTxn(purchase));
+    const rewardId = await store.saveTxn(formToTxn(form({ mode: '收入', account: '點數', rewardFor: id, cats: [{ category: reward, amount: 20 }] })));
+    let snap = await store.load();
+    const original = snap.txns.find((t) => t.id === id)!;
+    expect(original.lines).toHaveLength(1);
+    expect(original.payments?.map((x) => x.amount)).toEqual([1882, 82]);
+    expect(accountDelta(original, '刷卡')).toBe(-1882);
+    expect(accountDelta(original, '點數')).toBe(-82);
+    const incoming = snap.txns.find((t) => t.id === rewardId)!;
+    expect(txnToForm(incoming).rewardFor).toBe(id);
+    expect(accountDelta(incoming, '點數')).toBe(20);
+    expect(moneyDayTotals(snap, day)).toEqual({ expense: 1964, income: 20 });
+
+    await store.saveTxn(formToTxn({ ...txnToForm(original), account: '刷卡', payments: [] }), original);
+    snap = await store.load();
+    expect(snap.issues).toEqual([]);
+    expect(accountDelta(snap.txns.find((t) => t.id === id)!, '刷卡')).toBe(-1964);
+    expect((await backend.read('moneyPayments')).every((r) => r.values.deletedAt != null)).toBe(true);
+  });
+
+  it('立即折價列收入，付款明細與折價後的實付金額核對', async () => {
+    const { store } = await setup();
+    await store.saveTxn(formToTxn(form({
+      cats: [{ category: '食 / 三餐', amount: 65 }],
+      counterCats: [{ category: discount, amount: 5, note: '環保杯' }],
+      payments: [{ account: '刷卡', amount: 50 }, { account: '點數', amount: 10 }],
+    })));
+    const snap = await store.load();
+    expect(snap.txns[0]).toMatchObject({ amount: 60, lines: [{ kind: '支出', amount: 65 }, { kind: '收入', amount: 5, note: '環保杯' }] });
+    expect(moneyDayTotals(snap, day)).toEqual({ expense: 65, income: 5 });
+    expect(snap.issues).toEqual([]);
   });
 });
 

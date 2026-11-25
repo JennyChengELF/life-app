@@ -5,6 +5,7 @@ import {
   unpaidStatements,
   statementPaid,
   checkTxn,
+  emptyForm,
   ENTRY_MODES,
   fmtMoney,
   formToTxn,
@@ -16,6 +17,8 @@ import {
   toDateKey,
   toHHmm,
   txnCurrency,
+  txnTitle,
+  twdRate,
   defaultBudgetFor,
   estimateFee,
   feeTxnFrom,
@@ -87,7 +90,7 @@ export function AmountInput({
 const PAID_BY = '\u0000paidBy';
 const MODE_TITLE: Record<string, string> = { 不用還了: '不用還了', 調整: '盤點調整', 其他: '交易' };
 
-export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, hideModeSwitch = false }: { api: MoneyApi; snap: MoneySnapshot; editing: Editing; onClose: () => void; onSavedDate?: (date: string) => void; onCopy?: () => void; hideModeSwitch?: boolean }) {
+export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, onEdit, hideModeSwitch = false }: { api: MoneyApi; snap: MoneySnapshot; editing: Editing; onClose: () => void; onSavedDate?: (date: string) => void; onCopy?: () => void; onEdit?: (entry: Editing) => void; hideModeSwitch?: boolean }) {
   const txn = editing.txn;
   const [f, setF] = useState<EntryForm>(() => {
     const form = txn ? txnToForm(txn) : editing.form;
@@ -95,6 +98,8 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
     return first ? { ...form, cardPaymentOrg: snap.accounts.find((a) => a.name === first)?.org ?? null } : form;
   });
   const [multiCard, setMultiCard] = useState(() => f.cardPayments.length > 0);
+  const [splitPayment, setSplitPayment] = useState(() => !!f.payments?.length);
+  const [initialForm] = useState(() => JSON.stringify(f));
   const [problems, setProblems] = useState<string[]>([]);
   const [splitTotal, setSplitTotal] = useState<number | null>(null);
   const [splitN, setSplitN] = useState(2);
@@ -122,13 +127,15 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
   };
 
   const editable = ENTRY_MODES.includes(f.mode as (typeof ENTRY_MODES)[number]) || f.mode === '不用還了';
-  const currency = txnCurrency({ account: f.account, currency: f.currency }, snap.accounts);
+  const firstAccount = splitPayment ? f.payments?.[0]?.account ?? null : f.account;
+  const currency = txnCurrency({ account: firstAccount, currency: f.currency, origCurrency: paidByMode ? null : f.origCurrency }, snap.accounts);
   const addPerson = (name: string) => api.run((s) => s.addPerson(name));
   const currencies = useMemo(() => [...new Set(['TWD', ...snap.accounts.map((a) => a.currency)])], [snap.accounts]);
 
   const switchMode = (mode: EntryForm['mode']) => {
     setAutoStoreCategory(null);
-    set({ mode, sub: mode === '還款' ? '他還我' : null, cats: [{ category: null, amount: null }], counterCats: [], shares: [], paidBy: null });
+    setSplitPayment(false);
+    set({ mode, sub: mode === '還款' ? '他還我' : null, cats: [{ category: null, amount: null }], counterCats: [], shares: [], paidBy: null, origCurrency: null, twdAmount: null, twdStatus: null, payments: [] });
   };
 
   const save = async () => {
@@ -139,6 +146,7 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
       return setProblems([e instanceof Error ? e.message : String(e)]);
     }
     const p = checkTxn(tx, snap);
+    if (splitPayment && tx.payments?.length !== f.payments?.length) p.unshift('請填好每筆付款明細，或切回單一帳戶');
     if (multiCard && !f.cardPaymentOrg) p.unshift('請選發卡機構');
     if (multiCard && !f.cardPayments.length) p.unshift('請至少勾選一期帳單');
     if (paidByMode && !f.paidBy) p.unshift('請選誰先幫你付');
@@ -261,6 +269,12 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
   /** 2026-11-21 使用者決定：支出可加收入折抵；收入可加支出扣除，帳戶只依淨額增減。 */
   const counterCatRows = (kind: '支出' | '收入') => {
     const title = kind === '收入' ? '折抵／收入項目' : '扣除／支出項目';
+    const discount = kind === '收入' ? snap.categories.find((c) => c.kind === kind && !c.archived && /(?:^| \/ )回饋收入 \/ 優惠折抵$/.test(c.path)) : null;
+    const rewardParent = kind === '收入' ? snap.categories.find((c) => c.kind === kind && !c.archived && /^(?:[^/]+ \/ )?回饋收入$/.test(c.path)) : null;
+    const addDiscount = async () => {
+      const category = discount?.path ?? (rewardParent && await api.run((store) => store.addCategory(rewardParent.path, '優惠折抵', '收入')));
+      if (category) setF((current) => ({ ...current, counterCats: [...current.counterCats, withBudget({ category, amount: null })] }));
+    };
     return (
       <div className="field">
         {f.counterCats.length > 0 && title}
@@ -295,9 +309,10 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
             </div>
           ))}
         </div>
-        <button className="chip-add" onClick={() => set({ counterCats: [...f.counterCats, { category: null, amount: null }] })}>
-          ＋ {title}
-        </button>
+        <div className="row wrap">
+          <button className="chip-add" onClick={() => set({ counterCats: [...f.counterCats, { category: null, amount: null }] })}>＋ {title}</button>
+          {(discount || rewardParent) && <button className="chip-add" disabled={api.busy} onClick={addDiscount}>{discount ? '＋ 優惠折抵' : '＋ 新增優惠折抵分類'}</button>}
+        </div>
       </div>
     );
   };
@@ -412,17 +427,29 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
   const allNoteChips = useMemo(() => noteSuggestions(snap.txns, noteCats ? noteCats.split(' ') : []), [snap.txns, noteCats]);
   const noteChips = allNoteChips.filter((x) => !(f.note ?? '').split('、').map((y) => y.trim()).includes(x));
 
-  const from = snap.accounts.find((a) => a.name === f.account);
-  const canInstall = !txn && !editing.target && f.mode === '支出' && !paidByMode && !!from;
-  const feeCard = f.mode === '支出' && !paidByMode && from?.type === '信用卡' && !(txn && isFeeTxn(txn)) ? from : null;
+  const from = snap.accounts.find((a) => a.name === firstAccount);
+  const canInstall = !txn && !editing.target && f.mode === '支出' && !paidByMode && !f.origCurrency && !splitPayment && !!from;
+  const feeCard = f.mode === '支出' && !paidByMode && !splitPayment && from?.type === '信用卡' && !(txn && isFeeTxn(txn)) ? from : null;
   // 修改舊資料：已經記過手續費的不再重複記（2026-11-18 確認）
   const existingFee = txn ? findFeeTxn(snap.txns, txn) : null;
-  const feeChanged = !!existingFee && formTotal(f) !== initTotal;
+  const feeChanged = !!existingFee && (formTotal(f) !== initTotal || f.twdAmount !== txn?.twdAmount);
   const storeOrg = f.store ? (snap.orgs.find((o) => o.name === f.store) ?? null) : null;
   const storeForeign = storeOrg ? storeOrg.foreign : newForeign;
   // 用信用卡付國外店家 → 自動勾手續費（2026-11-18）；自己改過就照自己的
-  const feeOn = feeOnState ?? (txn ? false : storeForeign);
-  const feeAmount = feeEdit ?? estimateFee(Math.max(0, formTotal(f)), feeCard?.fxFeeRate ?? null);
+  const feeBase = f.origCurrency && from?.currency === 'TWD' ? f.twdAmount : formTotal(f);
+  const feeOn = feeOnState ?? (!txn && storeForeign && feeBase != null);
+  const feeAmount = feeEdit ?? (feeBase == null ? null : estimateFee(Math.max(0, feeBase), feeCard?.fxFeeRate ?? null));
+  const rate = twdRate({ origCurrency: f.origCurrency, amount: Math.abs(formTotal(f)), twdAmount: f.twdAmount });
+  const entryCurrencies = [...new Set(['TWD', 'USD', 'JPY', 'EUR', 'KRW', 'HKD', 'CNY', 'GBP', 'AUD', 'CAD', 'SGD', 'THB', ...currencies, f.origCurrency].filter((c): c is string => !!c))];
+  const fundingRows = f.payments ?? [];
+  const fundingAmount = f.origCurrency && (from?.currency ?? 'TWD') === 'TWD' ? f.twdAmount : Math.abs(formTotal(f));
+  const linkedRewards = txn ? snap.txns.filter((x) => x.rewardFor === txn.id) : [];
+  const rewardSource = f.rewardFor ? snap.txns.find((x) => x.id === f.rewardFor) : null;
+  const rebateCategory = snap.categories.find((c) => c.kind === '收入' && !c.archived && /(?:^| \/ )回饋收入 \/ 消費回饋$/.test(c.path));
+  const switchEntry = (entry: Editing) => {
+    if (JSON.stringify(f) !== initialForm && !window.confirm('這筆修改還沒儲存，確定要切換交易嗎？')) return;
+    onEdit?.(entry);
+  };
   const to = snap.accounts.find((a) => a.name === f.toAccount);
   const backfillPreview = (() => {
     try {
@@ -504,9 +531,59 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
             }} label="時間（24 小時制）" />
           </div>
 
-          {f.mode === '支出' && (
+          {(f.mode === '支出' || f.mode === '收入') && !paidByMode && (
             <>
               <label className="field">
+                幣別
+                <select value={f.origCurrency ?? from?.currency ?? 'TWD'} onChange={(e) => set({ origCurrency: e.target.value === 'TWD' ? null : e.target.value, twdAmount: null, twdStatus: null })}>
+                  {entryCurrencies.map((c) => <option key={c} value={c} disabled={c === 'TWD' && !!from && from.currency !== 'TWD'}>{c === 'TWD' ? '新台幣 TWD' : c}</option>)}
+                </select>
+              </label>
+              {f.origCurrency && (
+                <div className="subbox">
+                  <label className="field">
+                    台幣金額
+                    <AmountInput value={f.twdAmount ?? null} onChange={(twdAmount) => set({ twdAmount, twdStatus: twdAmount == null ? 'pending' : f.twdStatus === 'final' ? 'final' : 'estimated' })} placeholder="可先留空" />
+                  </label>
+                  {f.twdAmount != null ? (
+                    <label className="field">
+                      台幣金額狀態
+                      <select value={f.twdStatus === 'final' ? 'final' : 'estimated'} onChange={(e) => set({ twdStatus: e.target.value === 'final' ? 'final' : 'estimated' })}>
+                        <option value="estimated">預估金額</option>
+                        <option value="final">實際金額</option>
+                      </select>
+                    </label>
+                  ) : <p className="hint">台幣尚未換算，確認金額後可回來補填。</p>}
+                  {rate != null && Number.isFinite(rate) && <p className="hint">{f.twdStatus === 'estimated' ? '預估換算' : '換算'} 1 {f.origCurrency} ≈ NT$ {rate.toLocaleString('en-US', { maximumSignificantDigits: 8 })}</p>}
+                </div>
+              )}
+              {splitPayment ? (
+                <div className="subbox">
+                  <div className="field">{f.mode === '支出' ? '付款明細' : '收款明細'}</div>
+                  {fundingRows.map((row, i) => (
+                    <div className="row funding-line" key={i}>
+                      <AccountSelect snap={snap} value={row.account} onChange={(account) => set({ payments: fundingRows.map((x, j) => i === j ? { ...x, account } : x) })} />
+                      <AmountInput value={row.amount} onChange={(amount) => set({ payments: fundingRows.map((x, j) => i === j ? { ...x, amount } : x) })} />
+                      {fundingRows.length > 2 && <button type="button" className="x-btn" aria-label="移除付款方式" onClick={() => set({ payments: fundingRows.filter((_, j) => i !== j) })}>✕</button>}
+                    </div>
+                  ))}
+                  <p className="hint">{fundingAmount == null ? '請先填台幣金額' : `合計 ${fmtMoney(fundingRows.reduce((sum, x) => sum + (x.amount ?? 0), 0), from?.currency)} ／ 應為 ${fmtMoney(fundingAmount, from?.currency)}`}</p>
+                  <div className="row wrap">
+                    <button type="button" className="chip-add" onClick={() => set({ payments: [...fundingRows, { account: null, amount: null }] })}>＋ 帳戶</button>
+                    <button type="button" className="link" onClick={() => { setSplitPayment(false); set({ account: firstAccount, payments: [] }); }}>改用單一帳戶</button>
+                  </div>
+                </div>
+              ) : (
+                <button type="button" className="chip-add" onClick={() => { setSplitPayment(true); set({ payments: [{ account: f.account, amount: null }, { account: null, amount: null }] }); }}>
+                  ＋ {f.mode === '支出' ? '多種付款方式' : '多個收款帳戶'}
+                </button>
+              )}
+            </>
+          )}
+
+          {f.mode === '支出' && (
+            <>
+              {!splitPayment && <label className="field">
                 付款
                 <AccountSelect
                   snap={snap}
@@ -522,7 +599,7 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
                   }}
                   extra={<option value={PAID_BY}>朋友先幫我付⋯</option>}
                 />
-              </label>
+              </label>}
               {paidByMode && (
                 <div className="row">
                   <label className="field" style={{ flex: 2 }}>
@@ -599,10 +676,10 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
               )}
               {feeCard && existingFee && (
                 <div className="subbox">
-                  <p className="small">已記國外交易手續費 {fmtMoney(existingFee.amount ?? 0, currency)}</p>
+                  <p className="small">已記國外交易手續費 {fmtMoney(existingFee.amount ?? 0, feeCard.currency)}</p>
                   {feeChanged && (
                     <p className="hint warn">
-                      金額改了，手續費那筆不會自動跟著改，記得也去改（照費率約 {fmtMoney(estimateFee(Math.max(0, formTotal(f)), feeCard.fxFeeRate ?? null), currency)}）。
+                      金額改了，請另行確認手續費金額{feeBase != null && `（照費率約 ${fmtMoney(estimateFee(Math.max(0, feeBase), feeCard.fxFeeRate ?? null), feeCard.currency)}）`}。
                     </p>
                   )}
                 </div>
@@ -626,10 +703,10 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
 
           {f.mode === '收入' && (
             <>
-              <label className="field">
+              {!splitPayment && <label className="field">
                 存入帳戶
                 <AccountSelect snap={snap} value={f.account} onChange={(v) => set({ account: v })} />
-              </label>
+              </label>}
               {storePicker('收入')}
               {catRows('收入')}
               {counterCatRows('支出')}
@@ -764,6 +841,19 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
             </div>
           )}
           <TagPicker tags={snap.sharedTags} selected={f.tagIds} busy={api.busy} onChange={(tagIds) => set({ tagIds })} onAdd={(name) => api.run((store) => store.addTag(name))} />
+          {f.rewardFor && <p className="hint">回饋來源 {rewardSource && onEdit ? <button type="button" className="link" onClick={() => switchEntry({ form: txnToForm(rewardSource), txn: rewardSource })}>{rewardSource.date}・{txnTitle(rewardSource)}{rewardSource.store ? `・${rewardSource.store}` : ''}</button> : '原消費已移除'}</p>}
+          {txn && onEdit && txn.lines.some((l) => l.kind === '支出' && l.amount > 0) && (
+            <div className="subbox">
+              {linkedRewards.length > 0 && <div className="field">已記回饋</div>}
+              {linkedRewards.map((reward) => <button type="button" className="link" key={reward.id} onClick={() => switchEntry({ form: txnToForm(reward), txn: reward })}>
+                {reward.date}・{reward.account}・{fmtMoney(reward.amount ?? 0, txnCurrency(reward, snap.accounts))}
+              </button>)}
+              <button type="button" className="chip-add" onClick={() => switchEntry({ form: {
+                ...emptyForm('收入'), rewardFor: txn.id, store: txn.store, branch: txn.branch,
+                cats: [{ category: rebateCategory?.path ?? null, amount: null }],
+              } })}>＋ 記回饋收入</button>
+            </div>
+          )}
         </>
       )}
 

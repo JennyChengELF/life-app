@@ -21,7 +21,7 @@
  * 16：共用人物增加選填姓名（2026-11-25）
  * 17：共用標籤、記帳交易新增標籤 id（2026-11-25）
  */
-export const SCHEMA_VERSION = 17;
+export const SCHEMA_VERSION = 18;
 
 export type ColType = 'datetime' | 'date' | 'number' | 'text' | 'bool' | 'any';
 
@@ -464,7 +464,7 @@ export const TABLES = {
     description: '帳戶（錢放在哪裡）。一個帳戶一種幣別。建議在 APP 裡新增；改名請在 APP 裡改（用到的紀錄會一起改）。',
     columns: [
       { name: 'name', type: 'text', label: '帳戶名稱（必填，不可重複；例：大戶 台幣活存）' },
-      { name: 'type', type: 'text', label: '類型（現金、銀行、定存、信用卡、電子支付、儲值卡、禮券，必填）' },
+      { name: 'type', type: 'text', label: '類型（現金、銀行、定存、信用卡、電子支付、儲值卡、禮券、回饋點數，必填）' },
       { name: 'currency', type: 'text', label: '幣別（TWD、USD、JPY⋯⋯；空白 = TWD）' },
       { name: 'org', type: 'text', label: '屬於哪個機構（填機構名稱，例：永豐銀行；現金可空白）' },
       { name: 'last4', type: 'text', label: '卡號 / 帳號後幾碼（選填，例：5009）' },
@@ -520,6 +520,11 @@ export const TABLES = {
       { name: 'postedDate', type: 'date', label: '入帳日（對帳時 APP 自動填）' },
       { name: 'statement', type: 'text', label: '繳卡費的轉帳：繳哪一期帳單（moneyStatements 的 id；APP 自動填）' },
       { name: 'tagIds', type: 'text', label: '共用標籤 id（多個用逗號）' },
+      { name: 'origCurrency', type: 'text', label: '外幣交易的原始幣別（例 JPY；amount 與消費明細以原幣輸入）' },
+      { name: 'twdAmount', type: 'number', label: '外幣交易換算的新台幣金額（正數，未換算時留空）' },
+      { name: 'twdStatus', type: 'text', label: '台幣金額狀態（pending、estimated、final）' },
+      { name: 'rewardFor', type: 'text', label: '回饋收入所對應的原消費交易 id' },
+      { name: 'paymentCount', type: 'number', label: '分開付款的明細筆數（APP 自動填）' },
     ],
   },
   moneyLines: {
@@ -535,6 +540,17 @@ export const TABLES = {
       { name: 'budget', type: 'text', label: '扣 / 放進哪個預算（預算功能之後做）' },
       { name: 'note', type: 'text', label: '備註' },
       { name: 'sort', type: 'number', label: '同一筆交易內的順序' },
+      ...systemCols,
+    ],
+  },
+  moneyPayments: {
+    file: 'money',
+    description: '一般交易的付款明細：各帳戶實際分攤的付款或收款金額，使用帳戶幣別。',
+    columns: [
+      { name: 'transaction', type: 'text', label: '原交易 id（必填）' },
+      { name: 'account', type: 'text', label: '付款或收款帳戶（必填）' },
+      { name: 'amount', type: 'number', label: '該帳戶的金額（必填）' },
+      { name: 'sort', type: 'number', label: '順序' },
       ...systemCols,
     ],
   },

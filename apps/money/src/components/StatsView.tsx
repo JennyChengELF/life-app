@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { MoneySnapshot } from '@life/db';
-import { categoryBreakdown, fmtMoney, monthlyTotals, monthStats, txnCurrency, txnMyNet } from '@life/db';
+import { categoryBreakdown, fmtMoney, monthlyTotals, monthStats, txnReportCurrency, txnMyNet } from '@life/db';
 import { MonthNav } from './common';
 
 const pct = (x: number) => `${(x * 100).toFixed(x >= 0.1 ? 0 : 1)}%`;
@@ -53,10 +53,14 @@ function YearNav({ year, setYear }: { year: string; setYear: (y: string) => void
 }
 
 function DailyBars({ snap, month, currency }: { snap: MoneySnapshot; month: string; currency: string }) {
-  const rows = [...new Set(snap.txns.filter((txn) => txn.date.startsWith(month) && txnCurrency(txn, snap.accounts) === currency).map((txn) => txn.date))].sort().map((date) => {
-    const txns = snap.txns.filter((txn) => txn.date === date && txnCurrency(txn, snap.accounts) === currency);
-    return { date, expense: txns.reduce((sum, txn) => sum + txnMyNet(txn).expense, 0), income: txns.reduce((sum, txn) => sum + txnMyNet(txn).income, 0) };
-  });
+  const sums = new Map<string, { expense: number; income: number }>();
+  for (const txn of snap.txns) {
+    if (!txn.date.startsWith(month) || txnReportCurrency(txn, snap.accounts) !== currency) continue;
+    const row = sums.get(txn.date) ?? { expense: 0, income: 0 };
+    const { expense, income } = txnMyNet(txn, true);
+    sums.set(txn.date, { expense: row.expense + expense, income: row.income + income });
+  }
+  const rows = [...sums.keys()].sort().map((date) => ({ date, ...sums.get(date)! }));
   const max = Math.max(1, ...rows.flatMap((row) => [row.expense, row.income]));
   if (!rows.length) return null;
   return <><h2>每日收支</h2><ul className="daily-bars">{rows.map((row) => <li key={row.date}><span>{Number(row.date.slice(8))} 日</span><span className="month-bars"><i className="out" style={{ width: `${row.expense / max * 100}%` }} /><i className="in" style={{ width: `${row.income / max * 100}%` }} /></span><span className="num">{fmtMoney(row.expense, currency, false)} / {fmtMoney(row.income, currency, false)}</span></li>)}</ul><p className="hint">上排是支出，下排是收入。</p></>;

@@ -61,6 +61,8 @@ select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .editor-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; align-items: center; }
 .editor-actions .spacer { flex: 1; }
 .subbox { background: var(--bg); border-radius: 10px; padding: 10px; margin-bottom: 10px; }
+.funding-line { margin-bottom: 6px; }
+.funding-line select { flex: 2; min-width: 0; }
 .card-payment-row { border-top: 1px solid var(--line); padding: 10px 2px; }
 .card-payment-check { align-items: flex-start; margin-bottom: 3px; }
 .card-payment-check span { display: flex; flex-direction: column; gap: 1px; }

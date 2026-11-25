@@ -6,7 +6,7 @@ import { AccountSelect, PersonSelect } from './common';
 import { CategoryPicker } from './CategoryPicker';
 import { BudgetSelect } from './BudgetSelect';
 
-const TABLE_LABEL: Record<string, string> = { moneyTransactions: '交易', moneyLines: '明細', moneyAccounts: '帳戶', moneyCategories: '分類', hubPeople: '人物', hubOrganizations: '機構' };
+const TABLE_LABEL: Record<string, string> = { moneyTransactions: '交易', moneyLines: '明細', moneyPayments: '付款明細', moneyAccounts: '帳戶', moneyCategories: '分類', hubPeople: '人物', hubOrganizations: '機構' };
 /** 試算表的日期時間是序號（例 46343.71）→ 顯示成看得懂的 */
 const TIME_COLS = ['time', 'createdAt', 'updatedAt', 'deletedAt', 'date', 'openingDate', 'expiryDate'];
 const show = (k: string, v: unknown) => {

@@ -19,7 +19,7 @@ export const canReconcile = (acc: Pick<Account, 'type'>) => RECONCILE_TYPES.incl
 
 /** 這筆交易在帳單上的金額（照帳單的正負）；和這個帳戶無關 → 0 */
 export function stmtAmount(t: Txn, acc: Pick<Account, 'name' | 'type' | 'currency'>): number {
-  const d = accountDelta(t, acc.name);
+  const d = accountDelta(t, acc.name, acc.currency);
   return roundMoney(acc.type === '信用卡' ? -d : d, acc.currency);
 }
 

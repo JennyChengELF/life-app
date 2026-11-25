@@ -13,7 +13,7 @@ import { addSharedTag, loadSharedTags, readTagIds, writeTagIds, type SharedTag }
 
 // ───────────── 選項 ─────────────
 
-export const ACCOUNT_TYPES = ['現金', '銀行', '定存', '信用卡', '電子支付', '儲值卡', '禮券'] as const;
+export const ACCOUNT_TYPES = ['現金', '銀行', '定存', '信用卡', '電子支付', '儲值卡', '禮券', '回饋點數'] as const;
 export type AccountType = (typeof ACCOUNT_TYPES)[number];
 export const DIRECTIONS = ['出', '入', '轉帳'] as const;
 export type Direction = (typeof DIRECTIONS)[number];
@@ -128,6 +128,19 @@ export interface CardPayment extends RowRef {
   sort: number | null;
 }
 
+export type TwdStatus = 'pending' | 'estimated' | 'final';
+
+export interface PaymentInput {
+  account: string | null;
+  amount: number | null;
+}
+
+export interface Payment extends RowRef {
+  account: string;
+  amount: number;
+  sort: number | null;
+}
+
 export interface TxnInput {
   time: number;
   direction: Direction | null;
@@ -146,13 +159,18 @@ export interface TxnInput {
   note: string | null;
   tagIds: string[];
   lines: LineInput[];
+  origCurrency?: string | null;
+  twdAmount?: number | null;
+  twdStatus?: TwdStatus | null;
+  rewardFor?: string | null;
+  payments?: PaymentInput[];
   /** 同一家發卡機構的多卡／多期繳款分配；有值時不用 toAccount。 */
   cardPayments?: CardPaymentInput[];
   /** 繳卡費的轉帳：繳哪一期帳單（帳單 id）；undefined = 不改 */
   statement?: string | null;
 }
 
-export interface Txn extends RowRef, Omit<TxnInput, 'lines' | 'statement' | 'cardPayments'> {
+export interface Txn extends RowRef, Omit<TxnInput, 'lines' | 'statement' | 'cardPayments' | 'payments'> {
   date: string;
   /** 入帳日（對帳時填） */
   postedDate: string | null;
@@ -161,6 +179,7 @@ export interface Txn extends RowRef, Omit<TxnInput, 'lines' | 'statement' | 'car
   createdVia: string | null;
   lines: Line[];
   cardPayments: CardPayment[];
+  payments?: Payment[];
 }
 
 export interface MoneyIssue {
@@ -701,7 +720,7 @@ function toCardPayment(r: TableRow): CardPayment {
   };
 }
 
-function toTxn(r: TableRow, lines: Line[], cardPayments: CardPayment[] = []): Txn {
+function toTxn(r: TableRow, lines: Line[], cardPayments: CardPayment[] = [], payments: Payment[] = []): Txn {
   const v = r.values;
   return {
     rowNumber: r.rowNumber,
@@ -723,8 +742,13 @@ function toTxn(r: TableRow, lines: Line[], cardPayments: CardPayment[] = []): Tx
     createdVia: str(v.createdVia),
     postedDate: str(v.postedDate),
     statement: str(v.statement),
+    origCurrency: str(v.origCurrency)?.toUpperCase() ?? null,
+    twdAmount: num(v.twdAmount),
+    twdStatus: str(v.twdStatus) as TwdStatus | null,
+    rewardFor: str(v.rewardFor),
     lines,
     cardPayments,
+    payments,
   };
 }
 
@@ -740,9 +764,31 @@ export interface MoneyRefs {
 export const accountLabel = (a: Pick<Account, 'name' | 'last4'>) => (a.last4 ? `${a.name}（${a.last4}）` : a.name);
 
 /** 這筆交易的幣別：有帳戶看帳戶，沒帳戶看交易自己填的（空白 = TWD） */
-export function txnCurrency(t: Pick<TxnInput, 'account' | 'currency'>, accounts: Pick<Account, 'name' | 'currency'>[]): string {
+export function txnCurrency(t: Pick<TxnInput, 'account' | 'currency' | 'origCurrency'>, accounts: Pick<Account, 'name' | 'currency'>[]): string {
   const a = t.account ? accounts.find((x) => x.name === t.account) : null;
-  return a?.currency ?? t.currency ?? 'TWD';
+  return t.origCurrency ?? a?.currency ?? t.currency ?? 'TWD';
+}
+
+/** （2026-11-25 使用者決定：匯率由原幣金額與台幣金額計算。） */
+export function twdRate(t: Pick<TxnInput, 'origCurrency' | 'amount' | 'twdAmount'>): number | null {
+  return t.origCurrency && t.amount && t.twdAmount != null && Number.isFinite(t.twdAmount) ? t.twdAmount / t.amount : null;
+}
+
+export function txnReportCurrency(t: Txn, accounts: Pick<Account, 'name' | 'currency'>[]): string {
+  return twdRate(t) != null ? 'TWD' : txnCurrency(t, accounts);
+}
+
+/** 換算後的明細以交易順序分配四捨五入差額，保留原幣明細。 */
+export function txnReportLines(t: Txn): Line[] {
+  const rate = twdRate(t);
+  if (rate == null) return t.lines;
+  let total = 0;
+  return t.lines.map((line) => {
+    const sign = ['收入', '我欠他', '他還我'].includes(line.kind) ? -1 : 1;
+    const before = roundMoney(total * rate);
+    total += line.amount * sign;
+    return { ...line, amount: sign * (roundMoney(total * rate) - before) };
+  });
 }
 
 /**
@@ -772,6 +818,39 @@ export function checkTxn(t: Omit<TxnInput, 'tagIds'> & { tagIds?: string[] }, re
   const accName = (n: string | null) => n != null && refs.accounts.some((a) => a.name === n);
   const cur = txnCurrency(t, refs.accounts);
   const intOk = (n: number) => currencyDigits(cur) > 0 || Number.isInteger(n);
+  const accCur = refs.accounts.find((a) => a.name === t.account)?.currency ?? cur;
+  const payments = t.payments ?? [];
+
+  if (t.origCurrency) {
+    if (!/^[A-Z]{3}$/.test(t.origCurrency) || t.origCurrency === 'TWD') p.push('原始幣別請填三個英文字母（例：JPY、USD）');
+    if (t.direction !== '出' && t.direction !== '入') p.push('原幣金額適用於支出與收入');
+    if (accCur !== 'TWD' && accCur !== cur) p.push('請選新台幣或與原始幣別相同的帳戶');
+    if (t.twdAmount != null && (!Number.isInteger(t.twdAmount) || t.twdAmount <= 0 || !t.amount)) p.push('換算台幣金額請填正整數，原幣淨額須大於 0');
+    if (t.twdAmount == null ? t.twdStatus != null && t.twdStatus !== 'pending' : t.twdStatus !== 'estimated' && t.twdStatus !== 'final') {
+      p.push('請確認台幣金額是尚未換算、預估或實際金額');
+    }
+  } else if (t.twdAmount != null || t.twdStatus) p.push('請先填原始幣別');
+
+  if (t.rewardFor && (t.direction !== '入' || !t.lines.length || t.lines.some((l) => l.kind !== '收入' || l.amount <= 0))) p.push('回饋請記為一筆正金額的收入');
+
+  // （2026-11-25 使用者決定：付款與消費明細平行，付款加總需等於帳戶實際增減。）
+  if (payments.length) {
+    if (t.direction !== '出' && t.direction !== '入') p.push('付款明細適用於支出與收入');
+    if (payments[0].account !== t.account) p.push('第一筆付款明細須與交易帳戶相同');
+    const seen = new Set<string>();
+    let total = 0;
+    for (const x of payments) {
+      const account = refs.accounts.find((a) => a.name === x.account);
+      if (!account) p.push('每筆付款明細都要選帳戶');
+      else if (account.currency !== accCur) p.push(`付款明細的帳戶幣別應為 ${accCur}`);
+      if (x.account && seen.has(x.account)) p.push('相同帳戶的付款金額請合併');
+      if (x.account) seen.add(x.account);
+      if (x.amount == null || !Number.isFinite(x.amount) || x.amount <= 0 || roundMoney(x.amount, accCur) !== x.amount) p.push(`付款明細請填有效的 ${accCur} 正數金額`);
+      else total += x.amount;
+    }
+    const expected = t.origCurrency && accCur === 'TWD' ? t.twdAmount : t.amount;
+    if (expected == null || !same(total, expected)) p.push('付款明細加總須等於實際付款或收款金額');
+  }
 
   // 2026-11-21 使用者決定：一般支出／收入可以明確記 0；淨額為 0 時帳戶可留空。
   // 空白金額會在 formToTxn 轉成 NaN，因此仍和「輸入 0」分得出來。
@@ -893,9 +972,11 @@ function checkSimple(r: TableRow, need: string, label: string, names: Set<string
 // ───────────── 計算 ─────────────
 
 /** 錢的方向：帳戶的錢 +多 / −少 */
-export function accountDelta(t: Pick<Txn, 'account' | 'amount' | 'direction' | 'toAccount' | 'toAmount' | 'cardPayments'>, name: string): number {
+export function accountDelta(t: Pick<Txn, 'account' | 'amount' | 'direction' | 'toAccount' | 'toAmount' | 'cardPayments' | 'payments' | 'origCurrency' | 'twdAmount'>, name: string, currency = 'TWD'): number {
+  const sign = t.direction === '入' ? 1 : -1;
+  if (t.payments?.length) return sign * t.payments.filter((x) => x.account === name).reduce((n, x) => n + x.amount, 0);
   let d = 0;
-  if (t.account === name && t.amount != null) d += t.direction === '入' ? t.amount : -t.amount;
+  if (t.account === name) d += sign * ((t.origCurrency && currency === 'TWD' ? t.twdAmount : t.amount) ?? 0);
   if (t.direction === '轉帳') {
     if (t.cardPayments.length) d += t.cardPayments.filter((x) => x.account === name).reduce((n, x) => n + x.amount, 0);
     else if (t.toAccount === name) d += t.toAmount ?? t.amount ?? 0;
@@ -913,7 +994,7 @@ export function accountBalance(acc: Account, txns: Txn[], upTo?: string): number
   for (const t of txns) {
     if (t.date <= acc.openingDate) continue;
     if (upTo && t.date > upTo) continue;
-    bal += accountDelta(t, acc.name);
+    bal += accountDelta(t, acc.name, acc.currency);
   }
   return roundMoney(bal, acc.currency);
 }
@@ -1012,8 +1093,8 @@ export function monthStats(txns: Txn[], categories: Pick<Category, 'path' | 'isI
   const by = new Map<string, MonthStats & { _e: Map<string, number>; _i: Map<string, number> }>();
   for (const t of txns) {
     if (!t.date.startsWith(month) || isRecordOnlyTxn(t)) continue;
-    const cur = txnCurrency(t, accounts);
-    for (const l of t.lines) {
+    const cur = txnReportCurrency(t, accounts);
+    for (const l of txnReportLines(t)) {
       if (l.kind !== '支出' && l.kind !== '收入') continue;
       const s = by.get(cur) ?? { currency: cur, income: 0, expense: 0, realIncome: 0, realExpense: 0, expenseByTop: [], incomeByTop: [], expenseByPath: new Map(), incomeByPath: new Map(), _e: new Map(), _i: new Map() };
       const real = !invest.has(l.category ?? '');
@@ -1054,6 +1135,11 @@ export interface EntryForm {
   paidBy: string | null;
   /** 沒帳戶時的幣別 */
   currency: string | null;
+  origCurrency?: string | null;
+  twdAmount?: number | null;
+  twdStatus?: TwdStatus | null;
+  rewardFor?: string | null;
+  payments?: PaymentInput[];
   /** 我的部分：分類＋金額（支出 / 收入可拆成好幾筆） */
   cats: { category: string | null; amount: number | null; note?: string | null; budget?: string | null }[];
   /**
@@ -1122,6 +1208,12 @@ export const cardPaymentTotal = (f: Pick<EntryForm, 'cardPayments'>) => sum(f.ca
 /** 表單 → 要存的交易（不檢查；存之前用 checkTxn 檢查） */
 export function formToTxn(f: EntryForm): TxnInput {
   const base = { time: f.time, store: f.store?.trim() || null, branch: f.store?.trim() ? f.branch?.trim() || null : null, statementText: f.statementText?.trim() || null, note: f.note?.trim() || null, tagIds: f.tagIds, toAccount: null, toAmount: null, paidBy: null, currency: null };
+  const origCurrency = f.origCurrency?.trim().toUpperCase();
+  const exchange = origCurrency && origCurrency !== 'TWD'
+    ? { origCurrency, twdAmount: f.twdAmount ?? null, twdStatus: f.twdAmount == null ? 'pending' as const : f.twdStatus ?? null }
+    : {};
+  const payments = f.payments?.filter((x) => x.account || x.amount != null) ?? [];
+  const funding = { ...exchange, payments, account: payments.length ? payments[0].account : f.account };
   const cats = (items: EntryForm['cats'], kind: '支出' | '收入'): LineInput[] =>
     items
       .filter((c) => c.category || c.amount != null)
@@ -1147,8 +1239,8 @@ export function formToTxn(f: EntryForm): TxnInput {
       const total = formTotal(f);
       return {
         ...base,
+        ...funding,
         direction: total < 0 ? '入' : '出',
-        account: f.account,
         amount: Math.abs(total),
         lines: [...cats(f.cats, '支出'), ...cats(f.counterCats, '收入'), ...shareLines('他欠我')],
       };
@@ -1157,8 +1249,9 @@ export function formToTxn(f: EntryForm): TxnInput {
       const total = formTotal(f);
       return {
         ...base,
+        ...funding,
         direction: total < 0 ? '出' : '入',
-        account: f.account,
+        rewardFor: f.rewardFor,
         amount: Math.abs(total),
         lines: [...cats(f.cats, '收入'), ...cats(f.counterCats, '支出'), ...shareLines('我欠他')],
       };
@@ -1225,6 +1318,11 @@ export function feeTxnFrom(purchase: TxnInput, fee: number, bank: string | null)
     ...purchase,
     direction: '出',
     amount: fee,
+    origCurrency: null,
+    twdAmount: null,
+    twdStatus: null,
+    payments: [],
+    rewardFor: null,
     store: bank,
     branch: null,
     statementText: null,
@@ -1266,6 +1364,7 @@ export const estimateFee = (amount: number, ratePct: number | null) => Math.roun
  */
 export function installmentTxns(tx: TxnInput, n: number, accounts: Pick<Account, 'name' | 'currency'>[]): TxnInput[] {
   if (!Number.isInteger(n) || n < 2 || n > 60) throw new Error('分期期數請填 2–60');
+  if (tx.origCurrency || tx.payments?.length) throw new Error('分期請使用單一帳戶幣別與付款帳戶');
   const cur = txnCurrency(tx, accounts);
   const parts = tx.lines.map((l) => splitEven(l.amount, n, 0, cur));
   const date = toDateKey(tx.time);
@@ -1287,6 +1386,11 @@ export function installmentTxns(tx: TxnInput, n: number, accounts: Pick<Account,
 /** 交易 → 表單（看不出是哪一種的 → mode「其他」，畫面只能刪除或到試算表改） */
 export function txnToForm(t: Txn): EntryForm {
   const f: EntryForm = { ...emptyForm('其他', t.time), store: t.store, branch: t.branch, statementText: t.statementText, note: t.note, tagIds: t.tagIds, account: t.account, currency: t.currency, cats: [] };
+  f.origCurrency = t.origCurrency;
+  f.twdAmount = t.twdAmount;
+  f.twdStatus = t.twdStatus;
+  f.rewardFor = t.rewardFor;
+  f.payments = t.payments?.map(({ account, amount }) => ({ account, amount }));
   const L = t.lines;
   const only = (...kinds: LineKind[]) => L.length > 0 && L.every((l) => kinds.includes(l.kind));
   const has = (kind: LineKind) => L.some((l) => l.kind === kind);
@@ -1363,7 +1467,10 @@ export function canCopyTxn(t: Txn): boolean {
  */
 export function copyTxnForm(t: Txn, time: number): EntryForm {
   if (!canCopyTxn(t)) throw new Error('這筆是系統產生的交易，不能複製');
-  return { ...txnToForm(t), time, statement: null, statementText: null, tagIds: [] };
+  const f = txnToForm(t);
+  // 多筆外幣付款金額取自原入帳，複製時回到單一帳戶、等待新的台幣金額。
+  return { ...f, time, statement: null, statementText: null, tagIds: [], rewardFor: null,
+    ...(f.origCurrency ? { twdAmount: null, twdStatus: 'pending' as const, payments: [] } : {}) };
 }
 
 /** 一筆交易的標題（例：食 / 三餐、轉帳 → 悠遊卡、借給 小明） */
@@ -1402,11 +1509,11 @@ export function isRecordOnlyTxn(t: Pick<Txn, 'amount' | 'lines'>): boolean {
 }
 
 /** 這筆交易「我」的收支（列表顯示用）：支出 − 收入（正 = 花錢） */
-export function txnMyNet(t: Txn): { expense: number; income: number } {
+export function txnMyNet(t: Txn, converted = false): { expense: number; income: number } {
   if (isRecordOnlyTxn(t)) return { expense: 0, income: 0 };
   let expense = 0;
   let income = 0;
-  for (const l of t.lines) {
+  for (const l of converted ? txnReportLines(t) : t.lines) {
     if (l.kind === '支出') expense += l.amount;
     if (l.kind === '收入') income += l.amount;
   }
@@ -1434,12 +1541,13 @@ export class MoneyStore {
   }
 
   private async loadNow(now: number): Promise<MoneySnapshot> {
-    const [accRows, catRows, txRows, lineRows, cardPaymentRows, peopleRows, orgRows, setRows, budgetRows, allocRows, depRows, stmtRows, itemRows, checkRows, sharedTags] = await Promise.all([
+    const [accRows, catRows, txRows, lineRows, cardPaymentRows, paymentRows, peopleRows, orgRows, setRows, budgetRows, allocRows, depRows, stmtRows, itemRows, checkRows, sharedTags] = await Promise.all([
       this.b.read('moneyAccounts'),
       this.b.read('moneyCategories'),
       this.b.read('moneyTransactions'),
       this.b.read('moneyLines'),
       this.b.read('moneyCardPayments'),
+      this.b.read('moneyPayments'),
       this.b.read('hubPeople'),
       this.b.read('hubOrganizations'),
       this.b.read('moneySettings'),
@@ -1561,6 +1669,20 @@ export class MoneyStore {
       ensureId('moneyCardPayments', r);
       cardPaymentsByTx.set(tx!, [...(cardPaymentsByTx.get(tx!) ?? []), { row: r, payment: toCardPayment(r) }]);
     }
+    const paymentsByTx = new Map<string, { row: TableRow; payment: Payment }[]>();
+    for (const r of paymentRows) {
+      if (!isLive(r)) continue;
+      const transaction = str(r.values.transaction);
+      const account = str(r.values.account);
+      const amount = num(r.values.amount);
+      if (!transaction || !account || amount == null || amount <= 0) {
+        issue('moneyPayments', r, ['付款明細須填交易、帳戶與正數金額']);
+      }
+      if (!transaction) continue;
+      const id = ensureId('moneyPayments', r);
+      const payment = { id, rowNumber: r.rowNumber, account: account ?? '', amount: amount ?? NaN, sort: num(r.values.sort) };
+      paymentsByTx.set(transaction, [...(paymentsByTx.get(transaction) ?? []), { row: r, payment }]);
+    }
     const refs: MoneyRefs = { accounts, categories, people };
     const txns: Txn[] = [];
     const usedTx = new Set<string>();
@@ -1573,7 +1695,7 @@ export class MoneyStore {
         issue('moneyTransactions', r, [r.errors.includes('time') ? '時間格式看不懂（例：2026/11/18 12:30）' : '沒有填時間']);
         continue;
       }
-      const bad = ['amount', 'toAmount', 'postedDate'].filter((k) => r.errors.includes(k));
+      const bad = ['amount', 'toAmount', 'postedDate', 'twdAmount', 'paymentCount'].filter((k) => r.errors.includes(k));
       if (bad.length) {
         issue('moneyTransactions', r, bad.map((k) => `${k} 格式看不懂`));
         continue;
@@ -1586,7 +1708,8 @@ export class MoneyStore {
       usedTx.add(id);
       const lines = (linesByTx.get(id) ?? []).map((x) => x.line).sort(bySort);
       const cardPayments = (cardPaymentsByTx.get(id) ?? []).map((x) => x.payment).sort(bySort);
-      const t = toTxn(r, lines, cardPayments);
+      const payments = (paymentsByTx.get(id) ?? []).map((x) => x.payment).sort(bySort);
+      const t = toTxn(r, lines, cardPayments, payments);
       // 試算表直接填負數 = 退款（2026-11-18 使用者要求）：出 −3065 就是入 3065
       if ((t.direction === '出' || t.direction === '入') && t.amount != null && t.amount < 0) {
         t.direction = t.direction === '出' ? '入' : '出';
@@ -1616,6 +1739,8 @@ export class MoneyStore {
         }
       }
       const p = dir && !has(DIRECTIONS, dir) ? [`direction「${dir}」看不懂（請填：出、入、轉帳）`] : checkTxn(t, refs, { allowNoCategory: true });
+      const paymentCount = num(r.values.paymentCount);
+      if (paymentCount != null && paymentCount !== payments.length) p.unshift(`付款明細應有 ${paymentCount} 筆，目前有 ${payments.length} 筆`);
       if (quickCat && !categories.some((x) => x.path === quickCat)) p.unshift(`分類「${quickCat}」不在分類清單裡（請在「🏷️ 分類」新增，或改成清單裡的名稱）`);
       if (p.length) {
         // 沒有明細：準備「在 APP 裡補完」的表單（試算表填的負數照原樣 = 退款）
@@ -1625,6 +1750,11 @@ export class MoneyStore {
           draft = {
             ...emptyForm(dir === '入' ? '收入' : '支出', t.time),
             account: t.account,
+            origCurrency: t.origCurrency,
+            twdAmount: t.twdAmount,
+            twdStatus: t.twdStatus,
+            rewardFor: t.rewardFor,
+            payments: t.payments,
             store: t.store,
             branch: t.branch,
             statementText: t.statementText,
@@ -1635,7 +1765,7 @@ export class MoneyStore {
         }
         issue('moneyTransactions', r, p, draft);
         // 只缺分類（沒有其他問題）→ 可以整批補分類
-        if (draft && p.every((m) => m.startsWith('沒有分類') || m.startsWith('分類「'))) issues[issues.length - 1].needsCategory = draft.mode === '收入' ? '收入' : '支出';
+        if (draft && !t.origCurrency && !t.payments?.length && !t.rewardFor && p.every((m) => m.startsWith('沒有分類') || m.startsWith('分類「'))) issues[issues.length - 1].needsCategory = draft.mode === '收入' ? '收入' : '支出';
         continue;
       }
       txns.push(t);
@@ -1651,6 +1781,10 @@ export class MoneyStore {
     for (const [tx, xs] of cardPaymentsByTx) {
       if (usedTx.has(tx)) continue;
       for (const { row } of xs) issue('moneyCardPayments', row, [`找不到銀行扣款交易「${tx}」`]);
+    }
+    for (const [tx, xs] of paymentsByTx) {
+      if (usedTx.has(tx)) continue;
+      for (const { row } of xs) issue('moneyPayments', row, [`找不到交易「${tx}」`]);
     }
 
     for (const [t, us] of fixes) await this.b.update(t, us);
@@ -1826,6 +1960,9 @@ export class MoneyStore {
     const snap = await this.fresh();
     const p = checkTxn(input, { ...snap, statements: snap.statements });
     if (p.length) throw new Error(p.join('；'));
+    if (input.rewardFor && input.rewardFor !== existing?.rewardFor && !snap.txns.some((t) => t.id === input.rewardFor && t.id !== existing?.id && t.lines.some((l) => l.kind === '支出' && l.amount > 0))) {
+      throw new Error('找不到這筆回饋對應的原消費');
+    }
     if (input.store && !snap.orgs.some((o) => o.name === input.store)) await this.addOrg(input.store);
     const now = Date.now();
     const cur = txnCurrency(input, snap.accounts);
@@ -1847,6 +1984,11 @@ export class MoneyStore {
       statementText: input.statementText,
       note: input.note,
       tagIds: writeTagIds(input.tagIds),
+      origCurrency: input.origCurrency ?? null,
+      twdAmount: input.twdAmount ?? null,
+      twdStatus: input.origCurrency ? input.twdStatus ?? 'pending' : null,
+      rewardFor: input.rewardFor ?? null,
+      paymentCount: input.payments?.length || null,
       updatedAt: now,
     };
     // 繳哪一期：只有轉到信用卡才留
@@ -1873,6 +2015,9 @@ export class MoneyStore {
       updatedAt: now,
     });
     const payments = input.cardPayments ?? [];
+    const funding = input.payments ?? [];
+    const fundingValues = (x: PaymentInput, i: number): RowValues => ({ account: x.account, amount: x.amount, sort: i + 1, updatedAt: now });
+    const appendFunding = (id: string, start: number) => funding.slice(start).map((x, i) => ({ ...fundingValues(x, start + i), transaction: id, id: newId(now), createdAt: now }));
 
     if (!existing) {
       const id = newId(now);
@@ -1889,6 +2034,7 @@ export class MoneyStore {
           payments.map((x, i) => ({ ...paymentValues(x, i), transaction: id, id: newId(now), createdAt: now })),
         );
       }
+      if (funding.length) await this.b.append('moneyPayments', appendFunding(id, 0));
       return id;
     }
     // 修改：先寫交易（確認那一列還是這筆），再更新明細
@@ -1916,6 +2062,13 @@ export class MoneyStore {
     for (const old of oldPayments.slice(payments.length)) paymentUpdates.push({ rowNumber: old.rowNumber, values: { deletedAt: now, updatedAt: now }, expectId: old.id });
     if (paymentUpdates.length) await this.b.update('moneyCardPayments', paymentUpdates);
     if (paymentAppends.length) await this.b.append('moneyCardPayments', paymentAppends);
+    const oldFunding = existing.payments ?? [];
+    if (oldFunding.length) await this.b.update('moneyPayments', oldFunding.map((x, i) => ({
+      rowNumber: x.rowNumber,
+      values: i < funding.length ? fundingValues(funding[i], i) : { deletedAt: now, updatedAt: now },
+      expectId: x.id,
+    })));
+    if (funding.length > oldFunding.length) await this.b.append('moneyPayments', appendFunding(existing.id, oldFunding.length));
     return existing.id;
   }
 
@@ -1923,6 +2076,7 @@ export class MoneyStore {
   async deleteTxn(t: Txn) {
     const now = Date.now();
     await this.b.update('moneyTransactions', [{ rowNumber: t.rowNumber, values: { deletedAt: now, updatedAt: now }, expectId: t.id }]);
+    if (t.payments?.length) await this.b.update('moneyPayments', t.payments.map((x) => ({ rowNumber: x.rowNumber, values: { deletedAt: now, updatedAt: now }, expectId: x.id })));
     if (t.lines.length) {
       await this.b.update(
         'moneyLines',
@@ -1947,7 +2101,7 @@ export class MoneyStore {
     if (!has(ACCOUNT_TYPES, input.type)) throw new Error('請選帳戶類型');
     const currency = (input.currency.trim() || 'TWD').toUpperCase();
     if (!/^[A-Z]{3}$/.test(currency)) throw new Error('幣別請填 3 個英文字母（例：TWD、USD、JPY）');
-    if (existing && existing.currency !== currency && snap.txns.some((t) => t.account === existing.name || t.toAccount === existing.name || t.cardPayments.some((x) => x.account === existing.name))) {
+    if (existing && existing.currency !== currency && snap.txns.some((t) => t.account === existing.name || t.toAccount === existing.name || t.cardPayments.some((x) => x.account === existing.name) || t.payments?.some((x) => x.account === existing.name))) {
       throw new Error('這個帳戶已經有紀錄，不能改幣別');
     }
     if ((input.openingDate == null) !== (input.openingBalance == null)) throw new Error('期初餘額的日期和金額要一起填（或都不填）');
@@ -2009,6 +2163,7 @@ export class MoneyStore {
       await rename('moneyStatementItems', snap.statementItems);
       await rename('moneyBalanceChecks', snap.balanceChecks);
       await rename('moneyDeposits', snap.deposits);
+      await rename('moneyPayments', snap.txns.flatMap((t) => t.payments ?? []));
       const paymentUs = snap.txns
         .flatMap((t) => t.cardPayments)
         .filter((x) => x.account === from)

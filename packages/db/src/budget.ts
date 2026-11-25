@@ -6,7 +6,7 @@
  * - 第一版只算新台幣（外幣換算之後再做）
  */
 import type { Allocation, Budget, Line, MoneySnapshot, Txn, TxnInput } from './money';
-import { isRecordOnlyTxn, personBalances, txnCurrency } from './money';
+import { isRecordOnlyTxn, personBalances, txnCurrency, txnReportCurrency, txnReportLines } from './money';
 import { addDays, startOfDay, toDateKey } from './time';
 
 const monthStart = (m: string) => `${m}-01`;
@@ -71,8 +71,8 @@ export function backfillBudgetNames(snap: MoneySnapshot, tx: Pick<TxnInput, 'tim
 function twdLines(snap: MoneySnapshot): { txn: Txn; line: Line }[] {
   const out: { txn: Txn; line: Line }[] = [];
   for (const t of snap.txns) {
-    if (txnCurrency(t, snap.accounts) !== 'TWD' || isRecordOnlyTxn(t)) continue;
-    for (const l of t.lines) if (l.kind === '支出' || l.kind === '收入') out.push({ txn: t, line: l });
+    if (txnReportCurrency(t, snap.accounts) !== 'TWD' || isRecordOnlyTxn(t)) continue;
+    for (const l of txnReportLines(t)) if (l.kind === '支出' || l.kind === '收入') out.push({ txn: t, line: l });
   }
   return out;
 }

@@ -13,7 +13,7 @@ import { bowelSummary, judgeBowel } from './bowel';
 import type { WaterSnapshot } from './water';
 import { computeGoal, drinkOf, goalWeight } from './water';
 import type { MoneySnapshot } from './money';
-import { fmtMoney, isRecordOnlyTxn, txnCurrency, txnMyNet, txnTitle } from './money';
+import { fmtMoney, isRecordOnlyTxn, txnCurrency, txnMyNet, txnReportCurrency, txnTitle } from './money';
 
 /** 點一列要修改的是哪一筆 */
 export type EntryRef =
@@ -201,7 +201,8 @@ export function moneyEntries(snap: MoneySnapshot, date: string): TimelineEntry[]
           ? t.cardPayments.length
             ? `${t.account} → ${[...new Set(t.cardPayments.map((x) => x.account))].join('、')}`
             : `${t.account} → ${t.toAccount}`
-          : (t.account ?? (t.paidBy ? `${t.paidBy} 先付` : null)),
+          : (t.payments?.map((x) => x.account).join('＋') || t.account || (t.paidBy ? `${t.paidBy} 先付` : null)),
+        t.origCurrency ? (t.twdAmount == null ? '台幣待確認' : `${t.twdStatus === 'estimated' ? '預估 ' : ''}${fmtMoney(t.twdAmount)}`) : null,
       ]
         .filter(Boolean)
         .join('・');
@@ -223,8 +224,8 @@ export function moneyDayTotals(snap: MoneySnapshot, date: string): { expense: nu
   let expense = 0;
   let income = 0;
   for (const t of snap.txns) {
-    if (t.date !== date || txnCurrency(t, snap.accounts) !== 'TWD') continue;
-    const n = txnMyNet(t);
+    if (t.date !== date || txnReportCurrency(t, snap.accounts) !== 'TWD') continue;
+    const n = txnMyNet(t, true);
     expense += n.expense;
     income += n.income;
   }

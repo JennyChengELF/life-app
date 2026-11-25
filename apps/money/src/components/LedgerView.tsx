@@ -16,6 +16,7 @@ export function TxAmount({ t, snap }: { t: Txn; snap: MoneySnapshot }) {
   const cur = txnCurrency(t, snap.accounts);
   const { expense, income } = txnMyNet(t);
   const total = t.amount ?? 0;
+  const local = t.origCurrency && (t.twdAmount == null ? '台幣待確認' : `${t.twdStatus === 'estimated' ? '預估 ' : ''}${fmtMoney(t.twdAmount)}`);
   if (expense || income) {
     const net = income - expense;
     const paid = t.direction === '出' && total !== expense ? `付 ${fmtMoney(total, cur)}` : null;
@@ -24,6 +25,7 @@ export function TxAmount({ t, snap }: { t: Txn; snap: MoneySnapshot }) {
         {net < 0 ? '−' : '+'}
         {fmtMoney(Math.abs(net), cur)}
         {paid && <small>{paid}</small>}
+        {local && <small>{local}</small>}
       </div>
     );
   }
@@ -84,6 +86,7 @@ function TxBadges({ t }: { t: Txn }) {
 export function subText(t: Txn, tags: SharedTag[], withBadges = true) {
   const parts: string[] = [];
   if (t.direction === '轉帳') parts.push(t.cardPayments.length ? `${t.account} → ${[...new Set(t.cardPayments.map((x) => x.account))].join('、')}` : `${t.account} → ${t.toAccount}`);
+  else if (t.payments?.length) parts.push(t.payments.map((x) => x.account).join('＋'));
   else if (t.account) parts.push(t.account);
   if (t.paidBy) parts.push(`${t.paidBy} 先付`);
   // 有分類又有人物 → 註明人物（只有人物時標題已經寫了；列表用小標籤顯示）
