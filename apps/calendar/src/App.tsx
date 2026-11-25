@@ -467,8 +467,36 @@ function EventForm({ snap, event, initialDate, parentId, busy, hideStartDate = f
     {parentError && <p className="form-error">{parentError}</p>}
     <label className="field">標題<input value={form.title} onChange={(e) => set('title', e.target.value)} placeholder="可以先留空，會顯示未命名行程" /></label>
     <div className="type-choice">{([['range', '時段'], ['point', '時間點'], ['allDay', '全天']] as const).map(([value, label]) => <button type="button" key={value} className={form.timeType === value ? 'active' : ''} onClick={() => setForm((current) => ({ ...current, timeType: value, startTime: value === 'allDay' ? null : current.startTime ?? '09:00', endDate: value === 'point' ? current.startDate : current.endDate, endTime: value === 'range' ? current.endTime ?? '10:00' : null }))}>{label}</button>)}</div>
-    {hideStartDate && <div className="selected-start-date"><span>開始日期</span><strong>{slashDateLabel(form.startDate)}</strong></div>}
-    <div className="form-grid">{!hideStartDate && <label className="field">開始日期<input type="date" value={form.startDate} onChange={(e) => setStartDate(e.target.value)} required /></label>}{form.timeType !== 'allDay' && <TimeField label="開始時間" value={form.startTime ?? ''} onChange={(value) => { set('startTime', value); set('startUtcOffset', null); }} />}{form.timeType !== 'point' && <label className="field">結束日期<input type="date" value={form.endDate} onChange={(e) => set('endDate', e.target.value)} required /></label>}{form.timeType === 'range' && <TimeField label="結束時間" value={form.endTime ?? ''} onChange={(value) => { set('endTime', value); set('endUtcOffset', null); }} />}</div>
+    {/* （2026-11-25 使用者決定：開始與結束各自成組，窄畫面將同組日期與時間上下排列。） */}
+    <div className="event-date-time">
+      <div className={`event-date-row ${form.timeType !== 'allDay' ? 'with-time' : ''}`}>
+        {hideStartDate ? (
+          <div className="field">
+            開始日期
+            <div className="selected-start-date">{slashDateLabel(form.startDate)}</div>
+          </div>
+        ) : (
+          <label className="field">
+            開始日期
+            <input type="date" value={form.startDate} onChange={(e) => setStartDate(e.target.value)} required />
+          </label>
+        )}
+        {form.timeType !== 'allDay' && (
+          <TimeField label="開始時間" value={form.startTime ?? ''} onChange={(value) => { set('startTime', value); set('startUtcOffset', null); }} />
+        )}
+      </div>
+      {form.timeType !== 'point' && (
+        <div className={`event-date-row ${form.timeType === 'range' ? 'with-time' : ''}`}>
+          <label className="field">
+            結束日期
+            <input type="date" value={form.endDate} onChange={(e) => set('endDate', e.target.value)} required />
+          </label>
+          {form.timeType === 'range' && (
+            <TimeField label="結束時間" value={form.endTime ?? ''} onChange={(value) => { set('endTime', value); set('endUtcOffset', null); }} />
+          )}
+        </div>
+      )}
+    </div>
     {form.timeType !== 'allDay' && <div className="timezone-form"><div className="type-choice time-mode-choice"><button type="button" className={form.timeMode === 'fixedZone' ? 'active' : ''} onClick={() => set('timeMode', 'fixedZone')}>固定所在地時間</button><button type="button" className={form.timeMode === 'floatingLocal' ? 'active' : ''} onClick={() => set('timeMode', 'floatingLocal')}>跟隨目前時間</button></div>{form.timeMode === 'floatingLocal' ? <p className="field-help">例如每天 09:00，不論人在台灣或日本都顯示當地 09:00；不做時區換算。</p> : <><TimeZoneSelect label={form.locationType === 'route' ? '出發時區' : '行程時區'} value={form.startTimeZone ?? snap.currentTimeZone} snap={snap} onChange={(zone) => setForm((current) => ({ ...current, startTimeZone: zone, endTimeZone: current.locationType === 'route' && current.timeType === 'range' ? current.endTimeZone : zone, startUtcOffset: null, endUtcOffset: current.locationType === 'route' && current.timeType === 'range' ? current.endUtcOffset : null, timeZoneInferred: false }))} />{form.locationType === 'route' && form.timeType === 'range' && <TimeZoneSelect label="抵達時區" value={form.endTimeZone ?? form.startTimeZone ?? snap.currentTimeZone} snap={snap} onChange={(zone) => setForm((current) => ({ ...current, endTimeZone: zone, endUtcOffset: null }))} />}{startAnalysis?.kind === 'ambiguous' && <label className="field dst-choice">開始時間出現兩次<select value={form.startDisambiguation ?? 'earlier'} onChange={(e) => set('startDisambiguation', e.target.value as 'earlier' | 'later')}><option value="earlier">第一次（UTC{startAnalysis.earlier.offset}）</option><option value="later">第二次（UTC{startAnalysis.later.offset}）</option></select></label>}{endAnalysis?.kind === 'ambiguous' && <label className="field dst-choice">結束時間出現兩次<select value={form.endDisambiguation ?? 'earlier'} onChange={(e) => set('endDisambiguation', e.target.value as 'earlier' | 'later')}><option value="earlier">第一次（UTC{endAnalysis.earlier.offset}）</option><option value="later">第二次（UTC{endAnalysis.later.offset}）</option></select></label>}{startAnalysis?.kind === 'nonexistent' && <div className="dst-warning"><p>這個開始時間在當地不存在。</p><button type="button" onClick={() => setForm((current) => ({ ...current, startDate: startAnalysis.later.date, startTime: startAnalysis.later.time, startUtcOffset: null }))}>改成 {startAnalysis.later.date} {startAnalysis.later.time}</button></div>}{endAnalysis?.kind === 'nonexistent' && <div className="dst-warning"><p>這個結束時間在當地不存在。</p><button type="button" onClick={() => setForm((current) => ({ ...current, endDate: endAnalysis.later.date, endTime: endAnalysis.later.time, endUtcOffset: null }))}>改成 {endAnalysis.later.date} {endAnalysis.later.time}</button></div>}</>}</div>}
     {timeError && <p className="form-error">{timeError}</p>}
     <label className="field">行事曆群組<select value={form.groupId} onChange={(e) => set('groupId', e.target.value)}>{snap.groups.filter((group) => !group.archived && group.kind === 'user').map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
