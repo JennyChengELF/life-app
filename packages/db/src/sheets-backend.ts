@@ -1,7 +1,7 @@
 /** Google 試算表後端：透過 Sheets API / Drive API 讀寫使用者自己的試算表。 */
-import type { Backend, RowUpdate, RowValues, TableRow } from './backend';
+import type { Backend, RowUpdate, RowValues, TableRow, TableWrite } from './backend';
 import { ConflictError } from './backend';
-import { decodeCell, encodeCell } from './codec';
+import { decodeCell, encodeCell, type CellValue } from './codec';
 import type { GoogleAuth } from './google-auth';
 import { AuthError } from './google-auth';
 import type { ColumnDef, FileKey, TableDef, TableName } from './schema';
@@ -101,9 +101,9 @@ export class SheetsBackend implements Backend {
     return id ? `https://docs.google.com/spreadsheets/d/${id}/edit` : null;
   }
 
-  async init() {
+  async init(files: readonly FileKey[] = (Object.keys(FILES) as FileKey[]).filter((file) => file !== 'meds')) {
     const folder = await this.safely(() => this.ensureFolder());
-    for (const file of Object.keys(FILES) as FileKey[]) {
+    for (const file of files) {
       const sheetTitles = await this.ensureFile(file);
       await this.ensureTables(file, sheetTitles);
       await this.safely(() => this.ensureDateFormats(file));
@@ -115,10 +115,10 @@ export class SheetsBackend implements Backend {
   /** 新增版本的日期欄套用一致格式；每個 schema 版本每份檔案只做一次。 */
   private async ensureDateFormats(file: FileKey) {
     const id = this.sid(file);
-    const done = `life.dateFormats.${id}.${SCHEMA_VERSION}`;
+    const done = `life.dateFormats.${id}.${file === 'meds' ? SCHEMA_VERSION : 19}`;
     if (localStorage.getItem(done)) return;
     // 只處理本輪新增的表，不覆蓋使用者在既有 APP 試算表自行選的日期顯示格式。
-    const formatTables: TableName[] = file === 'period' ? tablesOfFile(file) : file === 'health' ? ['healthConditionLogs'] : [];
+    const formatTables: TableName[] = file === 'period' || file === 'meds' ? tablesOfFile(file) : file === 'health' ? ['healthConditionLogs'] : [];
     if (!formatTables.length) {
       localStorage.setItem(done, '1');
       return;
@@ -486,4 +486,64 @@ export class SheetsBackend implements Backend {
       body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data }),
     });
   }
+
+  /** 同份試算表的補貨、批次與服用紀錄一次寫入。 */
+  async writeBatch(writes: TableWrite[]) {
+    if (!writes.length) return;
+    const file = TABLES[writes[0].table].file;
+    if (writes.some(({ table }) => TABLES[table].file !== file)) throw new Error('批次寫入需要使用同一份試算表');
+    const id = this.sid(file);
+    const checks = writes.flatMap(({ table, update = [] }) => update
+      .filter((row) => row.expectId !== undefined)
+      .map((row) => ({ row, range: `${q(table)}!${colLetter(this.header(table).indexOf('id'))}${row.rowNumber}` })));
+    const [meta, checked] = await Promise.all([
+      this.api(`${SHEETS}/${id}?fields=sheets.properties(title,sheetId)`),
+      checks.length ? this.api(`${SHEETS}/${id}/values:batchGet?${checks.map(({ range }) => `ranges=${encodeURIComponent(range)}`).join('&')}`) : null,
+    ]);
+    checks.forEach(({ row }, i) => {
+      if (String(checked?.valueRanges?.[i]?.values?.[0]?.[0] ?? '') !== row.expectId) throw new ConflictError();
+    });
+    const ids = new Map<string, number>((meta.sheets ?? []).map((s: any) => [s.properties.title, s.properties.sheetId]));
+    const cell = (type: ColDefType, value: CellValue) => {
+      if (value == null) return {};
+      if (type === 'datetime') {
+        const utc = Date.parse(String(encodeCell(type, value)).replace(' ', 'T') + 'Z');
+        return { userEnteredValue: { numberValue: utc / 86400000 + 25569 } };
+      }
+      if (typeof value === 'number') return { userEnteredValue: { numberValue: value } };
+      if (typeof value === 'boolean') return { userEnteredValue: { boolValue: value } };
+      return { userEnteredValue: { stringValue: value } };
+    };
+    const requests: object[] = [];
+    for (const { table, append = [], update = [] } of writes) {
+      const sheetId = ids.get(table);
+      if (sheetId == null) throw new Error(`找不到工作表：${table}`);
+      const header = this.header(table);
+      const columns = new Map((TABLES[table].columns as ColumnDef[]).map(({ name, type }) => [name, type]));
+      const field = (name: string, value: CellValue) => {
+        const type = columns.get(name);
+        if (!type || !header.includes(name)) throw new Error(`欄位不存在：${table}.${name}`);
+        return cell(type, value);
+      };
+      if (append.length) {
+        const rows = append.map((row) => {
+          for (const name of Object.keys(row)) if (!columns.has(name) || !header.includes(name)) throw new Error(`欄位不存在：${table}.${name}`);
+          return { values: header.map((name) => Object.hasOwn(row, name) ? field(name, row[name]) : {}) };
+        });
+        requests.push({ appendCells: { sheetId, rows, fields: 'userEnteredValue' } });
+      }
+      for (const { rowNumber, values } of update) {
+        for (const [name, value] of Object.entries(values)) {
+          const entry = field(name, value);
+          requests.push({ updateCells: {
+            start: { sheetId, rowIndex: rowNumber - 1, columnIndex: header.indexOf(name) },
+            rows: [{ values: [entry] }], fields: 'userEnteredValue',
+          } });
+        }
+      }
+    }
+    if (requests.length) await this.api(`${SHEETS}/${id}:batchUpdate`, { method: 'POST', body: JSON.stringify({ requests }) });
+  }
 }
+
+type ColDefType = ColumnDef['type'];

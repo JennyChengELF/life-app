@@ -70,9 +70,14 @@ jobs:
         env:
           VITE_BASE: /${{ github.event.repository.name }}/period/
           VITE_GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+      - name: Build meds
+        run: pnpm --filter meds build
+        env:
+          VITE_BASE: /${{ github.event.repository.name }}/meds/
+          VITE_GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
       - name: Assemble site
         run: |
-          mkdir -p _site/water _site/health _site/bowel _site/money _site/calendar _site/period
+          mkdir -p _site/water _site/health _site/bowel _site/money _site/calendar _site/period _site/meds
           cp -r apps/hub/dist/. _site/
           cp -r apps/water/dist/. _site/water/
           cp -r apps/health/dist/. _site/health/
@@ -80,6 +85,7 @@ jobs:
           cp -r apps/money/dist/. _site/money/
           cp -r apps/calendar/dist/. _site/calendar/
           cp -r apps/period/dist/. _site/period/
+          cp -r apps/meds/dist/. _site/meds/
       - uses: actions/upload-pages-artifact@v3
   deploy:
     needs: build

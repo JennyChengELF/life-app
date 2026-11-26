@@ -24,6 +24,12 @@ export interface RowUpdate {
   expectId?: string;
 }
 
+export interface TableWrite {
+  table: TableName;
+  append?: RowValues[];
+  update?: RowUpdate[];
+}
+
 /** 資料存取後端：Google 試算表，或本機測試模式 */
 export interface Backend {
   readonly kind: 'sheets' | 'local';

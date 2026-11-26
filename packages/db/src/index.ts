@@ -20,6 +20,7 @@ export * from './shared-tags';
 export * from './person-anniversaries';
 export * from './taiwan-calendar';
 export * from './period';
+export * from './meds';
 export * from './conditions';
 export * from './money';
 export * from './budget';

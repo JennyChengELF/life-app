@@ -1,0 +1,45 @@
+@import '@life/ui/base.css';
+
+.meds-app { max-width: 800px; }
+.meds-app h2, .meds-app h3 { margin: 0; }
+.meds-app h3 { font-size: .94rem; }
+.med-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 8px; }
+.med-row button { flex-shrink: 0; }
+.med-row button .icon, .med-actions button .icon { vertical-align: -3px; }
+.med-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.meds-app .field { min-width: 0; }
+.meds-app .field > input, .meds-app select, .meds-app textarea { width: 100%; max-width: 100%; min-width: 0; }
+.meds-app select, .meds-app textarea {
+  display: block; margin-top: 4px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--card); color: var(--text); padding: 9px 10px; font: inherit;
+}
+.meds-app textarea { resize: vertical; }
+.meds-app .med-date-jump { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.meds-app .med-date-jump input { width: auto; margin: 0; }
+.med-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.med-push { margin-left: auto; }
+.med-form-body { border: 0; padding: 0; margin: 0; min-width: 0; }
+.med-entry { background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin: 10px 0; }
+.med-group { margin: 12px 0; }
+.med-group h3 { margin-bottom: 7px; }
+.med-footer { padding-top: 12px; border-top: 1px solid var(--line); }
+.med-stock-fields { padding: 8px 0 0; margin-top: 8px; border-top: 1px solid var(--line); }
+.med-check { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: .9rem; }
+.med-check input { width: 18px; height: 18px; }
+.med-list { list-style: none; padding: 0; margin: 8px 0 0; }
+.med-list li + li { border-top: 1px solid var(--line); }
+.med-list .med-list-button {
+  width: 100%; display: flex; align-items: center; gap: 10px; text-align: left;
+  padding: 10px 4px; border: 0; border-radius: 0; background: transparent;
+}
+.med-list-button:hover { background: var(--accent-soft); }
+.med-list-button > span:first-child { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.med-list-button small { display: block; color: var(--muted); }
+.med-list-button > .icon { color: var(--muted); flex: none; }
+.med-warning, .med-error, .med-notice { padding: 6px 10px; border-radius: 8px; font-size: .9rem; overflow-wrap: anywhere; }
+.med-warning { background: var(--warn-soft); color: var(--warn); }
+.med-error { background: var(--danger-soft); color: var(--danger); }
+.med-notice { background: var(--ok-soft); color: var(--ok); }
+.meds-app .med-warn-text { color: var(--warn); }
+.med-note { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 370px) { .med-fields { grid-template-columns: 1fr; gap: 0; } }

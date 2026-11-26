@@ -21,8 +21,9 @@
  * 16：共用人物增加選填姓名（2026-11-25）
  * 17：共用標籤、記帳交易新增標籤 id（2026-11-25）
  * 19：共用人物增加國曆／農曆生日、祭日與聯繫狀態（2026-11-25）
+ * 20：新增用藥記錄 APP（2026-11-26）
  */
-export const SCHEMA_VERSION = 19;
+export const SCHEMA_VERSION = 20;
 
 export type ColType = 'datetime' | 'date' | 'number' | 'text' | 'bool' | 'any';
 
@@ -33,7 +34,7 @@ export interface ColumnDef {
   label: string;
 }
 
-export type FileKey = 'water' | 'health' | 'bowel' | 'hub' | 'money' | 'calendar' | 'period';
+export type FileKey = 'water' | 'health' | 'bowel' | 'hub' | 'money' | 'calendar' | 'period' | 'meds';
 
 export interface FileDef {
   /** 試算表檔名（不加版本號） */
@@ -55,6 +56,7 @@ export const FILES: Record<FileKey, FileDef> = {
   money: { title: '生活APP-記帳', description: '記帳 APP 的資料：帳戶、分類、交易（一次付款 / 收款 / 轉帳）、明細（支出、收入、他欠我 / 我欠他、還款）、設定' },
   calendar: { title: '生活APP-行事曆', description: '行事曆 APP 的資料：群組、行程（含旅遊主行程與細項）、設定' },
   period: { title: '生活APP-生理期', description: '生理期 APP 的資料：經期起訖、每日出血、預測與提醒設定' },
+  meds: { title: '生活APP-用藥記錄', description: '藥品、保健品、批次、補貨、服用紀錄和常用組合' },
 };
 
 export interface TableDef {
@@ -73,6 +75,62 @@ const systemCols: ColumnDef[] = [
 ];
 
 export const TABLES = {
+  medItems: {
+    file: 'meds', description: '中藥、西藥和保健品清單。同一種藥建一個品項。',
+    columns: [
+      { name: 'name', type: 'text', label: '品項名稱' },
+      { name: 'kind', type: 'text', label: '中藥／西藥／保健品' },
+      { name: 'unit', type: 'text', label: '單位，例如包、粒、顆' },
+      { name: 'mode', type: 'text', label: '庫存方式：batch 分批／total 累加／none 只記服用' },
+      { name: 'stockSince', type: 'datetime', label: '由只記服用切換成直接累加的時間（APP 填寫）' },
+      { name: 'note', type: 'text', label: '備註' },
+      ...systemCols,
+    ],
+  },
+  medBatches: {
+    file: 'meds', description: '分批管理品項的領藥或購買紀錄，每批可保留不同成分。',
+    columns: [
+      { name: 'itemId', type: 'text', label: 'medItems 的品項編號' },
+      { name: 'receivedDate', type: 'date', label: '領藥／購買日期' },
+      { name: 'expiryDate', type: 'date', label: '使用期限（選填）' },
+      { name: 'ingredients', type: 'text', label: '成分明細（選填，可逐行輸入）' },
+      ...systemCols,
+    ],
+  },
+  medStock: {
+    file: 'meds', description: '初始數量及每次補貨。庫存由這些數量減去應扣庫存的服用紀錄計算。',
+    columns: [
+      { name: 'itemId', type: 'text', label: 'medItems 的品項編號' },
+      { name: 'batchId', type: 'text', label: 'medBatches 的批次編號（直接累加時留白）' },
+      { name: 'quantity', type: 'number', label: '增加數量' },
+      ...systemCols,
+    ],
+  },
+  medLogs: {
+    file: 'meds', description: '每種品項每次服用一列，實際時間和每日清單歸屬日分開。',
+    columns: [
+      { name: 'itemId', type: 'text', label: 'medItems 的品項編號' },
+      { name: 'batchId', type: 'text', label: 'medBatches 的批次編號（依品項庫存方式填寫）' },
+      { name: 'time', type: 'datetime', label: '實際服用時間' },
+      { name: 'date', type: 'date', label: '歸屬日期（空白預設採實際日期）' },
+      { name: 'quantity', type: 'number', label: '實際服用量' },
+      { name: 'stockEffect', type: 'text', label: '庫存影響：batch 扣批次／total 扣品項／pending 待補批次／none 不扣' },
+      { name: 'skipStock', type: 'bool', label: '補登時只補紀錄、不扣庫存' },
+      ...systemCols,
+    ],
+  },
+  medCombos: {
+    file: 'meds', description: '手動套用的常用組合，綁定品項和常用劑量。',
+    columns: [
+      { name: 'name', type: 'text', label: '組合名稱' },
+      { name: 'entries', type: 'text', label: '品項及劑量（APP 填寫，JSON）' },
+      ...systemCols,
+    ],
+  },
+  medCommands: {
+    file: 'meds', description: '系統用的儲存操作編號，避免網路中斷後重送造成同一筆重複扣量。',
+    columns: systemCols,
+  },
   waterLogs: {
     file: 'water',
     description: '喝水紀錄。可以直接在最下方新增一列，只要填 time（時間，例 2026/11/17 14:30）和 ml，其他欄位 APP 會自動補上。',

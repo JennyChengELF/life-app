@@ -1,5 +1,5 @@
 /** 本機測試模式：資料存在瀏覽器（還沒設定 Google 時開發用），不會同步到其他裝置。 */
-import type { Backend, RowUpdate, RowValues, TableRow } from './backend';
+import type { Backend, RowUpdate, RowValues, TableRow, TableWrite } from './backend';
 import { ConflictError } from './backend';
 import type { TableName } from './schema';
 import type { TableDef } from './schema';
@@ -63,6 +63,35 @@ export class LocalBackend implements Backend {
       Object.assign(row, u.values);
     }
     this.save(table, all);
+  }
+
+  async writeBatch(writes: TableWrite[]) {
+    const before = new Map<TableName, RowValues[]>();
+    const after = new Map<TableName, RowValues[]>();
+    for (const { table, append = [], update = [] } of writes) {
+      if (!after.has(table)) {
+        const rows = this.load(table);
+        before.set(table, rows);
+        after.set(table, rows.map((row) => ({ ...row })));
+      }
+      const rows = after.get(table)!;
+      for (const { rowNumber, expectId, values } of update) {
+        const row = rows[rowNumber - 2];
+        if (!row || (expectId !== undefined && (row.id ?? '') !== expectId)) throw new ConflictError();
+        Object.assign(row, values);
+      }
+      rows.push(...append);
+    }
+    const written: TableName[] = [];
+    try {
+      for (const [table, rows] of after) {
+        this.save(table, rows);
+        written.push(table);
+      }
+    } catch (error) {
+      for (const table of written.reverse()) this.save(table, before.get(table)!);
+      throw error;
+    }
   }
 
   /** 測試用：模擬使用者直接在試算表新增一列（沒有 id） */

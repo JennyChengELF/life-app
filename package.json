@@ -10,6 +10,7 @@
     "dev:money": "pnpm --filter money dev",
     "dev:calendar": "pnpm --filter calendar dev",
     "dev:period": "pnpm --filter period dev",
+    "dev:meds": "pnpm --filter meds dev",
     "build": "pnpm -r --filter ./apps/* build",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck"
