@@ -123,7 +123,7 @@ export function BudgetsView({
             <div className="list-row" key={line.id}>
               <span className="grow">
                 <span className="muted small">
-                  {txn.date.slice(5).replace('-', '/')} {toHHmm(txn.time)}
+                  {txn.date.slice(5).replace('-', '/')} {txn.dateOnly ? '' : toHHmm(txn.time)}
                 </span>{' '}
                 {line.category ?? txnTitle(txn)} {txn.store && <span className="muted small">{txn.store}</span>}{' '}
                 <span className="num">{n0(line.amount)}</span>

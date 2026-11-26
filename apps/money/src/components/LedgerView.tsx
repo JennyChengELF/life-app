@@ -115,7 +115,7 @@ export function TxList({ list, snap, onEdit }: { list: Txn[]; snap: MoneySnapsho
             <div className="tx-title">
               {txnTitle(t)} <TxBadges t={t} />
             </div>
-            <div className="tx-sub">{[toHHmm(t.time), subText(t, snap.sharedTags, false)].filter(Boolean).join('・')}</div>
+            <div className="tx-sub">{[t.dateOnly ? '' : toHHmm(t.time), subText(t, snap.sharedTags, false)].filter(Boolean).join('・')}</div>
           </div>
           <TxAmount t={t} snap={snap} />
         </li>
@@ -163,13 +163,6 @@ export function SummaryCard({ snap, date, view }: { snap: MoneySnapshot; date: s
   );
 }
 
-/** 新增時的時間：看的是今天 → 現在；看的是別天 → 那天的現在這個時間 */
-function timeFor(date: string) {
-  const now = Date.now();
-  const today = todayKey();
-  return date === today ? now : startOfDay(date) + (now - startOfDay(today));
-}
-
 /** 記帳頁（2026-11-18 使用者要求：預設一天一天看，可切換整個月） */
 export function LedgerView({
   snap,
@@ -189,7 +182,7 @@ export function LedgerView({
   editing: boolean;
 }) {
   const month = date.slice(0, 7);
-  const newEntry = (mode: '支出' | '收入' | '轉帳') => onEdit({ form: emptyForm(mode, view === 'day' ? timeFor(date) : Date.now()) });
+  const newEntry = (mode: '支出' | '收入' | '轉帳') => onEdit({ form: emptyForm(mode, view === 'day' ? startOfDay(date) : Date.now()) });
   const calendarInfo = (calendarDate: string) => {
     const count = snap.txns.filter((txn) => txn.date === calendarDate).length;
     return count ? { marks: [{ color: 'var(--accent)', kind: 'dot' as const }], label: `${count} 筆記帳紀錄` } : null;

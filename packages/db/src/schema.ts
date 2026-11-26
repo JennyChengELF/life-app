@@ -508,7 +508,7 @@ export const TABLES = {
     description:
       '交易：一次付款、收款或轉帳（和帳單比對的單位）。分類、分帳等在明細 moneyLines（transaction 欄填這裡的 id）。金額一律正數，出 / 入看 direction。建議在 APP 裡新增。',
     columns: [
-      { name: 'time', type: 'datetime', label: '消費 / 發生時間（必填）' },
+      { name: 'time', type: 'datetime', label: '消費 / 發生時間（選填；不知時間時只填 date）' },
       { name: 'direction', type: 'text', label: '出（錢從帳戶出去）、入（錢進帳戶）、轉帳；沒帳戶（朋友先幫我付、不用還了）時空白' },
       { name: 'account', type: 'text', label: '帳戶名稱（轉帳時是轉出的帳戶）' },
       { name: 'amount', type: 'number', label: '金額（帳戶幣別；一般支出／收入可填 0，轉帳／借還款須大於 0）' },
@@ -522,7 +522,7 @@ export const TABLES = {
       { name: 'note', type: 'text', label: '備註' },
       { name: 'category', type: 'text', label: '快速輸入：在試算表直接記帳時填分類（例：樂 / 數位內容），APP 打開時自動建立明細，這格會清空' },
       { name: 'budget', type: 'text', label: '快速輸入：預算（和 category 一起用）' },
-      { name: 'date', type: 'date', label: '日期（APP 依 time 自動填）' },
+      { name: 'date', type: 'date', label: '記帳日期（有 time 時 APP 自動填，沒有 time 時必填）' },
       { name: 'createdVia', type: 'text', label: '在哪裡輸入（money = 記帳 APP、sheet = 直接在試算表）' },
       ...systemCols,
       { name: 'postedDate', type: 'date', label: '入帳日（對帳時 APP 自動填）' },
@@ -533,6 +533,7 @@ export const TABLES = {
       { name: 'twdStatus', type: 'text', label: '台幣金額狀態（pending、estimated、final）' },
       { name: 'rewardFor', type: 'text', label: '回饋收入所對應的原消費交易 id' },
       { name: 'paymentCount', type: 'number', label: '分開付款的明細筆數（APP 自動填）' },
+      { name: 'feeFor', type: 'text', label: '國外交易手續費所對應的原消費交易 id（APP 自動填）' },
     ],
   },
   moneyLines: {

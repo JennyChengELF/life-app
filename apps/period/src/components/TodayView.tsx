@@ -194,7 +194,7 @@ function ConditionDraftRow({ date, draft, update, remove }: { date: string; draf
   const hasMore = draft.time != null || !!draft.note?.trim();
   return <div className="condition-draft">
     <div className="condition-main-row"><strong>{draft.symptom}</strong><div className="choice condition-severity">{CONDITION_SEVERITIES.map((x) => <button key={x} className={draft.severity === x ? 'active' : ''} onClick={() => update({ severity: draft.severity === x ? null : x as ConditionSeverity })}>{x}</button>)}</div><button className="link more-toggle" onClick={() => update({ expanded: !draft.expanded })}>{draft.expanded ? '收合' : `更多${hasMore ? '・已填' : ''}`}</button><button className="link danger-text" onClick={remove}>移除</button></div>
-    {draft.expanded && <div className="condition-more"><TimeField label="時間（選填）" value={localTime} onChange={setTime} showNow={date === todayKey()} /><label className="field">備註（選填）<input value={draft.note ?? ''} onChange={(e) => update({ note: e.target.value })} /></label></div>}
+    {draft.expanded && <div className="condition-more"><TimeField label="時間（選填）" value={localTime} onChange={setTime} showNow={date === todayKey()} allowEmpty /><label className="field">備註（選填）<input value={draft.note ?? ''} onChange={(e) => update({ note: e.target.value })} /></label></div>}
   </div>;
 }
 

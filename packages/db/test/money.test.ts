@@ -63,7 +63,7 @@ const refs = {
 };
 
 function form(patch: Partial<EntryForm>): EntryForm {
-  return { ...emptyForm(patch.mode ?? '支出', at('2026-11-18 12:00')), ...patch };
+  return { ...emptyForm(patch.mode ?? '支出', at('2026-11-18 12:00')), dateOnly: false, ...patch };
 }
 
 /** 表單 → 交易 → 表單 */
@@ -487,6 +487,34 @@ describe('MoneyStore', () => {
     snap = await store.load();
     expect(snap.txns).toHaveLength(0);
     expect(snap.issues).toEqual([]);
+  });
+
+  it('只記日期、修改時間和複製交易時，保留日期並區分空白與午夜', async () => {
+    await store.saveAccount({ name: '錢包', type: '現金', currency: 'TWD', org: null, openingDate: null, openingBalance: null, closingDay: null, dueDay: null, fxFeeRate: null, expiryDate: null, monthlyCheck: false, archived: false, note: null });
+    const time = at('2026-11-26 14:30');
+    const draft = { ...emptyForm('支出', time), account: '錢包', cats: [{ category: '食 / 三餐', amount: 100 }] };
+    const purchaseId = await store.saveTxn(formToTxn(draft));
+    snap = await store.load();
+    const purchase = snap.txns[0];
+    expect(purchase).toMatchObject({ id: purchaseId, date: '2026-11-26', dateOnly: true });
+    expect((await backend.read('moneyTransactions'))[0].values).toMatchObject({ date: '2026-11-26', time: null });
+    expect(moneyDayTotals(snap, '2026-11-26').expense).toBe(100);
+    expect(moneyEntries(snap, '2026-11-26')[0].allDay).toBe(true);
+
+    const copied = copyTxnForm(purchase, time);
+    expect(copied).toMatchObject({ time, dateOnly: false });
+    const timed = await store.saveTxn(formToTxn({ ...copied, time: at('2026-11-26 00:00') }));
+    snap = await store.load();
+    const midnight = snap.txns.find((t) => t.id === timed)!;
+    expect(midnight.dateOnly).toBe(false);
+    expect(moneyEntries(snap, '2026-11-26').find((t) => t.key === timed)?.allDay).toBe(false);
+    await store.saveTxn(formToTxn({ ...txnToForm(midnight), dateOnly: true }), midnight);
+    expect((await backend.read('moneyTransactions')).find((r) => r.values.id === timed)?.values.time).toBeNull();
+
+    await backend.appendRaw('moneyTransactions', { date: '2026-11-27', direction: '出', account: '錢包', amount: 80, category: '食 / 三餐' });
+    snap = await store.load();
+    expect(snap.issues).toEqual([]);
+    expect(snap.txns.find((t) => t.date === '2026-11-27')).toMatchObject({ dateOnly: true, amount: 80 });
   });
 
   it('改名：帳戶、人物、分類（含底下的分類）用到的紀錄一起改', async () => {

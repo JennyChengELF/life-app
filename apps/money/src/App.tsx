@@ -42,8 +42,9 @@ function requestedDate() {
 }
 
 function timeForDate(date: string) {
-  const now = Date.now();
-  return date === todayKey() ? now : startOfDay(date) + (now - startOfDay(todayKey()));
+  const now = new Date();
+  const selected = new Date(startOfDay(date));
+  return selected.setHours(now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds());
 }
 
 /** 正在編輯：新的一筆（form）或修改既有的（txn） */
@@ -108,7 +109,7 @@ export function App() {
       return setAccPage({ view: 'stocktake' });
     }
     setFromHome(true);
-    if (!pending.id) return edit({ form: emptyForm('支出', timeForDate(requestedDate())) });
+    if (!pending.id) return edit({ form: emptyForm('支出', startOfDay(requestedDate())) });
     const t = api.snap.txns.find((x) => x.id === pending.id);
     if (!t) return api.showToast({ kind: 'error', text: '找不到這一筆（可能已經刪除）' });
     setDate(t.date);
@@ -206,7 +207,7 @@ export function App() {
                 edit({ form: copyTxnForm(editing.txn!, timeForDate(date)), copied: true });
                 api.showToast({ kind: 'info', text: '已複製成新交易，確認或修改後再儲存' });
               } : undefined}
-            /></> : <AddMenu date={date} setDate={setDate} open={(mode) => edit({ form: emptyForm(mode, timeForDate(date)) })} />)}
+            /></> : <AddMenu date={date} setDate={setDate} open={(mode) => edit({ form: emptyForm(mode, startOfDay(date)) })} />)}
             {tab === 'calendar' && <CalendarView snap={api.snap} date={date} setDate={setDate} onEdit={(value) => edit(value)} onAdd={() => setTab('add')} />}
             {tab === 'stats' && <StatsView snap={api.snap} initialMonth={date.slice(0, 7)} />}
             {tab === 'accounts' && <AccountsTab api={api} snap={api.snap} page={accPage} setPage={setAccPage} onEdit={edit} onBack={() => setTab('more')} />}

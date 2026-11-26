@@ -120,6 +120,7 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
   /** 2026-11-23 使用者決定：新增與編輯都能改日期、可選未來；只換日期並保留原本時間。 */
   const setEntryDate = (value: string) => {
     if (!value) return;
+    if (f.dateOnly) return set({ time: startOfDay(value) });
     const [hour, minute] = toHHmm(f.time).split(':').map(Number);
     const next = new Date(startOfDay(value));
     next.setHours(hour, minute, 0, 0);
@@ -175,11 +176,18 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
     }
     const ok = await api.run(async (s) => {
       if (tx.store && newForeign && !storeOrg) await s.addOrg(tx.store, null, true);
-      if (parts) for (const part of parts) await s.saveTxn(part);
-      else await s.saveTxn(tx, txn ?? (editing.target ? ({ ...editing.target, lines: [] } as unknown as Txn) : undefined));
+      let purchaseId: string | undefined;
+      if (parts) {
+        for (const part of parts) {
+          const id = await s.saveTxn(part);
+          purchaseId ??= id;
+        }
+      } else {
+        purchaseId = await s.saveTxn(tx, txn ?? (editing.target ? ({ ...editing.target, lines: [] } as unknown as Txn) : undefined));
+      }
       if (feeTx) {
         await s.ensureCategories(feeTx.lines.map((l) => l.category ?? ''), '支出');
-        await s.saveTxn(feeTx);
+        await s.saveTxn({ ...feeTx, feeFor: purchaseId });
       }
       return true;
     });
@@ -523,12 +531,14 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
             <label className="field">記帳日期
               <input type="date" value={toDateKey(f.time)} onChange={(event) => setEntryDate(event.target.value)} />
             </label>
-            <TimeField value={toHHmm(f.time)} onChange={(value) => {
+            <TimeField allowEmpty value={f.dateOnly ? '' : toHHmm(f.time)} onChange={(value) => {
+              const date = toDateKey(f.time);
+              if (!value) return set({ time: startOfDay(date), dateOnly: true });
               const [hour, minute] = value.split(':').map(Number);
-              const next = new Date(startOfDay(toDateKey(f.time)));
+              const next = new Date(startOfDay(date));
               next.setHours(hour, minute, 0, 0);
-              set({ time: next.getTime() });
-            }} label="時間（24 小時制）" />
+              set({ time: next.getTime(), dateOnly: false });
+            }} label="時間（選填，24 小時制）" />
           </div>
 
           {(f.mode === '支出' || f.mode === '收入') && !paidByMode && (

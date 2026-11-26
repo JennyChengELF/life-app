@@ -143,6 +143,8 @@ export interface Payment extends RowRef {
 
 export interface TxnInput {
   time: number;
+  /** 只記日期時，time 僅供程式內排序／計算日期，試算表保留空白。 */
+  dateOnly?: boolean;
   direction: Direction | null;
   account: string | null;
   amount: number | null;
@@ -163,6 +165,7 @@ export interface TxnInput {
   twdAmount?: number | null;
   twdStatus?: TwdStatus | null;
   rewardFor?: string | null;
+  feeFor?: string | null;
   payments?: PaymentInput[];
   /** 同一家發卡機構的多卡／多期繳款分配；有值時不用 toAccount。 */
   cardPayments?: CardPaymentInput[];
@@ -202,6 +205,7 @@ export interface MoneyIssue {
 /** 整批補齊時填的交易資料 */
 export interface OrphanHead {
   time: number;
+  dateOnly?: boolean;
   /** 帳戶；朋友幫我付時是 null */
   account: string | null;
   paidBy: string | null;
@@ -217,6 +221,7 @@ export interface OrphanHead {
 export function orphanTxn(lines: LineInput[], head: OrphanHead): TxnInput {
   const base = {
     time: head.time,
+    dateOnly: head.dateOnly,
     store: head.store?.trim() || null,
     branch: head.store?.trim() ? head.branch?.trim() || null : null,
     statementText: null,
@@ -720,13 +725,15 @@ function toCardPayment(r: TableRow): CardPayment {
   };
 }
 
-function toTxn(r: TableRow, lines: Line[], cardPayments: CardPayment[] = [], payments: Payment[] = []): Txn {
+function toTxn(r: TableRow, date: string, lines: Line[], cardPayments: CardPayment[], payments: Payment[]): Txn {
   const v = r.values;
+  const time = num(v.time);
   return {
     rowNumber: r.rowNumber,
     id: String(v.id),
-    time: Number(v.time),
-    date: toDateKey(Number(v.time)),
+    time: time ?? startOfDay(date),
+    date,
+    dateOnly: time == null,
     direction: (str(v.direction) as Direction | null) ?? null,
     account: str(v.account),
     amount: num(v.amount),
@@ -746,6 +753,7 @@ function toTxn(r: TableRow, lines: Line[], cardPayments: CardPayment[] = [], pay
     twdAmount: num(v.twdAmount),
     twdStatus: str(v.twdStatus) as TwdStatus | null,
     rewardFor: str(v.rewardFor),
+    feeFor: str(v.feeFor),
     lines,
     cardPayments,
     payments,
@@ -814,7 +822,7 @@ export function lineBalance(lines: Pick<LineInput, 'kind' | 'amount'>[]) {
  */
 export function checkTxn(t: Omit<TxnInput, 'tagIds'> & { tagIds?: string[] }, refs: MoneyRefs, opts: { allowNoCategory?: boolean } = {}): string[] {
   const p: string[] = [];
-  if (!Number.isFinite(t.time)) p.push('沒有填時間');
+  if (!Number.isFinite(t.time)) p.push('沒有填有效的記帳日期');
   const accName = (n: string | null) => n != null && refs.accounts.some((a) => a.name === n);
   const cur = txnCurrency(t, refs.accounts);
   const intOk = (n: number) => currencyDigits(cur) > 0 || Number.isInteger(n);
@@ -1129,6 +1137,7 @@ export type EntryMode = (typeof ENTRY_MODES)[number] | '不用還了' | '調整'
 export interface EntryForm {
   mode: EntryMode;
   time: number;
+  dateOnly?: boolean;
   /** 支出 / 收入 / 還款的帳戶；轉帳的轉出帳戶 */
   account: string | null;
   /** 支出：朋友先幫我付（有值時沒有帳戶） */
@@ -1176,6 +1185,8 @@ export interface EntryForm {
 export const emptyForm = (mode: EntryForm['mode'] = '支出', time = Date.now()): EntryForm => ({
   mode,
   time,
+  // （2026-11-26 使用者決定：新交易可只記日期，時間預設空白。）
+  dateOnly: true,
   account: null,
   paidBy: null,
   currency: null,
@@ -1207,7 +1218,7 @@ export const cardPaymentTotal = (f: Pick<EntryForm, 'cardPayments'>) => sum(f.ca
 
 /** 表單 → 要存的交易（不檢查；存之前用 checkTxn 檢查） */
 export function formToTxn(f: EntryForm): TxnInput {
-  const base = { time: f.time, store: f.store?.trim() || null, branch: f.store?.trim() ? f.branch?.trim() || null : null, statementText: f.statementText?.trim() || null, note: f.note?.trim() || null, tagIds: f.tagIds, toAccount: null, toAmount: null, paidBy: null, currency: null };
+  const base = { time: f.dateOnly ? startOfDay(toDateKey(f.time)) : f.time, dateOnly: f.dateOnly, store: f.store?.trim() || null, branch: f.store?.trim() ? f.branch?.trim() || null : null, statementText: f.statementText?.trim() || null, note: f.note?.trim() || null, tagIds: f.tagIds, toAccount: null, toAmount: null, paidBy: null, currency: null };
   const origCurrency = f.origCurrency?.trim().toUpperCase();
   const exchange = origCurrency && origCurrency !== 'TWD'
     ? { origCurrency, twdAmount: f.twdAmount ?? null, twdStatus: f.twdAmount == null ? 'pending' as const : f.twdStatus ?? null }
@@ -1339,10 +1350,12 @@ export const isFeeTxn = (t: { lines: { category: string | null }[] }) =>
 
 /**
  * 找這筆消費已經記過的手續費（2026-11-18 確認：修改舊資料時可以補記，已記過的不再重複記）。
- * 手續費是另一筆交易、沒有連結，用「同一個時間、同一個帳戶、分類是…／國外交易手續費」判斷。
+ * 新資料依原消費連結查找；沒有連結的舊資料沿用時間與帳戶比對。
  */
 export function findFeeTxn(txns: Txn[], purchase: Txn): Txn | null {
-  return txns.find((t) => t.id !== purchase.id && t.time === purchase.time && t.account === purchase.account && isFeeTxn(t)) ?? null;
+  return txns.find((t) => t.feeFor === purchase.id) ?? txns.find((t) =>
+    !t.feeFor && !t.dateOnly && !purchase.dateOnly && t.id !== purchase.id && t.time === purchase.time && t.account === purchase.account && isFeeTxn(t),
+  ) ?? null;
 }
 
 /**
@@ -1386,6 +1399,7 @@ export function installmentTxns(tx: TxnInput, n: number, accounts: Pick<Account,
 /** 交易 → 表單（看不出是哪一種的 → mode「其他」，畫面只能刪除或到試算表改） */
 export function txnToForm(t: Txn): EntryForm {
   const f: EntryForm = { ...emptyForm('其他', t.time), store: t.store, branch: t.branch, statementText: t.statementText, note: t.note, tagIds: t.tagIds, account: t.account, currency: t.currency, cats: [] };
+  f.dateOnly = t.dateOnly;
   f.origCurrency = t.origCurrency;
   f.twdAmount = t.twdAmount;
   f.twdStatus = t.twdStatus;
@@ -1469,7 +1483,8 @@ export function copyTxnForm(t: Txn, time: number): EntryForm {
   if (!canCopyTxn(t)) throw new Error('這筆是系統產生的交易，不能複製');
   const f = txnToForm(t);
   // 多筆外幣付款金額取自原入帳，複製時回到單一帳戶、等待新的台幣金額。
-  return { ...f, time, statement: null, statementText: null, tagIds: [], rewardFor: null,
+  // （2026-11-26 使用者決定：複製交易仍帶入現在時間。）
+  return { ...f, time, dateOnly: false, statement: null, statementText: null, tagIds: [], rewardFor: null,
     ...(f.origCurrency ? { twdAmount: null, twdStatus: 'pending' as const, payments: [] } : {}) };
 }
 
@@ -1691,8 +1706,10 @@ export class MoneyStore {
     const quickClear: RowUpdate[] = [];
     for (const r of txRows) {
       if (!isLive(r)) continue;
-      if (r.errors.includes('time') || num(r.values.time) == null) {
-        issue('moneyTransactions', r, [r.errors.includes('time') ? '時間格式看不懂（例：2026/11/18 12:30）' : '沒有填時間']);
+      const time = num(r.values.time);
+      const date = time == null ? str(r.values.date) : toDateKey(time);
+      if (r.errors.includes('time') || !date) {
+        issue('moneyTransactions', r, [r.errors.includes('time') ? '時間格式看不懂（例：2026/11/18 12:30）' : r.errors.includes('date') ? '日期格式看不懂（例：2026/11/18）' : '請填記帳日期或時間']);
         continue;
       }
       const bad = ['amount', 'toAmount', 'postedDate', 'twdAmount', 'paymentCount'].filter((k) => r.errors.includes(k));
@@ -1700,7 +1717,6 @@ export class MoneyStore {
         issue('moneyTransactions', r, bad.map((k) => `${k} 格式看不懂`));
         continue;
       }
-      const date = toDateKey(Number(r.values.time));
       const id = ensureId('moneyTransactions', r, { date, createdVia: str(r.values.createdVia) ?? 'sheet' });
       if (str(r.values.date) !== date && !fixes.get('moneyTransactions')?.some((u) => u.rowNumber === r.rowNumber)) {
         fix('moneyTransactions', { rowNumber: r.rowNumber, values: { date }, expectId: id });
@@ -1709,7 +1725,7 @@ export class MoneyStore {
       const lines = (linesByTx.get(id) ?? []).map((x) => x.line).sort(bySort);
       const cardPayments = (cardPaymentsByTx.get(id) ?? []).map((x) => x.payment).sort(bySort);
       const payments = (paymentsByTx.get(id) ?? []).map((x) => x.payment).sort(bySort);
-      const t = toTxn(r, lines, cardPayments, payments);
+      const t = toTxn(r, date, lines, cardPayments, payments);
       // 試算表直接填負數 = 退款（2026-11-18 使用者要求）：出 −3065 就是入 3065
       if ((t.direction === '出' || t.direction === '入') && t.amount != null && t.amount < 0) {
         t.direction = t.direction === '出' ? '入' : '出';
@@ -1749,6 +1765,7 @@ export class MoneyStore {
           const rawAmt = num(r.values.amount);
           draft = {
             ...emptyForm(dir === '入' ? '收入' : '支出', t.time),
+            dateOnly: t.dateOnly,
             account: t.account,
             origCurrency: t.origCurrency,
             twdAmount: t.twdAmount,
@@ -1970,7 +1987,7 @@ export class MoneyStore {
     const multiCard = (input.cardPayments?.length ?? 0) > 0;
     const toCur = input.toAccount ? txnCurrency({ account: input.toAccount, currency: null }, snap.accounts) : cur;
     const txValues: RowValues = {
-      time: input.time,
+      time: input.dateOnly ? null : input.time,
       date: toDateKey(input.time),
       direction: input.direction,
       account: input.account,
@@ -1988,6 +2005,7 @@ export class MoneyStore {
       twdAmount: input.twdAmount ?? null,
       twdStatus: input.origCurrency ? input.twdStatus ?? 'pending' : null,
       rewardFor: input.rewardFor ?? null,
+      ...(input.feeFor !== undefined ? { feeFor: input.feeFor } : {}),
       paymentCount: input.payments?.length || null,
       updatedAt: now,
     };
@@ -2762,7 +2780,7 @@ export class MoneyStore {
     await this.b.append('moneyTransactions', [
       {
         id,
-        time: input.time,
+        time: input.dateOnly ? null : input.time,
         date: toDateKey(input.time),
         direction: input.direction,
         account: input.account,

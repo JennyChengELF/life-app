@@ -209,6 +209,7 @@ export function moneyEntries(snap: MoneySnapshot, date: string): TimelineEntry[]
       return {
         key: t.id,
         time: t.time,
+        allDay: t.dateOnly,
         icon: 'wallet',
         name: txnTitle(t),
         value,

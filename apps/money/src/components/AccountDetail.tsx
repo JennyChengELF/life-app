@@ -177,7 +177,7 @@ export function AccountDetail({
                 const more = card ? amt < 0 : amt > 0;
                 return (
                   <li key={t.id} className="tx-row" onClick={() => onEdit({ form: emptyForm(), txn: t, back })}>
-                    <span className="muted small num">{toHHmm(t.time)}</span>
+                    <span className="muted small num">{t.dateOnly ? '' : toHHmm(t.time)}</span>
                     <div className="tx-main">
                       <div className="tx-title">
                         {txnTitle(t)}

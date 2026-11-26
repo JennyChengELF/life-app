@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { MoneyIssue, MoneySnapshot, OrphanHead } from '@life/db';
-import { fmtMoney, orphanTxn, serialToMs, toInputDateTime, toSheetDateTime } from '@life/db';
+import { fmtMoney, orphanTxn, serialToMs, startOfDay, toDateKey, toHHmm, toSheetDateTime } from '@life/db';
+import { TimeField } from '@life/ui/time-field';
 import type { MoneyApi } from '../useMoney';
 import { AccountSelect, PersonSelect } from './common';
 import { CategoryPicker } from './CategoryPicker';
@@ -91,7 +92,7 @@ function DiscardPicked({ api, picked }: { api: MoneyApi; picked: MoneyIssue[] })
 /** 沒有交易的明細：勾選 → 填交易資料 → 合成一筆交易 */
 function OrphanBatch({ api, snap, list }: { api: MoneyApi; snap: MoneySnapshot; list: MoneyIssue[] }) {
   const { sel, toggle, picked } = useSelection(list);
-  const [head, setHead] = useState<OrphanHead>({ time: Date.now(), account: null, paidBy: null, store: null, note: null });
+  const [head, setHead] = useState<OrphanHead>({ time: Date.now(), dateOnly: true, account: null, paidBy: null, store: null, note: null });
   const [friend, setFriend] = useState(false);
   const set = (p: Partial<OrphanHead>) => setHead((h) => ({ ...h, ...p }));
 
@@ -109,7 +110,7 @@ function OrphanBatch({ api, snap, list }: { api: MoneyApi; snap: MoneySnapshot; 
   return (
     <section className="card batch">
       <h2>沒有交易的明細（{list.length} 行）</h2>
-      <p className="muted small">勾選屬於同一筆的明細，填上時間、帳戶，就會合成一筆交易。</p>
+      <p className="muted small">勾選屬於同一筆的明細，填上日期、帳戶，就會合成一筆交易。</p>
       {ordered.map(([g, items]) => {
         const all = items.every((i) => sel.has(keyOf(i)));
         return (
@@ -143,17 +144,18 @@ function OrphanBatch({ api, snap, list }: { api: MoneyApi; snap: MoneySnapshot; 
       {picked.length > 0 && (
         <div className="batch-form">
           <h3>補交易資料（{picked.length} 行）</h3>
-          <label className="field">
-            時間
-            <input
-              type="datetime-local"
-              value={toInputDateTime(head.time)}
-              onChange={(e) => {
-                const t = new Date(e.target.value).getTime();
-                if (Number.isFinite(t)) set({ time: t });
-              }}
-            />
-          </label>
+          <div className="entry-when">
+            <label className="field">記帳日期
+              <input type="date" value={toDateKey(head.time)} onChange={(e) => {
+                const date = e.target.value;
+                if (date) set({ time: head.dateOnly ? startOfDay(date) : new Date(`${date}T${toHHmm(head.time)}`).getTime() });
+              }} />
+            </label>
+            <TimeField allowEmpty label="時間（選填，24 小時制）" value={head.dateOnly ? '' : toHHmm(head.time)} onChange={(value) => {
+              const date = toDateKey(head.time);
+              set({ time: value ? new Date(`${date}T${value}`).getTime() : startOfDay(date), dateOnly: !value });
+            }} />
+          </div>
           <div className="seg modes">
             <button className={friend ? '' : 'active'} onClick={() => setFriend(false)}>
               我付 / 我收
@@ -240,7 +242,7 @@ function CategoryBatch({ api, snap, kind, list }: { api: MoneyApi; snap: MoneySn
               <label className="check">
                 <input type="checkbox" checked={sel.has(keyOf(i))} onChange={(e) => toggle([i], e.target.checked)} />
                 <span className="grow">
-                  <span className="muted small num">{toSheetDateTime(d.time).slice(0, 16)}</span> {d.store ?? ''}
+                  <span className="muted small num">{toSheetDateTime(d.time).slice(0, d.dateOnly ? 10 : 16)}</span> {d.store ?? ''}
                   {d.note ? <span className="muted">　{d.note}</span> : null}
                 </span>
                 <span className="num">{amt == null ? '（沒填金額）' : fmtMoney(amt)}</span>
