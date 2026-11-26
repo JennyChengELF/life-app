@@ -157,6 +157,13 @@ export function EntryEditor({ api, snap, date, log, combo, editingCombo, onDateC
     if (await api.save(() => api.store.remove(deleteId, editingCombo ? 'medCombos' : 'medLogs', target.id), '已刪除')) onClose();
   };
 
+  const itemPicker = <div className="med-group">
+    <h3>加選品項</h3>
+    {pickable.length ? <div className="med-actions">{pickable.map((item) => <button type="button" key={item.id}
+      onClick={() => setEntries((old) => [...old, blankDose(item.id)])}><Icon name="plus" size={16} /> {item.name}</button>)}</div>
+      : <p className="muted small">目前沒有其他可選品項。可到「藥品與庫存」新增品項或補貨。</p>}
+  </div>;
+
   return <>
     {onDateChange && <fieldset className="med-form-body med-add-week" disabled={api.busy}>
       <WeekDateStrip selected={logDate} setDate={setLogDate} />
@@ -177,6 +184,8 @@ export function EntryEditor({ api, snap, date, log, combo, editingCombo, onDateC
           }}>{group.name}</button>)}</div>
         </div>}
       </>}
+      {/* （2026-11-26 使用者決定：常用組合的加選品項放在名稱下方、已選品項上方。） */}
+      {editingCombo && itemPicker}
       {entries.map((entry) => {
         const item = snap.items.find((candidate) => candidate.id === entry.itemId);
         if (!item) return null;
@@ -186,12 +195,7 @@ export function EntryEditor({ api, snap, date, log, combo, editingCombo, onDateC
           onChange={(value) => setEntries((old) => old.map((e) => e.itemId === item.id ? value : e))}
           onRemove={() => setEntries((old) => old.filter((e) => e.itemId !== item.id))} />;
       })}
-      <div className="med-group">
-        <h3>加選品項</h3>
-        {pickable.length ? <div className="med-actions">{pickable.map((item) => <button type="button" key={item.id}
-          onClick={() => setEntries((old) => [...old, blankDose(item.id)])}><Icon name="plus" size={16} /> {item.name}</button>)}</div>
-          : <p className="muted small">目前沒有其他可選品項。可到「藥品與庫存」新增品項或補貨。</p>}
-      </div>
+      {!editingCombo && itemPicker}
       {problem && <p className="error-text" role="alert">{problem}</p>}
       <div className="med-actions med-footer">
         <button className="primary" type="submit">儲存</button>
