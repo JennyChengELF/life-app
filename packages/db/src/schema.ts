@@ -22,8 +22,9 @@
  * 17：共用標籤、記帳交易新增標籤 id（2026-11-25）
  * 19：共用人物增加國曆／農曆生日、祭日與聯繫狀態（2026-11-25）
  * 20：新增用藥記錄 APP（2026-11-26）
+ * 21：新增子彈筆記 APP（2026-11-26）
  */
-export const SCHEMA_VERSION = 20;
+export const SCHEMA_VERSION = 21;
 
 export type ColType = 'datetime' | 'date' | 'number' | 'text' | 'bool' | 'any';
 
@@ -34,7 +35,7 @@ export interface ColumnDef {
   label: string;
 }
 
-export type FileKey = 'water' | 'health' | 'bowel' | 'hub' | 'money' | 'calendar' | 'period' | 'meds';
+export type FileKey = 'water' | 'health' | 'bowel' | 'hub' | 'money' | 'calendar' | 'period' | 'meds' | 'bujo';
 
 export interface FileDef {
   /** 試算表檔名（不加版本號） */
@@ -57,6 +58,7 @@ export const FILES: Record<FileKey, FileDef> = {
   calendar: { title: '生活APP-行事曆', description: '行事曆 APP 的資料：群組、行程（含旅遊主行程與細項）、設定' },
   period: { title: '生活APP-生理期', description: '生理期 APP 的資料：經期起訖、每日出血、預測與提醒設定' },
   meds: { title: '生活APP-用藥記錄', description: '藥品、保健品、批次、補貨、服用紀錄和常用組合' },
+  bujo: { title: '生活APP-子彈筆記', description: '一般待辦、每週待辦排程與各次完成紀錄' },
 };
 
 export interface TableDef {
@@ -75,6 +77,41 @@ const systemCols: ColumnDef[] = [
 ];
 
 export const TABLES = {
+  bujoTasks: {
+    file: 'bujo', description: '一次性待辦；開始日和到期日均含當天。',
+    columns: [
+      { name: 'title', type: 'text', label: '待辦名稱' },
+      { name: 'note', type: 'text', label: '備註（選填）' },
+      { name: 'startDate', type: 'date', label: '開始日' },
+      { name: 'dueDate', type: 'date', label: '到期日' },
+      { name: 'completedDate', type: 'date', label: '實際完成日（空白代表未勾選）' },
+      { name: 'tagIds', type: 'text', label: '共用標籤編號，以逗號分隔' },
+      ...systemCols,
+    ],
+  },
+  bujoSchedules: {
+    file: 'bujo', description: '每週待辦排程歷史；APP 修改或停用時新增一列，原列保留。',
+    columns: [
+      { name: 'seriesId', type: 'text', label: '同一重複待辦的編號（APP 自動填）' },
+      { name: 'title', type: 'text', label: '待辦名稱' },
+      { name: 'note', type: 'text', label: '備註（選填）' },
+      { name: 'weekday', type: 'number', label: '星期（0 是星期日，6 是星期六）' },
+      { name: 'time', type: 'text', label: '出現時間（24 小時，如 00:00）' },
+      { name: 'effectiveAt', type: 'datetime', label: '此版本何時開始生效' },
+      { name: 'stopped', type: 'bool', label: '此版本是否停用後續排程' },
+      { name: 'tagIds', type: 'text', label: '共用標籤編號，以逗號分隔' },
+      ...systemCols,
+    ],
+  },
+  bujoCompletions: {
+    file: 'bujo', description: '重複待辦各次完成紀錄；未完成依排程計算。',
+    columns: [
+      { name: 'scheduleId', type: 'text', label: '排程版本編號' },
+      { name: 'occurrenceDate', type: 'date', label: '原訂出現日' },
+      { name: 'completedDate', type: 'date', label: '實際完成日（空白代表取消完成）' },
+      ...systemCols,
+    ],
+  },
   medItems: {
     file: 'meds', description: '中藥、西藥和保健品清單。同一種藥建一個品項。',
     columns: [

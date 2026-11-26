@@ -1,0 +1,33 @@
+@import '@life/ui/base.css';
+
+.bujo-app { max-width: 820px; }
+.bujo-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.bujo-row h2, .bujo-row .field { margin: 0; }
+.bujo-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: end; gap: 12px; }
+.bujo-fields, .bujo-type { border: 0; padding: 0; margin: 0; min-width: 0; }
+.bujo-type { display: flex; gap: 16px; }
+.bujo-type legend { font-weight: 600; margin-bottom: 4px; }
+.bujo-columns input { min-width: 0; width: 100%; }
+.bujo-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.bujo-actions .danger { color: var(--bad); }
+.bujo-section h3 { margin: 16px 0 0; }
+.bujo-list { padding: 0; margin: 0; list-style: none; }
+.bujo-list > li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.bujo-list > li:last-child { border-bottom: 0; }
+.bujo-item { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.bujo-item-title { display: block; text-align: left; background: none; border: none; padding: 0; color: var(--text); }
+.bujo-item small { display: block; color: var(--muted); }
+.bujo-complete { flex: none; }
+.bujo-jump { max-width: 230px; }
+.bujo-entry-form { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; margin-top: 12px; }
+.bujo-entry-form .field { margin: 0; }
+.bujo-note { white-space: pre-wrap; overflow-wrap: anywhere; }
+.bujo-stats { width: 100%; border-collapse: collapse; margin-top: 12px; }
+.bujo-stats th, .bujo-stats td { text-align: center; padding: 10px 6px; border-bottom: 1px solid var(--line); }
+.bujo-stats th:first-child { text-align: left; overflow-wrap: anywhere; }
+.bujo-notice, .bujo-error { margin: 8px 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+.bujo-error { color: var(--bad); }
+@media (max-width: 380px) {
+  .bujo-app { padding-left: 10px; padding-right: 10px; }
+  .bujo-columns { grid-template-columns: minmax(0, 1fr); gap: 0; }
+}

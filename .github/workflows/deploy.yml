@@ -75,9 +75,14 @@ jobs:
         env:
           VITE_BASE: /${{ github.event.repository.name }}/meds/
           VITE_GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+      - name: Build bujo
+        run: pnpm --filter bujo build
+        env:
+          VITE_BASE: /${{ github.event.repository.name }}/bujo/
+          VITE_GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
       - name: Assemble site
         run: |
-          mkdir -p _site/water _site/health _site/bowel _site/money _site/calendar _site/period _site/meds
+          mkdir -p _site/water _site/health _site/bowel _site/money _site/calendar _site/period _site/meds _site/bujo
           cp -r apps/hub/dist/. _site/
           cp -r apps/water/dist/. _site/water/
           cp -r apps/health/dist/. _site/health/
@@ -86,6 +91,7 @@ jobs:
           cp -r apps/calendar/dist/. _site/calendar/
           cp -r apps/period/dist/. _site/period/
           cp -r apps/meds/dist/. _site/meds/
+          cp -r apps/bujo/dist/. _site/bujo/
       - uses: actions/upload-pages-artifact@v3
   deploy:
     needs: build
