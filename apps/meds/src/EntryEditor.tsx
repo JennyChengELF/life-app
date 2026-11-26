@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   availableMedBatches, canPickMed, newId, parseDateTimeText, toInputDateTime,
   type MedCombo, type MedItem, type MedLog, type MedSnapshot, type MedStockChanges,
 } from '@life/db';
 import { DateTimeField } from '@life/ui/date-time-field';
 import { Icon } from '@life/ui/icon';
+import { WeekDateStrip } from '@life/ui/week-date-strip';
 import { BatchFields, blankBatch, QuantityField, type BatchDraft } from './StockFields';
 import type { MedApi } from './useMeds';
 
@@ -86,13 +87,15 @@ function EntryRow({ item, draft, snap, combo, canReplenish, previouslyChosen, be
   </div>;
 }
 
-export function EntryEditor({ api, snap, date, log, combo, editingCombo, onClose, onSaved }: {
+export function EntryEditor({ api, snap, date, log, combo, editingCombo, onDateChange, onDirtyChange, onClose, onSaved }: {
   api: MedApi;
   snap: MedSnapshot;
   date: string;
   log?: MedLog;
   combo?: MedCombo;
   editingCombo: boolean;
+  onDateChange?: (date: string) => void;
+  onDirtyChange?: (dirty: boolean) => void;
   onClose: () => void;
   onSaved: (date: string) => void;
 }) {
@@ -100,7 +103,13 @@ export function EntryEditor({ api, snap, date, log, combo, editingCombo, onClose
   const [deleteId] = useState(newId);
   const [initialTime] = useState(() => log?.time ?? Date.now());
   const [dateTime, setDateTime] = useState(() => toInputDateTime(initialTime));
-  const [logDate, setLogDate] = useState(log?.date ?? date);
+  const [localDate, setLocalDate] = useState(log?.date ?? date);
+  const logDate = onDateChange ? date : localDate;
+  const setLogDate = (value: string) => {
+    if (!value) return;
+    if (onDateChange) onDateChange(value);
+    else setLocalDate(value);
+  };
   const [name, setName] = useState(combo?.name ?? '');
   const [entries, setEntries] = useState<Draft[]>(() => {
     if (log) return [{
@@ -113,6 +122,8 @@ export function EntryEditor({ api, snap, date, log, combo, editingCombo, onClose
     (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(dateTime) ? parseDateTimeText(dateTime) : null);
   const pickable = snap.items.filter((item) => canPickMed(item) && !entries.some((entry) => entry.itemId === item.id));
   const isEdit = !!(log || combo);
+  const dirty = entries.length > 0 || dateTime !== toInputDateTime(initialTime);
+  useEffect(() => onDirtyChange?.(dirty), [dirty, onDirtyChange]);
 
   const save = async () => {
     setProblem('');
@@ -146,7 +157,11 @@ export function EntryEditor({ api, snap, date, log, combo, editingCombo, onClose
     if (await api.save(() => api.store.remove(deleteId, editingCombo ? 'medCombos' : 'medLogs', target.id), '已刪除')) onClose();
   };
 
-  return <form className="card med-form" onSubmit={(e) => { e.preventDefault(); void save(); }}>
+  return <>
+    {onDateChange && <fieldset className="med-form-body med-add-week" disabled={api.busy}>
+      <WeekDateStrip selected={logDate} setDate={setLogDate} />
+    </fieldset>}
+    <form className="card med-form" onSubmit={(e) => { e.preventDefault(); void save(); }}>
     <div className="med-row"><h2>{editingCombo ? (isEdit ? '修改常用組合' : '新增常用組合') : (isEdit ? '修改服用紀錄' : '記一筆服用')}</h2>
       <button type="button" className="icon-btn" aria-label="關閉編輯" onClick={onClose} disabled={api.busy}><Icon name="x" /></button>
     </div>
@@ -184,5 +199,6 @@ export function EntryEditor({ api, snap, date, log, combo, editingCombo, onClose
         {isEdit && <button type="button" className="danger med-push" onClick={() => void remove()}>刪除</button>}
       </div>
     </fieldset>
-  </form>;
+    </form>
+  </>;
 }
