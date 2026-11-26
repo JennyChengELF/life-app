@@ -141,6 +141,11 @@ export interface Payment extends RowRef {
   sort: number | null;
 }
 
+export interface AdvanceSettlement {
+  transaction: string;
+  rate: number | null;
+}
+
 export interface TxnInput {
   time: number;
   /** 只記日期時，time 僅供程式內排序／計算日期，試算表保留空白。 */
@@ -166,6 +171,9 @@ export interface TxnInput {
   twdStatus?: TwdStatus | null;
   rewardFor?: string | null;
   feeFor?: string | null;
+  /** 約定 1 單位原幣值多少台幣，只用於朋友先付。 */
+  agreedRate?: number | null;
+  settles?: AdvanceSettlement[];
   payments?: PaymentInput[];
   /** 同一家發卡機構的多卡／多期繳款分配；有值時不用 toAccount。 */
   cardPayments?: CardPaymentInput[];
@@ -175,6 +183,8 @@ export interface TxnInput {
 
 export interface Txn extends RowRef, Omit<TxnInput, 'lines' | 'statement' | 'cardPayments' | 'payments'> {
   date: string;
+  /** 還款時確認的匯率，載入時從還款紀錄帶入。 */
+  settledRate?: number | null;
   /** 入帳日（對帳時填） */
   postedDate: string | null;
   /** 繳卡費的轉帳：繳哪一期帳單（帳單 id） */
@@ -725,6 +735,18 @@ function toCardPayment(r: TableRow): CardPayment {
   };
 }
 
+function parseAdvanceSettlements(raw: unknown): AdvanceSettlement[] | null {
+  if (raw == null || raw === '') return [];
+  if (typeof raw !== 'string') return null;
+  try {
+    const rows: unknown = JSON.parse(raw);
+    if (!Array.isArray(rows) || !rows.every((x) => x && typeof x.transaction === 'string' && x.transaction && (x.rate === null || validAgreedRate(x.rate)))) return null;
+    return rows.map((x) => ({ transaction: x.transaction, rate: x.rate }));
+  } catch {
+    return null;
+  }
+}
+
 function toTxn(r: TableRow, date: string, lines: Line[], cardPayments: CardPayment[], payments: Payment[]): Txn {
   const v = r.values;
   const time = num(v.time);
@@ -754,6 +776,8 @@ function toTxn(r: TableRow, date: string, lines: Line[], cardPayments: CardPayme
     twdStatus: str(v.twdStatus) as TwdStatus | null,
     rewardFor: str(v.rewardFor),
     feeFor: str(v.feeFor),
+    agreedRate: num(v.agreedRate),
+    settles: parseAdvanceSettlements(v.settles) ?? [],
     lines,
     cardPayments,
     payments,
@@ -783,19 +807,22 @@ export function twdRate(t: Pick<TxnInput, 'origCurrency' | 'amount' | 'twdAmount
 }
 
 export function txnReportCurrency(t: Txn, accounts: Pick<Account, 'name' | 'currency'>[]): string {
-  return twdRate(t) != null ? 'TWD' : txnCurrency(t, accounts);
+  return reportRate(t) != null ? 'TWD' : txnCurrency(t, accounts);
 }
+
+const reportRate = (t: Txn) => t.paidBy ? t.settledRate ?? t.agreedRate ?? null : twdRate(t);
 
 /** 換算後的明細以交易順序分配四捨五入差額，保留原幣明細。 */
 export function txnReportLines(t: Txn): Line[] {
-  const rate = twdRate(t);
+  const rate = reportRate(t);
   if (rate == null) return t.lines;
+  const round = t.paidBy ? roundAdvanceTwd : roundMoney;
   let total = 0;
   return t.lines.map((line) => {
     const sign = ['收入', '我欠他', '他還我'].includes(line.kind) ? -1 : 1;
-    const before = roundMoney(total * rate);
+    const before = round(total * rate);
     total += line.amount * sign;
-    return { ...line, amount: sign * (roundMoney(total * rate) - before) };
+    return { ...line, amount: sign * (round(total * rate) - before) };
   });
 }
 
@@ -823,6 +850,8 @@ export function lineBalance(lines: Pick<LineInput, 'kind' | 'amount'>[]) {
 export function checkTxn(t: Omit<TxnInput, 'tagIds'> & { tagIds?: string[] }, refs: MoneyRefs, opts: { allowNoCategory?: boolean } = {}): string[] {
   const p: string[] = [];
   if (!Number.isFinite(t.time)) p.push('沒有填有效的記帳日期');
+  if (t.agreedRate != null && (!t.paidBy || !t.currency || t.currency === 'TWD' || !validAgreedRate(t.agreedRate))) p.push('約定匯率只用於朋友先付的外幣支出，請填大於 0 的數字');
+  if (t.settles?.length && (t.direction !== '出' || !t.account || t.lines.length !== 1 || t.lines[0].kind !== '我還他' || new Set(t.settles.map((x) => x.transaction)).size !== t.settles.length)) p.push('結清明細只能用於「我還他」，同一筆代付只能勾選一次');
   const accName = (n: string | null) => n != null && refs.accounts.some((a) => a.name === n);
   const cur = txnCurrency(t, refs.accounts);
   const intOk = (n: number) => currencyDigits(cur) > 0 || Number.isInteger(n);
@@ -1014,20 +1043,76 @@ export interface PersonBalance {
   net: number;
 }
 
+export const validAgreedRate = (rate: unknown): rate is number => typeof rate === 'number' && Number.isFinite(rate) && rate > 0;
+
+const roundAdvanceTwd = (value: number) => Math.sign(value) * Math.round(Math.abs(value) * (1 + Number.EPSILON));
+
+function advanceDebt(t: Txn) {
+  return t.paidBy ? t.lines.find((line) => line.kind === '我欠他' && line.person === t.paidBy) : undefined;
+}
+
+export function settlementsByAdvance(txns: Txn[], exceptPayment?: string) {
+  const result = new Map<string, { payment: Txn; settlement: AdvanceSettlement }>();
+  for (const payment of txns) {
+    if (payment.id === exceptPayment) continue;
+    for (const settlement of payment.settles ?? []) {
+      if (!result.has(settlement.transaction)) result.set(settlement.transaction, { payment, settlement });
+    }
+  }
+  return result;
+}
+
+export function pendingAdvances(txns: Txn[], person: string, exceptPayment?: string) {
+  const linked = settlementsByAdvance(txns, exceptPayment);
+  return txns.flatMap((txn) => {
+    const debt = advanceDebt(txn);
+    return debt && txn.paidBy === person && !linked.has(txn.id)
+      ? [{ txn, amount: debt.amount, currency: txn.currency ?? 'TWD', rate: txn.agreedRate ?? null }]
+      : [];
+  });
+}
+
+export function advancePaymentAmount(amount: number, originalCurrency: string, paymentCurrency: string, rate: number | null): number | null {
+  if (originalCurrency === paymentCurrency) return amount;
+  if (paymentCurrency !== 'TWD' || !validAgreedRate(rate)) return null;
+  // （2026-11-26 使用者決定：每筆先四捨五入到新台幣整元，再加總。）
+  const converted = roundAdvanceTwd(amount * rate);
+  return Number.isFinite(converted) ? converted : null;
+}
+
+function settlementProblem(settles: AdvanceSettlement[], person: string | null | undefined, currency: string, advances: ReadonlyMap<string, Txn>, claimed: ReadonlySet<string>): string | null {
+  for (const { transaction, rate } of settles) {
+    const advance = advances.get(transaction);
+    const debt = advance && advanceDebt(advance);
+    if (!advance || !debt || advance.paidBy !== person) return '找不到選取的代付紀錄，或代付人不同';
+    if (claimed.has(transaction)) return '選取的代付已有還款紀錄，請重新確認';
+    const original = advance.currency ?? 'TWD';
+    if (rate != null && (!validAgreedRate(rate) || original === 'TWD')) return '請填有效的約定匯率';
+    if (advancePaymentAmount(debt.amount, original, currency, rate) == null) return '請選同幣別帳戶，或用台幣還款並填齊約定匯率';
+  }
+  return null;
+}
+
 /**
  * 每個人的淨額（依幣別分開；2026-11-19 起借款和代墊不分）。
  * 淨額＝他欠我＋我還他 − 我欠他 − 他還我
  */
 export function personBalances(txns: Txn[], accounts: Pick<Account, 'name' | 'currency'>[]): PersonBalance[] {
   const map = new Map<string, PersonBalance>();
+  const linked = settlementsByAdvance(txns);
   for (const t of txns) {
-    const cur = txnCurrency(t, accounts);
+    if (t.settles?.length) continue;
+    const original = txnCurrency(t, accounts);
+    const debt = advanceDebt(t);
     for (const l of t.lines) {
       if (!l.person || !PERSON_KINDS.includes(l.kind)) continue;
+      if (l === debt && linked.has(t.id)) continue;
+      const converted = l === debt ? advancePaymentAmount(l.amount, original, 'TWD', t.agreedRate ?? null) : null;
+      const cur = converted != null ? 'TWD' : original;
       const key = `${l.person}\u0000${cur}`;
       const b = map.get(key) ?? { person: l.person, currency: cur, net: 0 };
       const sign = l.kind === '他欠我' || l.kind === '我還他' ? 1 : -1;
-      b.net += sign * l.amount;
+      b.net += sign * (converted ?? l.amount);
       map.set(key, b);
     }
   }
@@ -1138,6 +1223,8 @@ export interface EntryForm {
   mode: EntryMode;
   time: number;
   dateOnly?: boolean;
+  agreedRate?: number | null;
+  settles?: AdvanceSettlement[];
   /** 支出 / 收入 / 還款的帳戶；轉帳的轉出帳戶 */
   account: string | null;
   /** 支出：朋友先幫我付（有值時沒有帳戶） */
@@ -1242,6 +1329,7 @@ export function formToTxn(f: EntryForm): TxnInput {
           amount: null,
           paidBy: f.paidBy,
           currency: f.currency,
+          agreedRate: f.currency && f.currency !== 'TWD' ? f.agreedRate : null,
           // 朋友先付的退款（我的部分是負的）→ 變成他欠我
           lines: [...mine, { kind: sum(mine.map((l) => l.amount)) < 0 ? '他欠我' : '我欠他', amount: Math.abs(sum(mine.map((l) => l.amount))), person: f.paidBy }],
         };
@@ -1280,6 +1368,7 @@ export function formToTxn(f: EntryForm): TxnInput {
         direction: toMe ? '入' : '出',
         account: f.account,
         amount: f.amount,
+        settles: toMe ? [] : f.settles,
         lines: [{ kind: toMe ? '他還我' : '我還他', amount: f.amount ?? 0, person: f.person }],
       };
     }
@@ -1400,6 +1489,8 @@ export function installmentTxns(tx: TxnInput, n: number, accounts: Pick<Account,
 export function txnToForm(t: Txn): EntryForm {
   const f: EntryForm = { ...emptyForm('其他', t.time), store: t.store, branch: t.branch, statementText: t.statementText, note: t.note, tagIds: t.tagIds, account: t.account, currency: t.currency, cats: [] };
   f.dateOnly = t.dateOnly;
+  f.agreedRate = t.agreedRate;
+  f.settles = t.settles;
   f.origCurrency = t.origCurrency;
   f.twdAmount = t.twdAmount;
   f.twdStatus = t.twdStatus;
@@ -1484,7 +1575,7 @@ export function copyTxnForm(t: Txn, time: number): EntryForm {
   const f = txnToForm(t);
   // 多筆外幣付款金額取自原入帳，複製時回到單一帳戶、等待新的台幣金額。
   // （2026-11-26 使用者決定：複製交易仍帶入現在時間。）
-  return { ...f, time, dateOnly: false, statement: null, statementText: null, tagIds: [], rewardFor: null,
+  return { ...f, time, dateOnly: false, settles: [], statement: null, statementText: null, tagIds: [], rewardFor: null,
     ...(f.origCurrency ? { twdAmount: null, twdStatus: 'pending' as const, payments: [] } : {}) };
 }
 
@@ -1712,7 +1803,8 @@ export class MoneyStore {
         issue('moneyTransactions', r, [r.errors.includes('time') ? '時間格式看不懂（例：2026/11/18 12:30）' : r.errors.includes('date') ? '日期格式看不懂（例：2026/11/18）' : '請填記帳日期或時間']);
         continue;
       }
-      const bad = ['amount', 'toAmount', 'postedDate', 'twdAmount', 'paymentCount'].filter((k) => r.errors.includes(k));
+      const bad = ['amount', 'toAmount', 'postedDate', 'twdAmount', 'paymentCount', 'agreedRate'].filter((k) => r.errors.includes(k));
+      if (parseAdvanceSettlements(r.values.settles) == null) bad.push('settles');
       if (bad.length) {
         issue('moneyTransactions', r, bad.map((k) => `${k} 格式看不懂`));
         continue;
@@ -1810,6 +1902,25 @@ export class MoneyStore {
       await this.b.update('moneyTransactions', quickClear);
       return this.loadNow(now);
     }
+    // 依試算表列序確認關聯。同一筆代付重複結清時，後續重複列進「需要補齊」。
+    const advances = new Map(txns.filter((t) => advanceDebt(t)).map((t) => [t.id, t]));
+    const claimed = new Set<string>();
+    const invalidPayments = new Set<string>();
+    for (const payment of txns) {
+      if (!payment.settles?.length) continue;
+      const problem = settlementProblem(payment.settles, payment.lines[0]?.person, txnCurrency(payment, accounts), advances, claimed);
+      if (problem) {
+        const row = txRows.find((r) => r.rowNumber === payment.rowNumber);
+        if (row) issue('moneyTransactions', row, [problem]);
+        invalidPayments.add(payment.id);
+        continue;
+      }
+      for (const settlement of payment.settles) {
+        claimed.add(settlement.transaction);
+        advances.get(settlement.transaction)!.settledRate = settlement.rate;
+      }
+    }
+    for (let i = txns.length - 1; i >= 0; i--) if (invalidPayments.has(txns[i].id)) txns.splice(i, 1);
     txns.sort((a, b) => b.time - a.time);
 
     // 第一次使用：放預設分類（只放一次；使用者刪光也不會再放）
@@ -1977,6 +2088,20 @@ export class MoneyStore {
     const snap = await this.fresh();
     const p = checkTxn(input, { ...snap, statements: snap.statements });
     if (p.length) throw new Error(p.join('；'));
+    const linked = settlementsByAdvance(snap.txns, existing?.id);
+    const current = existing && snap.txns.find((t) => t.id === existing.id);
+    if (current && linked.has(current.id)) {
+      const prior = advanceDebt(current)!;
+      const next = input.lines.find((x) => x.kind === '我欠他' && x.person === input.paidBy);
+      if (input.paidBy !== current.paidBy || input.currency !== current.currency || next?.amount !== prior.amount || (input.agreedRate ?? null) !== (current.agreedRate ?? null)) {
+        throw new Error('這筆代付已結清，請先修改或刪除對應的還款，再調整代付人、金額或匯率');
+      }
+    }
+    if (input.settles?.length) {
+      const byId = new Map(snap.txns.map((t) => [t.id, t]));
+      const problem = settlementProblem(input.settles, input.lines[0]?.person, txnCurrency(input, snap.accounts), byId, new Set(linked.keys()));
+      if (problem) throw new Error(problem);
+    }
     if (input.rewardFor && input.rewardFor !== existing?.rewardFor && !snap.txns.some((t) => t.id === input.rewardFor && t.id !== existing?.id && t.lines.some((l) => l.kind === '支出' && l.amount > 0))) {
       throw new Error('找不到這筆回饋對應的原消費');
     }
@@ -2006,6 +2131,8 @@ export class MoneyStore {
       twdStatus: input.origCurrency ? input.twdStatus ?? 'pending' : null,
       rewardFor: input.rewardFor ?? null,
       ...(input.feeFor !== undefined ? { feeFor: input.feeFor } : {}),
+      agreedRate: input.agreedRate ?? null,
+      settles: input.settles?.length ? JSON.stringify(input.settles) : null,
       paymentCount: input.payments?.length || null,
       updatedAt: now,
     };
@@ -2092,6 +2219,7 @@ export class MoneyStore {
 
   /** 刪除只做標記（交易和明細一起） */
   async deleteTxn(t: Txn) {
+    if (advanceDebt(t) && settlementsByAdvance((await this.fresh()).txns).has(t.id)) throw new Error('請先取消還款中的這筆結清，再刪除代付紀錄');
     const now = Date.now();
     await this.b.update('moneyTransactions', [{ rowNumber: t.rowNumber, values: { deletedAt: now, updatedAt: now }, expectId: t.id }]);
     if (t.payments?.length) await this.b.update('moneyPayments', t.payments.map((x) => ({ rowNumber: x.rowNumber, values: { deletedAt: now, updatedAt: now }, expectId: x.id })));

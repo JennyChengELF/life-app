@@ -534,6 +534,8 @@ export const TABLES = {
       { name: 'rewardFor', type: 'text', label: '回饋收入所對應的原消費交易 id' },
       { name: 'paymentCount', type: 'number', label: '分開付款的明細筆數（APP 自動填）' },
       { name: 'feeFor', type: 'text', label: '國外交易手續費所對應的原消費交易 id（APP 自動填）' },
+      { name: 'agreedRate', type: 'number', label: '外幣代付約定匯率：1 單位原幣值多少台幣（選填）' },
+      { name: 'settles', type: 'text', label: '還款結清的原代付交易 id 與各筆匯率（APP 自動填）' },
     ],
   },
   moneyLines: {

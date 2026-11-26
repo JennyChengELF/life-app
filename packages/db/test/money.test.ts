@@ -5,12 +5,14 @@ import {
   accountBalance,
   accountDelta,
   accountLabel,
+  advancePaymentAmount,
   canCopyTxn,
   categoryBreakdown,
   moneyDayTotals,
   moneyEntries,
   monthlyTotals,
   parseEditHash,
+  pendingAdvances,
   categoryTree,
   checkTxn,
   copyTxnForm,
@@ -515,6 +517,38 @@ describe('MoneyStore', () => {
     snap = await store.load();
     expect(snap.issues).toEqual([]);
     expect(snap.txns.find((t) => t.date === '2026-11-27')).toMatchObject({ dateOnly: true, amount: 80 });
+  });
+
+  it('各筆代付依約定匯率取整，還款只結清勾選的整筆支出且以實付扣帳', async () => {
+    await store.saveAccount({ name: '錢包', type: '現金', currency: 'TWD', org: null, openingDate: '2026-11-01', openingBalance: 500, closingDay: null, dueDay: null, fxFeeRate: null, expiryDate: null, monthlyCheck: false, archived: false, note: null });
+    await store.addPerson('小明');
+    const addAdvance = (amount: number, agreedRate: number | null) => store.saveTxn(formToTxn(form({ paidBy: '小明', currency: 'JPY', agreedRate, cats: [{ category: '食 / 三餐', amount }] })));
+    const first = await addAdvance(50, 0.29);
+    const second = await addAdvance(50, null);
+    const third = await addAdvance(100, 0.21);
+    snap = await store.load();
+    expect(advancePaymentAmount(50, 'JPY', 'TWD', 0.29)).toBe(15);
+    expect(pendingAdvances(snap.txns, '小明').find((x) => x.txn.id === first)?.rate).toBe(0.29);
+    expect(personBalances(snap.txns, snap.accounts)).toEqual(expect.arrayContaining([{ person: '小明', currency: 'TWD', net: -36 }, { person: '小明', currency: 'JPY', net: -50 }]));
+
+    const payment = (rate: number | null) => formToTxn(form({ mode: '還款', sub: '我還他', person: '小明', account: '錢包', amount: 30,
+      settles: [{ transaction: first, rate: 0.29 }, { transaction: second, rate }],
+    }));
+    await expect(store.saveTxn(payment(null))).rejects.toThrow('填齊約定匯率');
+    const paymentId = await store.saveTxn(payment(0.25)); // 應還 15 + 13，實付 30。
+    snap = await store.load();
+    expect(snap.issues).toEqual([]);
+    expect(pendingAdvances(snap.txns, '小明').map((x) => x.txn.id)).toEqual([third]);
+    expect(personBalances(snap.txns, snap.accounts)).toEqual([{ person: '小明', currency: 'TWD', net: -21 }]);
+    expect(accountBalance(snap.accounts[0], snap.txns)).toBe(470);
+    expect(moneyDayTotals(snap, '2026-11-18').expense).toBe(49);
+    expect(txnToForm(snap.txns.find((t) => t.id === paymentId)!).settles).toEqual(payment(0.25).settles);
+    await expect(store.saveTxn(payment(0.25))).rejects.toThrow('已有還款紀錄');
+    await expect(store.deleteTxn(snap.txns.find((t) => t.id === first)!)).rejects.toThrow('先取消還款');
+    await store.deleteTxn(snap.txns.find((t) => t.id === paymentId)!);
+    snap = await store.load();
+    expect(pendingAdvances(snap.txns, '小明')).toHaveLength(3);
+    expect(accountBalance(snap.accounts[0], snap.txns)).toBe(500);
   });
 
   it('改名：帳戶、人物、分類（含底下的分類）用到的紀錄一起改', async () => {

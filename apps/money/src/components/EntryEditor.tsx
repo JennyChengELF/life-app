@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { EntryForm, MoneySnapshot, Txn, TxnInput } from '@life/db';
+import type { AdvanceSettlement, EntryForm, MoneySnapshot, Txn, TxnInput } from '@life/db';
 import {
   noteSuggestions,
   unpaidStatements,
@@ -12,6 +12,9 @@ import {
   formTotal,
   cardPaymentTotal,
   personBalances,
+  pendingAdvances,
+  settlementsByAdvance,
+  advancePaymentAmount,
   splitEven,
   startOfDay,
   toDateKey,
@@ -39,6 +42,7 @@ import { BudgetSelect } from './BudgetSelect';
 import { TimeField } from '@life/ui/time-field';
 import { WeekDateStrip } from '@life/ui/week-date-strip';
 import { TagPicker } from '@life/ui/tag-picker';
+import { AdvanceRepayment, RateInput, repaymentTotal } from './AdvanceRepayment';
 
 /** 金額輸入：自己記住打到一半的文字（例：「12.」） */
 export function AmountInput({
@@ -130,13 +134,22 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
   const editable = ENTRY_MODES.includes(f.mode as (typeof ENTRY_MODES)[number]) || f.mode === '不用還了';
   const firstAccount = splitPayment ? f.payments?.[0]?.account ?? null : f.account;
   const currency = txnCurrency({ account: firstAccount, currency: f.currency, origCurrency: paidByMode ? null : f.origCurrency }, snap.accounts);
+  const repaymentCurrency = snap.accounts.find((a) => a.name === f.account)?.currency ?? 'TWD';
+  const advances = f.mode === '還款' && f.sub === '我還他' && f.person ? pendingAdvances(snap.txns, f.person, txn?.id) : [];
+  const settlements = f.settles ?? [];
+  const expectedRepayment = repaymentTotal(advances, settlements, repaymentCurrency);
+  const settledLink = txn?.paidBy ? settlementsByAdvance(snap.txns).get(txn.id) : undefined;
+  const updateSettlements = (next: AdvanceSettlement[], account = f.account) => {
+    const nextCurrency = snap.accounts.find((a) => a.name === account)?.currency ?? 'TWD';
+    set({ settles: next, account, amount: next.length ? repaymentTotal(advances, next, nextCurrency) : null });
+  };
   const addPerson = (name: string) => api.run((s) => s.addPerson(name));
   const currencies = useMemo(() => [...new Set(['TWD', ...snap.accounts.map((a) => a.currency)])], [snap.accounts]);
 
   const switchMode = (mode: EntryForm['mode']) => {
     setAutoStoreCategory(null);
     setSplitPayment(false);
-    set({ mode, sub: mode === '還款' ? '他還我' : null, cats: [{ category: null, amount: null }], counterCats: [], shares: [], paidBy: null, origCurrency: null, twdAmount: null, twdStatus: null, payments: [] });
+    set({ mode, sub: mode === '還款' ? '他還我' : null, cats: [{ category: null, amount: null }], counterCats: [], shares: [], paidBy: null, agreedRate: null, settles: [], origCurrency: null, twdAmount: null, twdStatus: null, payments: [] });
   };
 
   const save = async () => {
@@ -151,8 +164,12 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
     if (multiCard && !f.cardPaymentOrg) p.unshift('請選發卡機構');
     if (multiCard && !f.cardPayments.length) p.unshift('請至少勾選一期帳單');
     if (paidByMode && !f.paidBy) p.unshift('請選誰先幫你付');
+    if (txn?.settles?.length && !tx.settles?.length) p.unshift('請保留至少一筆結清明細；要取消這筆還款，可以刪除還款紀錄');
+    if (tx.settles?.length && expectedRepayment == null) p.unshift('請選同幣別帳戶，或用台幣還款並填齊約定匯率');
     setProblems(p);
     if (p.length) return;
+    // （2026-11-26 使用者決定：第一版整筆結清。實付與換算有差時先確認。）
+    if (tx.settles?.length && tx.amount !== expectedRepayment && !confirm(`換算應還 ${fmtMoney(expectedRepayment!, repaymentCurrency)}，實付 ${fmtMoney(tx.amount!, repaymentCurrency)}。確定將勾選的 ${tx.settles.length} 筆全部結清嗎？`)) return;
     const backfill = backfillBudgetNames(snap, tx);
     // 國外交易手續費：另外記一筆（2026-11-18 確認）
     const card = snap.accounts.find((a) => a.name === tx.account && a.type === '信用卡');
@@ -392,7 +409,7 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
             {fmtMoney(Math.abs(x.net), x.currency)}{' '}
             <button
               className="link small"
-              onClick={() => set({ amount: Math.abs(x.net), sub: f.mode === '不用還了' || f.mode === '還款' ? (x.net > 0 ? '他還我' : '我還他') : f.sub })}
+              onClick={() => set({ amount: Math.abs(x.net), settles: [], sub: f.mode === '不用還了' || f.mode === '還款' ? (x.net > 0 ? '他還我' : '我還他') : f.sub })}
             >
               填入
             </button>
@@ -448,7 +465,8 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
   const feeOn = feeOnState ?? (!txn && storeForeign && feeBase != null);
   const feeAmount = feeEdit ?? (feeBase == null ? null : estimateFee(Math.max(0, feeBase), feeCard?.fxFeeRate ?? null));
   const rate = twdRate({ origCurrency: f.origCurrency, amount: Math.abs(formTotal(f)), twdAmount: f.twdAmount });
-  const entryCurrencies = [...new Set(['TWD', 'USD', 'JPY', 'EUR', 'KRW', 'HKD', 'CNY', 'GBP', 'AUD', 'CAD', 'SGD', 'THB', ...currencies, f.origCurrency].filter((c): c is string => !!c))];
+  const entryCurrencies = [...new Set(['TWD', 'USD', 'JPY', 'EUR', 'KRW', 'HKD', 'CNY', 'GBP', 'AUD', 'CAD', 'SGD', 'THB', ...currencies, f.origCurrency, f.currency].filter((c): c is string => !!c))];
+  const advanceTwdAmount = paidByMode && currency !== 'TWD' ? advancePaymentAmount(formTotal(f), currency, 'TWD', f.agreedRate ?? null) : null;
   const fundingRows = f.payments ?? [];
   const fundingAmount = f.origCurrency && (from?.currency ?? 'TWD') === 'TWD' ? f.twdAmount : Math.abs(formTotal(f));
   const linkedRewards = txn ? snap.txns.filter((x) => x.rewardFor === txn.id) : [];
@@ -604,7 +622,7 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
                       set({ account: null, shares: [] });
                     } else {
                       setPaidByMode(false);
-                      set({ account: v, paidBy: null, currency: null });
+                      set({ account: v, paidBy: null, currency: null, agreedRate: null });
                     }
                   }}
                   extra={<option value={PAID_BY}>朋友先幫我付⋯</option>}
@@ -618,14 +636,18 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
                   </label>
                   <label className="field" style={{ flex: 1 }}>
                     幣別
-                    <select value={f.currency ?? 'TWD'} onChange={(e) => set({ currency: e.target.value === 'TWD' ? null : e.target.value })}>
-                      {currencies.map((c) => (
+                    <select value={f.currency ?? 'TWD'} onChange={(e) => set({ currency: e.target.value === 'TWD' ? null : e.target.value, agreedRate: null })}>
+                      {entryCurrencies.map((c) => (
                         <option key={c}>{c}</option>
                       ))}
                     </select>
                   </label>
                 </div>
               )}
+              {paidByMode && currency !== 'TWD' && (settledLink ? <p className="hint">已結清{settledLink.settlement.rate == null ? '' : `・約定匯率 ${settledLink.settlement.rate}`}</p> : <>
+                <RateInput label={`約定匯率（選填，1 ${currency} 等於多少台幣）`} value={f.agreedRate ?? null} onChange={(agreedRate) => set({ agreedRate })} />
+                {advanceTwdAmount != null && <p className="hint">換算後 {fmtMoney(advanceTwdAmount, 'TWD')}</p>}
+              </>)}
               {storePicker('支出')}
               {catRows('支出')}
 
@@ -780,20 +802,20 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
             <>
               <div className="seg modes">
                 {(['他還我', '我還他'] as const).map((s) => (
-                  <button key={s} className={f.sub === s ? 'active' : ''} onClick={() => set({ sub: s })}>
+                  <button key={s} className={f.sub === s ? 'active' : ''} onClick={() => { if (f.sub !== s) set({ sub: s, settles: [], ...(settlements.length ? { amount: null } : {}) }); }}>
                     {f.mode === '不用還了' ? (s === '他還我' ? '他欠我的不收了' : '我欠他的不用還了') : s}
                   </button>
                 ))}
               </div>
               <label className="field">
                 誰
-                <PersonSelect people={snap.people} value={f.person} onChange={(v) => set({ person: v })} onAdd={addPerson} />
+                <PersonSelect people={snap.people} value={f.person} onChange={(v) => set({ person: v, settles: [], ...(settlements.length ? { amount: null } : {}) })} onAdd={addPerson} />
               </label>
-              {balanceHint()}
+              {!settlements.length && balanceHint()}
               {f.mode !== '不用還了' ? (
                 <label className="field">
                   {f.sub === '我還他' ? '從哪個帳戶出' : '存入哪個帳戶'}
-                  <AccountSelect snap={snap} value={f.account} onChange={(v) => set({ account: v })} />
+                  <AccountSelect snap={snap} value={f.account} onChange={(v) => settlements.length ? updateSettlements(settlements, v) : set({ account: v })} />
                 </label>
               ) : (
                 <>
@@ -817,8 +839,9 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
                   </label>
                 </>
               )}
+              {!!advances.length && <AdvanceRepayment key={f.person} advances={advances} selections={settlements} currency={repaymentCurrency} onChange={updateSettlements} />}
               <label className="field">
-                金額
+                {settlements.length ? '實付金額' : '金額'}
                 <AmountInput value={f.amount} onChange={(n) => set({ amount: n })} />
               </label>
             </>
