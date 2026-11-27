@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Backend, MoneySnapshot } from '@life/db';
+import type { Backend, MoneySnapshot, TxnInput } from '@life/db';
 import { AuthError, GoogleAuth, InvestMoney, InvestStore, LocalBackend, SheetsBackend, MoneyStore, type Txn } from '@life/db';
 
 const CLIENT_ID = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined)?.trim() ?? '';
@@ -55,6 +55,11 @@ export function useMoney() {
     }
     await store.deleteTxn(txn);
   }, [backend, connectInvest, store]);
+
+  const saveInvestmentCash = useCallback(async (input: TxnInput, txn: Txn) => {
+    await connectInvest();
+    return new InvestMoney(backend).saveFromMoney(input, txn);
+  }, [backend, connectInvest]);
 
   const showToast = useCallback((t: Omit<Toast, 'id'>, ms = 6000) => {
     window.clearTimeout(toastTimer.current);
@@ -182,6 +187,7 @@ export function useMoney() {
     refresh,
     run,
     investmentDetail,
+    saveInvestmentCash,
     deleteLinkedTxn,
     signOut,
     fileUrl: () => backend.fileUrl('money'),

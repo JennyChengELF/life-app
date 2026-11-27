@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { impliedInvestPrice, INVEST_KINDS, investOriginal, type Txn } from '@life/db';
+import { impliedInvestPrice, INVEST_KINDS, investmentMemo, investOriginal, type Txn } from '@life/db';
 import type { MoneyApi } from '../useMoney';
 
 export function investUrl(values: Record<string, string>) {
@@ -10,7 +10,7 @@ export function investUrl(values: Record<string, string>) {
   return url.href;
 }
 
-export function InvestEntry({ txn, api, close }: { txn: Txn; api: MoneyApi; close: () => void }) {
+export function InvestEntry({ txn, api }: { txn: Txn; api: MoneyApi }) {
   const [detail, setDetail] = useState<Awaited<ReturnType<MoneyApi['investmentDetail']>> | null>(null);
   const [error, setError] = useState('');
   const investmentId = txn.investmentId;
@@ -19,7 +19,9 @@ export function InvestEntry({ txn, api, close }: { txn: Txn; api: MoneyApi; clos
     if (!investmentId) return;
     let live = true;
     void investmentDetail(investmentId).then((result) => {
-      if (live) setDetail(result);
+      if (!live) return;
+      if (result.event && result.asset) setDetail(result);
+      else setError('找不到連結的投資紀錄。');
     }).catch(() => { if (live) setError('無法讀取投資明細，可重開這筆交易再試。'); });
     return () => { live = false; };
   }, [investmentId, investmentDetail]);
@@ -35,23 +37,11 @@ export function InvestEntry({ txn, api, close }: { txn: Txn; api: MoneyApi; clos
   const estimate = asset && event ? impliedInvestPrice(event, asset) : null;
   return <section className="card">
     <h2>{event ? INVEST_KINDS[event.kind] : '投資明細'}{asset && ` · ${asset.symbol} ${asset.name}`}</h2>
-    {txn.note && txn.investmentGenerated && <label className="field">整筆自動備註<input readOnly value={txn.note} /></label>}
     {event && asset ? <p>{event.tradeDate || '成交日待補'} · {event.quantity ?? '待補'} {asset.kind === 'stock' ? '股' : '單位'}
       {event.price != null && ` · ${asset.kind === 'stock' ? '成交價' : '淨值'} ${event.price} ${asset.currency}`}
       {estimate != null && ` · 推算單價 ${estimate}`}{event.fx != null && ` · 匯率 ${event.fx}`}
       {investOriginal(event) != null && ` · 原幣金額 ${investOriginal(event)} ${asset.currency}`}</p> : <p className="hint">{error || '讀取投資明細中…'}</p>}
-    {txn.investmentGenerated && <>
-      <p>{txn.date} · {txn.account} · {txn.direction === '入' ? '實收' : '實扣'} {txn.amount}</p>
-      <ul>{txn.lines.map((line) => <li key={line.id}>{line.category?.replaceAll(' / ', '／')} · {line.amount}{line.note && ` · ${line.note}`}</li>)}</ul>
-    </>}
+    {event && asset && txn.investmentGenerated && <p className="hint">自動摘要 · {investmentMemo(event, asset)}</p>}
     <a className="link" href={url}>修改投資交易</a>
-    {txn.investmentGenerated && <>
-      <button type="button" className="btn" onClick={close}>返回</button>
-      <button type="button" className="btn danger" disabled={api.busy} onClick={() => {
-        if (window.confirm('刪除這筆記帳和對應的投資紀錄？')) {
-          void api.run(() => api.deleteLinkedTxn(txn).then(() => true)).then((ok) => { if (ok) close(); });
-        }
-      }}>刪除</button>
-    </>}
   </section>;
 }

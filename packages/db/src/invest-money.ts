@@ -3,9 +3,9 @@ import {
   dividendEligibility, dividendEstimate, INVEST_KINDS, investIsPurchase, investIsSale,
   investOriginal, InvestStore, type InvestAsset, type InvestEvent,
 } from './invest';
-import { MoneyStore, roundMoney, type CategoryKind, type LineInput, type TxnInput } from './money';
+import { MoneyStore, roundMoney, type CategoryKind, type LineInput, type Txn, type TxnInput } from './money';
 import { newId } from './ids';
-import { startOfDay } from './time';
+import { startOfDay, toDateKey } from './time';
 
 export function investCategory(e: InvestEvent, a: InvestAsset) {
   if (e.kind === 'dividend') return '投資收入 / 投資配息';
@@ -92,15 +92,18 @@ export class InvestMoney {
     if (event.moneyMode === 'linked') throw new Error('這筆已連結既有記帳');
     const id = event.id;
     const linked = { ...event, id, moneyMode: 'generated' as const, moneyId: event.moneyId || `invest-${id}`, pending: true };
-    const assets = (await this.investments.load()).assets;
+    const { assets, events } = await this.investments.load();
     const asset = assets.find((a) => a.id === linked.asset);
     if (!asset) throw new Error('找不到投資標的');
-    const input = investmentCashInput(linked, asset);
+    const prior = events.find((e) => e.id === linked.id);
+    const ledger = await this.money.load();
+    const existing = ledger.txns.find((txn) => txn.id === linked.moneyId);
+    const priorAsset = assets.find((a) => a.id === prior?.asset);
+    const input = this.keepMoneyDetails(linked, asset, prior, priorAsset, existing);
     if (linked.kind !== 'switch') linked.cashAmount = input.amount;
     await this.investments.saveEvent(linked);
     try {
-      const money = await this.money.load();
-      const account = money.accounts.find((a) => a.name === input.account);
+      const account = ledger.accounts.find((a) => a.name === input.account);
       if (!account) throw new Error('找不到記帳帳戶');
       if (account.currency !== linked.cashCurrency) throw new Error('記帳帳戶幣別已變更，請重新選擇');
       const categories = input.lines.flatMap((l, i) => l.category ? [{
@@ -115,20 +118,95 @@ export class InvestMoney {
     }
   }
 
+  private keepMoneyDetails(event: InvestEvent, asset: InvestAsset, prior?: InvestEvent, priorAsset?: InvestAsset, existing?: Txn): TxnInput {
+    if (!existing || !prior || !priorAsset) return investmentCashInput(event, asset);
+    if (!event.cashDate) throw new Error('請填扣款／入帳日');
+    const matchCash = event.cashAccount === prior.cashAccount && event.cashCurrency === prior.cashCurrency &&
+      event.cashAmount === prior.cashAmount && event.externalFee === prior.externalFee;
+    const matchLines = matchCash && event.fee === prior.fee && event.tax === prior.tax &&
+      (event.fx === prior.fx || (!event.fee && !event.tax) || asset.currency === event.cashCurrency);
+    if ((!matchCash && existing.payments?.length) || (!matchLines && existing.origCurrency)) {
+      throw new Error('這筆有拆分付款或外幣記帳資料，請在一般記帳表單修改實收、實扣或付款帳戶');
+    }
+    const memo = investmentMemo(event, asset);
+    const note = existing.note === investmentMemo(prior, priorAsset) ? memo : existing.note;
+    const time = startOfDay(event.cashDate) + (existing.dateOnly ? 0 : existing.time - startOfDay(existing.date));
+    // （2026-11-27 使用者決定：從投資編輯時，保留一般記帳表單填寫的內容。）
+    if (matchLines) {
+      const oldLabel = investLabel(priorAsset);
+      const label = investLabel(asset);
+      const lines = existing.lines.map((line, i) => ({
+        ...line,
+        category: i === 0 && event.category !== prior.category ? event.category || investCategory(event, asset) : line.category,
+        note: line.note === oldLabel || line.note?.startsWith(`${oldLabel} `) ? label + line.note.slice(oldLabel.length) : line.note,
+      }));
+      return { ...existing, time, note, lines };
+    }
+    const next = investmentCashInput(event, asset);
+    const standard = investmentCashInput(prior, priorAsset);
+    if (existing.lines.length !== standard.lines.length || existing.lines.some((line, i) =>
+      line.kind !== standard.lines[i].kind || line.amount !== standard.lines[i].amount)) {
+      throw new Error('這筆已在記帳拆分或調整明細，請從一般記帳表單修改相關金額');
+    }
+    return {
+      ...existing, ...next, time, dateOnly: existing.dateOnly, note,
+      store: existing.store, branch: existing.branch, statementText: existing.statementText, tagIds: existing.tagIds,
+      rewardFor: existing.rewardFor, feeFor: existing.feeFor, payments: existing.payments,
+      origCurrency: existing.origCurrency, twdAmount: existing.twdAmount, twdStatus: existing.twdStatus,
+      lines: next.lines.map((line, i) => {
+        const previous = existing.lines[i];
+        if (!previous || previous.kind !== line.kind || (i > 0 && previous.category !== line.category)) return line;
+        return { ...line, budget: previous.budget, note: previous.note === standard.lines[i].note ? line.note : previous.note };
+      }),
+    };
+  }
+
+  async saveFromMoney(input: TxnInput, existing: Txn) {
+    const id = existing.investmentId;
+    if (!id || !existing.investmentGenerated) throw new Error('找不到這筆連動的投資紀錄');
+    const save = async () => {
+      const event = (await this.investments.load()).events.find((e) => e.id === id && e.moneyId === existing.id && e.moneyMode === 'generated');
+      if (!event) throw new Error('找不到這筆連動的投資紀錄');
+      const ledger = await this.money.load();
+      const account = ledger.accounts.find((a) => a.name === input.account);
+      const amount = input.origCurrency && account?.currency === 'TWD' ? input.twdAmount : input.amount;
+      if (!account || !amount || amount <= 0 || input.direction !== existing.direction || input.paidBy ||
+        (input.origCurrency && input.twdStatus !== 'final')) {
+        throw new Error('投資記帳須保留原本的收支方向，並填寫實際收付款帳戶與金額');
+      }
+      const txnId = await this.money.saveTxn({
+        ...input, investmentId: id, investmentGenerated: true, investmentDeferred: existing.investmentDeferred,
+      }, existing, existing.id);
+      const cashDate = toDateKey(input.time);
+      const cashAmount = roundMoney(amount, account.currency);
+      const cash = event.kind === 'switch' ? { externalFee: cashAmount } : { cashAmount };
+      const category = input.lines.find((line) => line.kind === (input.direction === '出' ? '支出' : '收入'))?.category ?? '';
+      try {
+        await this.investments.saveEvent({ ...event, ...cash, cashDate, cashCurrency: account.currency, cashAccount: account.name, category, pending: false });
+      } catch (error) {
+        throw new Error(`記帳已儲存，投資明細同步失敗。請再按一次儲存重試。 ${error instanceof Error ? error.message : ''}`);
+      }
+      return txnId;
+    };
+    const locks = globalThis.navigator?.locks;
+    return locks ? locks.request(`life-invest-${id}`, save) : save();
+  }
+
   async link(event: InvestEvent, moneyId: string) {
     if (event.moneyMode === 'generated') throw new Error('這筆已有自動產生的記帳');
     if (event.moneyId && event.moneyId !== moneyId) throw new Error('請先解除前一筆記帳連結');
+    const id = event.id || `money-${moneyId}`;
     const snapshot = await this.money.load();
     const txn = snapshot.txns.find((t) => t.id === moneyId);
-    if (!txn || (txn.investmentId && txn.investmentId !== event.id)) throw new Error('該筆記帳已連到其他投資');
+    if (!txn || (txn.investmentId && txn.investmentId !== id)) throw new Error('該筆記帳已連到其他投資');
     const expected = investIsSale(event) || event.kind === 'dividend' ? '入' : '出';
     if (txn.direction !== expected) throw new Error('請選擇對應的支出或收入');
     const currency = snapshot.accounts.find((a) => a.name === txn.account)?.currency ?? txn.currency;
     const confirmedCash = event.kind === 'dividend' && txn.amount != null
       ? { cashAmount: txn.amount, cashCurrency: currency || event.cashCurrency } : {};
-    const linked = { ...event, ...confirmedCash, id: event.id || `money-${moneyId}`, moneyId, moneyMode: 'linked' as const, pending: true };
+    const linked = { ...event, ...confirmedCash, id, moneyId, moneyMode: 'linked' as const, pending: true };
     await this.investments.saveEvent(linked);
-    await this.money.setInvestmentLink(moneyId, event.id);
+    await this.money.setInvestmentLink(moneyId, id);
     await this.investments.saveEvent({ ...linked, pending: false });
     return linked.id;
   }

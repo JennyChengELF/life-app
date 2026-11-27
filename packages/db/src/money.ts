@@ -1567,6 +1567,7 @@ const SYSTEM_TXN_NOTE = /^(?:\d+\/\d+ 期|開定存|定存利息|定存到期解
 
 /** 系統產生或 APP 無法完整重建的交易不提供複製。（2026-11-21 使用者決定） */
 export function canCopyTxn(t: Txn): boolean {
+  if (t.investmentGenerated) return false;
   const form = txnToForm(t);
   const editable = ENTRY_MODES.includes(form.mode as (typeof ENTRY_MODES)[number]) || form.mode === '不用還了';
   if (!editable || isFeeTxn(t) || t.cardPayments.length) return false;
@@ -2185,6 +2186,7 @@ export class MoneyStore {
       // （2026-11-27 使用者決定：同步重試使用同一個記帳編號，不重複入帳。）
       const id = investmentTransactionId;
       const old = existing?.lines ?? [];
+      const oldFunding = existing?.payments ?? [];
       await this.b.writeBatch([
         { table: 'moneyTransactions', ...(existing
           ? { update: [{ rowNumber: existing.rowNumber, expectId: id, values: txValues }] }
@@ -2195,6 +2197,10 @@ export class MoneyStore {
         })), append: input.lines.slice(old.length).map((l, i) => ({
           ...lineValues(l, i + old.length), transaction: id, id: newId(now), createdAt: now,
         })) },
+        { table: 'moneyPayments', update: oldFunding.map((row, i) => ({
+          rowNumber: row.rowNumber, expectId: row.id,
+          values: funding[i] ? fundingValues(funding[i], i) : { deletedAt: now, updatedAt: now },
+        })), append: appendFunding(id, oldFunding.length) },
       ]);
       return id;
     }

@@ -268,6 +268,8 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
           const id = await s.saveTxn(part);
           purchaseId ??= id;
         }
+      } else if (txn?.investmentGenerated) {
+        purchaseId = await api.saveInvestmentCash(tx, txn);
       } else {
         purchaseId = await s.saveTxn(tx, txn ?? (editing.target ? ({ ...editing.target, lines: [] } as unknown as Txn) : undefined));
       }
@@ -299,7 +301,7 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
   };
 
   const remove = async () => {
-    if (!txn || !confirm('確定刪除這一筆嗎？')) return;
+    if (!txn || !confirm(txn.investmentGenerated ? '確定刪除這筆記帳及連動的投資紀錄嗎？' : '確定刪除這一筆嗎？')) return;
     const ok = await api.run(() => api.deleteLinkedTxn(txn).then(() => true));
     if (ok) {
       api.showToast({ kind: 'info', text: '已刪除' });

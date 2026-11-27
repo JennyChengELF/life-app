@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   accountBalance, blankAsset, blankInvestEvent, dividendEligibility, dividendEstimate, impliedInvestPrice,
   importInvestRows, InvestMoney, investPortfolio, LocalBackend, memoryStorage, monthStats, previewInvestImport,
-  type InvestAsset, type InvestEvent,
+  startOfDay, type InvestAsset, type InvestEvent,
 } from '../src';
 
 const date = '2020-07-01';
@@ -107,6 +107,42 @@ describe('投資 APP', () => {
     expect(snap.txns[0].lines[0]).toMatchObject({ category: '投資收入 / 投資配息', amount: 195 });
     expect(monthStats(snap.txns, snap.categories, snap.accounts, future.slice(0, 7))[0].income).toBe(195);
     expect(accountBalance(snap.accounts[0], snap.txns)).toBe(2000);
+  });
+
+  it('一般記帳表單可改已產生的投資記帳，之後改股數仍保留使用者填的欄位', async () => {
+    const { bridge, store } = await setup();
+    const buy = event({ id: '', quantity: 4, price: 100, cashAmount: 400, cashDate: date, cashAccount: '測試銀行' });
+    expect((await bridge.generate(buy)).error).toBeUndefined();
+    const [cash] = (await bridge.money.load()).txns;
+    const depositDay = '2020-07-03';
+    const time = startOfDay(depositDay) + 9 * 3600000;
+    await bridge.saveFromMoney({
+      ...cash, time, dateOnly: false, amount: 420, store: '測試店家', note: '自己填的備註',
+      lines: [{ ...cash.lines[0], amount: 420, note: '明細備註' }],
+    }, cash);
+    const [investment] = (await store.load()).events;
+    expect(investment).toMatchObject({ tradeDate: date, cashDate: depositDay, cashAmount: 420, quantity: 4 });
+    expect((await bridge.generate({ ...investment, quantity: 5, price: 84 })).error).toBeUndefined();
+    const edited = (await bridge.money.load()).txns;
+    expect(edited).toHaveLength(1);
+    expect(edited[0]).toMatchObject({ id: cash.id, time, dateOnly: false, amount: 420, store: '測試店家', note: '自己填的備註' });
+    expect(edited[0].lines[0]).toMatchObject({ note: '明細備註', amount: 420 });
+  });
+
+  it('從原有記帳第一次補填投資時，使用完整連結編號且不重建現金交易', async () => {
+    const { bridge, store } = await setup();
+    const cashInput = {
+      time: startOfDay(date), dateOnly: true, direction: '出' as const, account: '測試銀行',
+      amount: 400, paidBy: null, currency: null, toAccount: null, toAmount: null,
+      store: null, branch: null, statementText: null, note: '舊記帳', tagIds: [],
+      lines: [{ kind: '支出' as const, amount: 400, category: '投資' }],
+    };
+    const cashId = await bridge.money.saveTxn(cashInput);
+    const id = await bridge.link(event({ id: '', quantity: 4, price: 100 }), cashId);
+    expect((await store.load()).events[0]).toMatchObject({ id, moneyId: cashId, moneyMode: 'linked' });
+    const ledger = (await bridge.money.load()).txns;
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0]).toMatchObject({ id: cashId, investmentId: id, note: '舊記帳', amount: 400 });
   });
 
   it('已知格式分表預覽和匯入，不建立記帳，重貼時標示可能重複', async () => {

@@ -196,8 +196,8 @@ export function App() {
             {tab === 'add' && (editing ? <><button type="button" className="link more-back" onClick={() => {
               if (window.confirm('這筆資料還沒儲存，確定要更換記帳項目嗎？')) setEditing(null);
             }}><Icon name="left" size={18} /> 更換項目</button>
-            {editing.txn && <InvestEntry txn={editing.txn} api={api} close={closeEditor} />}
-            {!editing.txn?.investmentGenerated && <EntryEditor
+            {editing.txn && <InvestEntry key={editing.txn.id} txn={editing.txn} api={api} />}
+            <EntryEditor
               key={editing.txn?.id ?? `new-${editing.form.mode}-${editing.form.person ?? ''}`}
               api={api}
               snap={api.snap}
@@ -210,7 +210,7 @@ export function App() {
                 edit({ form: copyTxnForm(editing.txn!, timeForDate(date)), copied: true });
                 api.showToast({ kind: 'info', text: '已複製成新交易，確認或修改後再儲存' });
               } : undefined}
-            />}</> : <AddMenu date={date} setDate={setDate} open={(mode) => edit({ form: emptyForm(mode, startOfDay(date)) })}
+            /></> : <AddMenu date={date} setDate={setDate} open={(mode) => edit({ form: emptyForm(mode, startOfDay(date)) })}
               openInvestment={() => { location.href = investUrl({ fromMoney: '1', date }); }} />)}
             {tab === 'calendar' && <CalendarView snap={api.snap} date={date} setDate={setDate} onEdit={(value) => edit(value)} onAdd={() => setTab('add')} />}
             {tab === 'stats' && <StatsView snap={api.snap} initialMonth={date.slice(0, 7)} />}
