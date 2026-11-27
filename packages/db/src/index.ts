@@ -24,6 +24,7 @@ export * from './meds';
 export * from './bujo';
 export * from './conditions';
 export * from './money';
+export * from './exchange-rates';
 export * from './budget';
 export * from './timeline';
 export * from './statement';

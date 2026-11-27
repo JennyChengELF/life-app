@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { AdvanceSettlement, EntryForm, MoneySnapshot, Txn, TxnInput } from '@life/db';
+import type { AdvanceSettlement, EntryForm, MoneySnapshot, ReferenceRate, Txn, TxnInput } from '@life/db';
 import {
   noteSuggestions,
   unpaidStatements,
@@ -17,11 +17,14 @@ import {
   advancePaymentAmount,
   splitEven,
   startOfDay,
+  todayKey,
   toDateKey,
   toHHmm,
   txnCurrency,
   txnTitle,
   twdRate,
+  estimateTwdAmount,
+  fetchReferenceRate,
   defaultBudgetFor,
   estimateFee,
   feeTxnFrom,
@@ -96,18 +99,75 @@ const MODE_TITLE: Record<string, string> = { 不用還了: '不用還了', 調�
 
 export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, onEdit, hideModeSwitch = false }: { api: MoneyApi; snap: MoneySnapshot; editing: Editing; onClose: () => void; onSavedDate?: (date: string) => void; onCopy?: () => void; onEdit?: (entry: Editing) => void; hideModeSwitch?: boolean }) {
   const txn = editing.txn;
-  const [f, setF] = useState<EntryForm>(() => {
+  const [draft, setF] = useState<EntryForm>(() => {
     const form = txn ? txnToForm(txn) : editing.form;
     const first = form.cardPayments[0]?.account;
     return first ? { ...form, cardPaymentOrg: snap.accounts.find((a) => a.name === first)?.org ?? null } : form;
   });
+  const [paidByMode, setPaidByMode] = useState(!!draft.paidBy);
+  const [splitPayment, setSplitPayment] = useState(() => !!draft.payments?.length);
+  const [rateDraft, setRateDraft] = useState<{ rate: number | null; date?: string } | null>();
+  const [historyDate, setHistoryDate] = useState<string | null>(null);
+  const [rateMessage, setRateMessage] = useState<string | null>(null);
+  const [rateProposal, setRateProposal] = useState<ReferenceRate | null>(null);
+  const today = todayKey();
+  const entryDate = toDateKey(draft.time);
+  const firstAccount = splitPayment ? draft.payments?.[0]?.account ?? null : draft.account;
+  const from = snap.accounts.find((a) => a.name === firstAccount);
+  const entryCurrency = draft.origCurrency ?? from?.currency ?? 'TWD';
+  const foreignCurrency = !paidByMode && (draft.mode === '支出' || draft.mode === '收入') && entryCurrency !== 'TWD'
+    ? entryCurrency : null;
+  const actualAmount = draft.twdStatus === 'final' && draft.twdAmount != null;
+  const twdEstimate = rateDraft?.rate ? estimateTwdAmount(formTotal(draft), rateDraft.rate) : null;
+  const f: EntryForm = foreignCurrency && rateDraft
+    ? { ...draft, origCurrency: twdEstimate == null ? draft.origCurrency : foreignCurrency, twdAmount: twdEstimate, twdStatus: twdEstimate == null ? null : 'estimated' }
+    : draft;
+
+  // （2026-11-27 使用者決定：所有匯率查詢都以記帳日期為準；只有新增時自動查。）
+  const autoLookup = !txn && !editing.target && rateDraft === undefined && draft.twdAmount == null && !rateMessage;
+  const lookupDate = foreignCurrency && entryDate <= today && (historyDate === entryDate || autoLookup) ? entryDate : null;
+  const lookupBusy = !!lookupDate && !rateProposal;
+  useEffect(() => {
+    if (!foreignCurrency || !lookupDate || rateProposal) return;
+    const request = new AbortController();
+    const applyResult = (quote: ReferenceRate | null, error: string) => {
+      if (request.signal.aborted) return;
+      if (quote && actualAmount) {
+        setRateProposal(quote);
+      } else if (quote) {
+        setRateDraft(quote);
+        setHistoryDate(null);
+      } else {
+        setRateMessage(error);
+        setHistoryDate(null);
+      }
+    };
+    void fetchReferenceRate(foreignCurrency, lookupDate, request.signal).then(
+      (quote) => applyResult(quote, '這個日期附近沒有可用匯率，可以手動填寫。'),
+      () => applyResult(null, '暫時查不到參考匯率，可以重試或手動填寫。'),
+    );
+    return () => request.abort();
+  }, [foreignCurrency, lookupDate, historyDate, actualAmount, rateProposal]);
+
+  const clearLookup = () => {
+    setHistoryDate(null);
+    setRateProposal(null);
+    setRateMessage(null);
+  };
+  const resetRate = () => {
+    clearLookup();
+    setRateDraft(undefined);
+  };
+  const useEstimate = (rate: number | null, date?: string) => {
+    clearLookup();
+    setRateDraft({ rate, date });
+    setF((current) => ({ ...current, twdAmount: null, twdStatus: null }));
+  };
   const [multiCard, setMultiCard] = useState(() => f.cardPayments.length > 0);
-  const [splitPayment, setSplitPayment] = useState(() => !!f.payments?.length);
   const [initialForm] = useState(() => JSON.stringify(f));
   const [problems, setProblems] = useState<string[]>([]);
   const [splitTotal, setSplitTotal] = useState<number | null>(null);
   const [splitN, setSplitN] = useState(2);
-  const [paidByMode, setPaidByMode] = useState(!!f.paidBy);
   /** 目前第一筆分類是否仍是依店家自動帶入；使用者手動選過後清除。 */
   const [autoStoreCategory, setAutoStoreCategory] = useState<string | null>(null);
   /** 國外交易手續費（信用卡支出）：null = 自動（新增時國外店家就勾；修改時不勾） */
@@ -121,9 +181,18 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
   /** 修改前的金額：改了金額要提醒手續費那筆也要改 */
   const [initTotal] = useState(() => formTotal(f));
   const set = (patch: Partial<EntryForm>) => setF((x) => ({ ...x, ...patch }));
+  const setFunding = (account: string | null, patch: Partial<EntryForm>) => {
+    const nextCurrency = snap.accounts.find((a) => a.name === account)?.currency ?? 'TWD';
+    if (!draft.origCurrency && nextCurrency !== entryCurrency) resetRate();
+    set(patch);
+  };
   /** 2026-11-23 使用者決定：新增與編輯都能改日期、可選未來；只換日期並保留原本時間。 */
   const setEntryDate = (value: string) => {
     if (!value) return;
+    if (value !== entryDate) {
+      clearLookup();
+      if (!txn && !editing.target && rateDraft?.date) setRateDraft(undefined);
+    }
     if (f.dateOnly) return set({ time: startOfDay(value) });
     const [hour, minute] = toHHmm(f.time).split(':').map(Number);
     const next = new Date(startOfDay(value));
@@ -132,7 +201,6 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
   };
 
   const editable = ENTRY_MODES.includes(f.mode as (typeof ENTRY_MODES)[number]) || f.mode === '不用還了';
-  const firstAccount = splitPayment ? f.payments?.[0]?.account ?? null : f.account;
   const currency = txnCurrency({ account: firstAccount, currency: f.currency, origCurrency: paidByMode ? null : f.origCurrency }, snap.accounts);
   const repaymentCurrency = snap.accounts.find((a) => a.name === f.account)?.currency ?? 'TWD';
   const advances = f.mode === '還款' && f.sub === '我還他' && f.person ? pendingAdvances(snap.txns, f.person, txn?.id) : [];
@@ -147,6 +215,7 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
   const currencies = useMemo(() => [...new Set(['TWD', ...snap.accounts.map((a) => a.currency)])], [snap.accounts]);
 
   const switchMode = (mode: EntryForm['mode']) => {
+    resetRate();
     setAutoStoreCategory(null);
     setSplitPayment(false);
     set({ mode, sub: mode === '還款' ? '他還我' : null, cats: [{ category: null, amount: null }], counterCats: [], shares: [], paidBy: null, agreedRate: null, settles: [], origCurrency: null, twdAmount: null, twdStatus: null, payments: [] });
@@ -452,7 +521,6 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
   const allNoteChips = useMemo(() => noteSuggestions(snap.txns, noteCats ? noteCats.split(' ') : []), [snap.txns, noteCats]);
   const noteChips = allNoteChips.filter((x) => !(f.note ?? '').split('、').map((y) => y.trim()).includes(x));
 
-  const from = snap.accounts.find((a) => a.name === firstAccount);
   const canInstall = !txn && !editing.target && f.mode === '支出' && !paidByMode && !f.origCurrency && !splitPayment && !!from;
   const feeCard = f.mode === '支出' && !paidByMode && !splitPayment && from?.type === '信用卡' && !(txn && isFeeTxn(txn)) ? from : null;
   // 修改舊資料：已經記過手續費的不再重複記（2026-11-18 確認）
@@ -464,7 +532,8 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
   const feeBase = f.origCurrency && from?.currency === 'TWD' ? f.twdAmount : formTotal(f);
   const feeOn = feeOnState ?? (!txn && storeForeign && feeBase != null);
   const feeAmount = feeEdit ?? (feeBase == null ? null : estimateFee(Math.max(0, feeBase), feeCard?.fxFeeRate ?? null));
-  const rate = twdRate({ origCurrency: f.origCurrency, amount: Math.abs(formTotal(f)), twdAmount: f.twdAmount });
+  const rate = rateDraft ? rateDraft.rate : twdRate({ origCurrency: f.origCurrency, amount: Math.abs(formTotal(f)), twdAmount: f.twdAmount });
+  const proposedAmount = rateProposal ? estimateTwdAmount(formTotal(f), rateProposal.rate) : null;
   const entryCurrencies = [...new Set(['TWD', 'USD', 'JPY', 'EUR', 'KRW', 'HKD', 'CNY', 'GBP', 'AUD', 'CAD', 'SGD', 'THB', ...currencies, f.origCurrency, f.currency].filter((c): c is string => !!c))];
   const advanceTwdAmount = paidByMode && currency !== 'TWD' ? advancePaymentAmount(formTotal(f), currency, 'TWD', f.agreedRate ?? null) : null;
   const fundingRows = f.payments ?? [];
@@ -563,26 +632,58 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
             <>
               <label className="field">
                 幣別
-                <select value={f.origCurrency ?? from?.currency ?? 'TWD'} onChange={(e) => set({ origCurrency: e.target.value === 'TWD' ? null : e.target.value, twdAmount: null, twdStatus: null })}>
+                <select value={entryCurrency} onChange={(e) => {
+                  resetRate();
+                  set({ origCurrency: e.target.value === 'TWD' ? null : e.target.value, twdAmount: null, twdStatus: null });
+                }}>
                   {entryCurrencies.map((c) => <option key={c} value={c} disabled={c === 'TWD' && !!from && from.currency !== 'TWD'}>{c === 'TWD' ? '新台幣 TWD' : c}</option>)}
                 </select>
               </label>
-              {f.origCurrency && (
+              {foreignCurrency && (
                 <div className="subbox">
+                  <RateInput label={`匯率（1 ${foreignCurrency} 等於多少台幣）`} value={rate} onChange={(value) => useEstimate(value)} />
+                  <div className="row wrap">
+                    <button type="button" disabled={entryDate > today || !!historyDate} onClick={() => {
+                      clearLookup();
+                      setHistoryDate(entryDate);
+                    }}>使用交易日匯率</button>
+                    {lookupBusy && <span className="hint" role="status">查詢匯率中⋯</span>}
+                  </div>
+                  {entryDate > today && <p className="hint">未來日期還沒有交易日匯率。</p>}
+                  {rateMessage && <p className="hint" role="status">{rateMessage}</p>}
+                  {rateDraft?.date && <p className="hint">參考報價日期 {rateDraft.date} · <a href="https://frankfurter.dev/" target="_blank" rel="noreferrer">Frankfurter</a></p>}
+                  {rateDraft?.rate != null && rateDraft.rate <= 0 && <p className="hint">匯率請填大於 0 的數字。</p>}
+                  {rateDraft?.rate != null && rateDraft.rate > 0 && formTotal(f) !== 0 && twdEstimate == null && <p className="hint">換算結果無法存成台幣正整數，可以手動填寫金額。</p>}
+                  {rateProposal && (
+                    <div className="subbox">
+                      <p className="hint">參考報價日期 {rateProposal.date}，匯率 {rateProposal.rate}。{proposedAmount == null ? '目前無法換算成台幣正整數。' : `套用後將使用預估 ${fmtMoney(proposedAmount)}，取代目前的實際金額。`}</p>
+                      <div className="row wrap">
+                        <button type="button" disabled={proposedAmount == null} onClick={() => useEstimate(rateProposal.rate, rateProposal.date)}>改用預估金額</button>
+                        <button type="button" className="link" onClick={clearLookup}>保留實際金額</button>
+                      </div>
+                    </div>
+                  )}
                   <label className="field">
                     台幣金額
-                    <AmountInput value={f.twdAmount ?? null} onChange={(twdAmount) => set({ twdAmount, twdStatus: twdAmount == null ? 'pending' : f.twdStatus === 'final' ? 'final' : 'estimated' })} placeholder="可先留空" />
+                    <AmountInput value={f.twdAmount ?? null} onChange={(twdAmount) => {
+                      clearLookup();
+                      setRateDraft(null);
+                      set({ origCurrency: twdAmount == null ? draft.origCurrency : foreignCurrency, twdAmount, twdStatus: twdAmount == null ? 'pending' : f.twdStatus === 'final' ? 'final' : 'estimated' });
+                    }} placeholder="可先留空" />
                   </label>
                   {f.twdAmount != null ? (
                     <label className="field">
                       台幣金額狀態
-                      <select value={f.twdStatus === 'final' ? 'final' : 'estimated'} onChange={(e) => set({ twdStatus: e.target.value === 'final' ? 'final' : 'estimated' })}>
+                      <select value={f.twdStatus === 'final' ? 'final' : 'estimated'} onChange={(e) => {
+                        clearLookup();
+                        setRateDraft(null);
+                        set({ origCurrency: foreignCurrency, twdAmount: f.twdAmount, twdStatus: e.target.value === 'final' ? 'final' : 'estimated' });
+                      }}>
                         <option value="estimated">預估金額</option>
                         <option value="final">實際金額</option>
                       </select>
                     </label>
                   ) : <p className="hint">台幣尚未換算，確認金額後可回來補填。</p>}
-                  {rate != null && Number.isFinite(rate) && <p className="hint">{f.twdStatus === 'estimated' ? '預估換算' : '換算'} 1 {f.origCurrency} ≈ NT$ {rate.toLocaleString('en-US', { maximumSignificantDigits: 8 })}</p>}
                 </div>
               )}
               {splitPayment ? (
@@ -590,9 +691,9 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
                   <div className="field">{f.mode === '支出' ? '付款明細' : '收款明細'}</div>
                   {fundingRows.map((row, i) => (
                     <div className="row funding-line" key={i}>
-                      <AccountSelect snap={snap} value={row.account} onChange={(account) => set({ payments: fundingRows.map((x, j) => i === j ? { ...x, account } : x) })} />
+                      <AccountSelect snap={snap} value={row.account} onChange={(account) => setFunding(i === 0 ? account : firstAccount, { payments: fundingRows.map((x, j) => i === j ? { ...x, account } : x) })} />
                       <AmountInput value={row.amount} onChange={(amount) => set({ payments: fundingRows.map((x, j) => i === j ? { ...x, amount } : x) })} />
-                      {fundingRows.length > 2 && <button type="button" className="x-btn" aria-label="移除付款方式" onClick={() => set({ payments: fundingRows.filter((_, j) => i !== j) })}>✕</button>}
+                      {fundingRows.length > 2 && <button type="button" className="x-btn" aria-label="移除付款方式" onClick={() => setFunding(i === 0 ? fundingRows[1].account : firstAccount, { payments: fundingRows.filter((_, j) => i !== j) })}>✕</button>}
                     </div>
                   ))}
                   <p className="hint">{fundingAmount == null ? '請先填台幣金額' : `合計 ${fmtMoney(fundingRows.reduce((sum, x) => sum + (x.amount ?? 0), 0), from?.currency)} ／ 應為 ${fmtMoney(fundingAmount, from?.currency)}`}</p>
@@ -618,11 +719,12 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
                   value={paidByMode ? PAID_BY : f.account}
                   onChange={(v) => {
                     if (v === PAID_BY) {
+                      clearLookup();
                       setPaidByMode(true);
                       set({ account: null, shares: [] });
                     } else {
                       setPaidByMode(false);
-                      set({ account: v, paidBy: null, currency: null, agreedRate: null });
+                      setFunding(v, { account: v, paidBy: null, currency: null, agreedRate: null });
                     }
                   }}
                   extra={<option value={PAID_BY}>朋友先幫我付⋯</option>}
@@ -737,7 +839,7 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
             <>
               {!splitPayment && <label className="field">
                 存入帳戶
-                <AccountSelect snap={snap} value={f.account} onChange={(v) => set({ account: v })} />
+                <AccountSelect snap={snap} value={f.account} onChange={(v) => setFunding(v, { account: v })} />
               </label>}
               {storePicker('收入')}
               {catRows('收入')}
