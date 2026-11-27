@@ -8,7 +8,7 @@ export const INVEST_KINDS = {
   bonus: '加值回饋', insuranceCost: '保險成本', policyFee: '保單維持費用',
 } as const;
 export type InvestKind = keyof typeof INVEST_KINDS;
-export type AssetKind = 'stock' | 'fund' | 'policy';
+export type AssetKind = 'pending' | 'stock' | 'fund' | 'policy';
 
 export interface InvestAsset {
   id: string;
@@ -190,7 +190,7 @@ export function investPortfolio(assets: InvestAsset[], events: InvestEvent[], th
 
 export function dividendEligibility(event: InvestEvent, assets: InvestAsset[], events: InvestEvent[]) {
   const asset = assets.find((a) => a.id === event.asset);
-  if (!event.exDate || !asset || asset.kind === 'policy' || (asset.kind === 'stock' && asset.market !== 'TW')) return null;
+  if (!event.exDate || !asset || asset.kind === 'pending' || asset.kind === 'policy' || (asset.kind === 'stock' && asset.market !== 'TW')) return null;
   // （2026-11-27 使用者決定：台灣股票與 ETF 用除權息日以前的成交紀錄核對。）
   const prev = new Date(`${event.exDate}T00:00:00Z`);
   prev.setUTCDate(prev.getUTCDate() - 1);
@@ -223,7 +223,8 @@ export function validateInvest(e: InvestEvent, assets: InvestAsset[]) {
   if (e.fx === 0) throw new Error('匯率須大於 0');
   if (e.quantity === 0 || e.secondQuantity === 0) throw new Error('交易股數或單位數須大於 0');
   if (e.kind === 'switch') {
-    if (a.kind === 'stock' || !assets.some((target) => target.id === e.secondAsset && target.kind !== 'stock' && target.id !== a.id)) {
+    if ((a.kind !== 'fund' && a.kind !== 'policy') || !assets.some((target) =>
+      target.id === e.secondAsset && (target.kind === 'fund' || target.kind === 'policy') && target.id !== a.id)) {
       throw new Error('請選擇不同的換出與換入基金');
     }
     if (!e.quantity && !e.secondQuantity) throw new Error('至少填入一邊已確認的單位數');
@@ -280,6 +281,17 @@ export class InvestStore {
     const snap = await this.load();
     if (snap.assets.some((x) => x.id !== a.id && assetKey(x) === assetKey(a))) throw new Error('同一帳戶已有這個標的代號');
     return this.save('investAssets', { ...a });
+  }
+
+  async addAssetBySymbol(value: string) {
+    const symbol = value.trim().toUpperCase();
+    if (!symbol) throw new Error('請填標的代號');
+    const { assets } = await this.load();
+    const matches = assets.filter((asset) => asset.symbol.trim().toUpperCase() === symbol);
+    if (matches.length > 1) throw new Error('已有多筆相同代號，請在原清單選擇正確的標的');
+    if (matches[0]) return matches[0].id;
+    // （2026-11-27 使用者決定：交易表單快速新增只收代號，其餘資料到更多補填。）
+    return this.saveAsset({ ...blankAsset, symbol, kind: 'pending', currency: '', market: '' });
   }
 
   async saveEvent(event: InvestEvent) {

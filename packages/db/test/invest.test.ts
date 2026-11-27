@@ -164,6 +164,23 @@ describe('投資 APP', () => {
     expect((await backend.read('investAssets'))[1].values.updatedAt).toBe(rows[1].values.updatedAt);
   });
 
+  it('快速新增只存代號，不猜類型或幣別，已有代號可直接選用', async () => {
+    const { bridge, store } = await setup();
+    const id = await store.addAssetBySymbol(' 00301 ');
+    expect(await store.addAssetBySymbol('00301')).toBe(id);
+    expect(await store.addAssetBySymbol(stock.symbol.toLowerCase())).toBe(stock.id);
+    const { assets } = await store.load();
+    expect(assets).toHaveLength(2);
+    const quick = assets.find((a) => a.id === id)!;
+    expect(quick).toMatchObject({ symbol: '00301', name: '', kind: 'pending', currency: '', market: '', account: '' });
+    await store.saveEvent(event({ id: '', asset: id, quantity: 1, price: 10 }));
+    await expect(bridge.generate(event({ id: '', asset: id, cashDate: date, cashAmount: 10, cashAccount: '測試銀行' })))
+      .rejects.toThrow('補上標的類型');
+    expect((await bridge.money.load()).txns).toHaveLength(0);
+    await store.saveAsset({ ...quick, kind: 'fund', currency: 'TWD' });
+    expect((await store.load()).events[0].asset).toBe(id);
+  });
+
   it('一次銀行扣款可對應三檔，金額不符時不能分列，解除一筆不刪扣款和其他投資', async () => {
     const { bridge, store } = await setup();
     await store.saveAsset({ ...stock, id: 'second', symbol: 'SECOND' });

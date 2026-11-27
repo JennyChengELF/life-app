@@ -237,8 +237,8 @@ export function App() {
             void run(async () => { await bridge.allocatePurchases(linkedTxn.id); await loadMoney(); setNotice('已分列買進明細。'); });
           }} />}
         {oldMoney && !linkedTxn && <p className="hint">{money ? '找不到原本的記帳交易。' : '讀取記帳摘要中…'}</p>}
-        <div className="invest-actions"><button className="btn" onClick={() => setAsset({ ...blankAsset })}>新增投資標的</button>
-          {event?.moneyId && !event.pending && !linkedTxn && <a className="invest-link" href={moneyUrl(event.moneyId)}>查看記帳</a>}</div>
+        {event?.moneyId && !event.pending && !linkedTxn && <div className="invest-actions">
+          <a className="invest-link" href={moneyUrl(event.moneyId)}>查看記帳</a></div>}
         {oldMoney && !event && <section className="card"><h2>從既有記帳連到投資</h2><ul className="invest-list">
           {active.filter((e) => !e.moneyId && (!moneyGroup.length || e.kind === 'buy')).map((row) => <li key={row.id}><button type="button"
             onClick={() => void run(async () => { await bridge.link(row, oldMoney); await after(row.id); })}>
@@ -247,6 +247,15 @@ export function App() {
         {(!oldMoney || oldTxn) && <Editor key={event ? `${event.id}:${event.pending}:${event.moneyId}` : `new:${editorVersion}:${oldTxn?.id ?? ''}`}
           initial={editor} day={day} onDate={setDay} snap={snap} money={money}
           busy={busy} fromMoney={viaMoney} linking={!!oldMoney} onSave={save}
+          onQuickAsset={async (symbol) => {
+            let id: string | undefined;
+            await run(async () => {
+              const saved = await store.addAssetBySymbol(symbol);
+              await load();
+              id = saved;
+            });
+            return id;
+          }}
           onCancel={() => { setEvent(null); if (!oldMoney) setTab('calendar'); else setEditorVersion((n) => n + 1); }}
           onCash={() => { if (!money) void run(async () => { await loadMoney(); }); }}
           onMoney={(row, id) => void run(async () => { await bridge.link(row, id); await after(row.id); })}
@@ -273,7 +282,7 @@ export function App() {
       {tab === 'more' && <>
         <section className="card"><h2>標的與保單</h2><button type="button" className="btn" onClick={() => setAsset({ ...blankAsset })}>新增標的</button>
           <ul className="invest-list">{snap.assets.map((a) => <li key={a.id}><button onClick={() => setAsset(a)}>
-            {a.symbol} {a.name}<small>{a.account || '未填保管帳戶'} · {a.currency || '幣別待補'}</small></button></li>)}</ul>
+            {a.symbol} {a.name}<small>{a.kind === 'pending' ? '類型待補 · ' : ''}{a.account || '未填保管帳戶'} · {a.currency || '幣別待補'}</small></button></li>)}</ul>
         </section>
         <section className="card"><h2>資料與試算表</h2>
           {backend.fileUrl('invest') && <a className="invest-link" target="_blank" rel="noreferrer" href={backend.fileUrl('invest')!}>開啟投資試算表</a>}
@@ -296,8 +305,7 @@ export function App() {
         </section>
       </>}
       {asset && <AssetForm key={asset.id || 'new'} initial={asset} close={() => setAsset(null)} busy={busy} save={(a) => void run(async () => {
-        const id = await store.saveAsset(a); setAsset(null); await load();
-        if (tab === 'add') setEvent((old) => ({ ...(old ?? blankInvestEvent('buy', day)), asset: id, cashCurrency: a.currency || 'TWD' }));
+        await store.saveAsset(a); setAsset(null); await load();
       })} />}
     </>}
   </div>;
@@ -435,6 +443,7 @@ function AssetForm({ initial, close, save, busy }: {
     <div className="invest-grid">
       {field('symbol', '標的代號')}{field('name', '標的名稱')}
       <label className="field">類型<select value={a.kind} onChange={(e) => set({ ...a, kind: e.currentTarget.value as InvestAsset['kind'] })}>
+        {a.kind === 'pending' && <option value="pending">類型待補</option>}
         <option value="stock">股票／ETF</option><option value="fund">基金</option><option value="policy">保單基金</option>
       </select></label>
       {field('account', '券商／保單名稱')}{field('currency', '計價幣別（可待補）')}{field('market', '市場（例如 TW、US）')}

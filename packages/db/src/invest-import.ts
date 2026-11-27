@@ -51,6 +51,10 @@ export async function previewInvestImport(store: InvestStore): Promise<InvestImp
     if (!kind || !symbol || !date) item.errors.push('請填交易種類、日期和代號');
     if (item.errors.length) return item;
     const matches = assets.filter((a) => a.symbol === symbol && (raw.startsWith('基金') ? a.kind === 'fund' : a.kind === 'stock'));
+    if (!matches.length && assets.some((a) => a.symbol === symbol && a.kind === 'pending')) {
+      item.errors.push('已有相同代號的待補標的，請先在「更多 → 標的與保單」設定類型');
+      return item;
+    }
     if (matches.length > 1) {
       item.errors.push('同一代號有多個持有帳戶，請在投資 APP 個別補登');
       return item;

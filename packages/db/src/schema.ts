@@ -102,7 +102,7 @@ export const TABLES = {
     columns: [
       { name: 'symbol', type: 'text', label: '標的代號' },
       { name: 'name', type: 'text', label: '標的名稱' },
-      { name: 'kind', type: 'text', label: '股票／基金／保單基金（stock / fund / policy）' },
+      { name: 'kind', type: 'text', label: '類型待補／股票／基金／保單基金（pending / stock / fund / policy）' },
       { name: 'account', type: 'text', label: '券商或保單名稱' },
       { name: 'currency', type: 'text', label: '計價幣別' },
       { name: 'market', type: 'text', label: '交易所或市場' },

@@ -8,6 +8,7 @@ import { newId } from './ids';
 import { startOfDay, toDateKey } from './time';
 
 export function investCategory(e: InvestEvent, a: InvestAsset) {
+  if (a.kind === 'pending') return '';
   if (e.kind === 'dividend') return '投資收入 / 投資配息';
   if (investIsSale(e)) return '投資收入 / 投資贖回';
   if (e.kind === 'switch') return '投資 / 投資手續費';
@@ -15,7 +16,7 @@ export function investCategory(e: InvestEvent, a: InvestAsset) {
 }
 
 export function investLabel(a: InvestAsset) {
-  return `${a.kind === 'stock' ? '股票' : '基金'}${a.symbol}`;
+  return `${a.kind === 'pending' ? '標的' : a.kind === 'stock' ? '股票' : '基金'}${a.symbol}`;
 }
 
 export function investmentMemo(e: InvestEvent, a: InvestAsset) {
@@ -40,6 +41,7 @@ function withMoneyLock<T>(moneyId: string, action: () => Promise<T>): Promise<T>
 }
 
 export function investmentCashInput(e: InvestEvent, a: InvestAsset): TxnInput {
+  if (a.kind === 'pending') throw new Error('請先在「更多 → 標的與保單」補上標的類型，再產生記帳');
   if (!canGenerateCash(e) || !e.cashDate || !e.cashAccount) throw new Error('請填扣款／入帳日和記帳帳戶');
   const income = investIsSale(e) || e.kind === 'dividend';
   const cur = e.cashCurrency;
@@ -104,6 +106,7 @@ export class InvestMoney {
     const { assets, events } = await this.investments.load();
     const asset = assets.find((a) => a.id === linked.asset);
     if (!asset) throw new Error('找不到投資標的');
+    if (asset.kind === 'pending') throw new Error('請先在「更多 → 標的與保單」補上標的類型，再同步記帳');
     const prior = events.find((e) => e.id === linked.id);
     if (investmentsForMoney(events, linked.moneyId).some((row) => row.id !== linked.id)) {
       if (!prior || linked.cashAmount !== prior.cashAmount || linked.cashAccount !== prior.cashAccount ||
