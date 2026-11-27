@@ -111,7 +111,6 @@ export function App() {
           {tab === 'calendar' && <>
             <MonthCalendar selected={date} setDate={setDate} dayInfo={(day) => recordedDates.has(day)
               ? { label: '有服用紀錄', marks: [{ kind: 'dot' }] } : null} />
-            <label className="field med-date-jump">跳到日期<input type="date" value={date} onChange={(e) => { if (e.target.value) setDate(e.target.value); }} /></label>
             <LogList snap={snap} date={date} open={openLog} />
           </>}
           {tab === 'more' && !more && <nav className="med-more" aria-label="更多功能">

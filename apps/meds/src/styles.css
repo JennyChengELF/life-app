@@ -17,8 +17,6 @@
   background: var(--card); color: var(--text); padding: 9px 10px; font: inherit;
 }
 .meds-app textarea { resize: vertical; }
-.meds-app .med-date-jump { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
-.meds-app .med-date-jump input { width: auto; margin: 0; }
 .med-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .med-push { margin-left: auto; }
 .med-form-body { border: 0; padding: 0; margin: 0; min-width: 0; }

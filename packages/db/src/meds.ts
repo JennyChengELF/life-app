@@ -136,7 +136,8 @@ export class MedStore {
       if (!item || time == null || !validDate(date) || quantity == null || !positive(quantity)
         || (batchId && get(batches, batchId)?.itemId !== itemId)) return '請確認品項、批次、日期時間和服用量';
       const inferred = !deducts(item, { time, skipStock }) ? 'none' : item.mode === 'total' ? 'total' : batchId ? 'batch' : 'pending';
-      const stockEffect = (str(v.stockEffect) || inferred) as StockEffect;
+      // （2026-11-27 使用者決定：直接填 skipStock=TRUE 時照常顯示服用紀錄，並且不扣庫存。）
+      const stockEffect = (skipStock ? 'none' : str(v.stockEffect) || inferred) as StockEffect;
       if (!stockEffects.includes(stockEffect) || ((stockEffect === 'batch' || stockEffect === 'total' || stockEffect === 'pending') && stockEffect !== inferred))
         return '請確認這筆紀錄的庫存影響';
       return { ...row, itemId, batchId, time, date, quantity, stockEffect, skipStock };

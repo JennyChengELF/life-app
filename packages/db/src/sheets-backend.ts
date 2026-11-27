@@ -28,6 +28,8 @@ const READ_PARAMS = 'valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SE
 
 /** A1 表示法中的工作表名稱（加單引號） */
 const q = (title: string) => `'${title.replace(/'/g, "''")}'`;
+type SheetGrid = { sheetId: number; columnCount: number };
+const gridForTable = (table: TableName) => ({ frozenRowCount: 1, columnCount: Math.max(26, TABLES[table].columns.length) });
 
 /** 0 → A、25 → Z、26 → AA */
 export function colLetter(index: number): string {
@@ -85,9 +87,31 @@ export class SheetsBackend implements Backend {
       } catch {
         /* ignore */
       }
-      throw new ApiError(res.status, `Google 回應錯誤：${msg}`);
+      // （2026-11-27 使用者決定：試算表錯誤要另外指出涉及的試算表與工作表。）
+      const file = (Object.keys(this.ids) as FileKey[]).find((key) => url.startsWith(`${SHEETS}/${this.ids[key]}`)
+        && /^(?:$|[/:?])/.test(url.slice(`${SHEETS}/${this.ids[key]}`.length)));
+      const location = file ? this.errorLocation(file, url, init, msg) : '';
+      throw new ApiError(res.status, `Google 回應錯誤${location}：${msg}`);
     }
     return res.status === 204 ? (undefined as T) : res.json();
+  }
+
+  private errorLocation(file: FileKey, url: string, init: RequestInit, message: string) {
+    const titles = [...tablesOfFile(file), INFO_SHEET];
+    const fromRange = (range: string) => titles.find((title) => range.includes(`${q(title)}!`) || range.includes(`${title}!`));
+    const requestUrl = new URL(url);
+    const table = fromRange(message)
+      ?? fromRange(decodeURI(requestUrl.pathname))
+      ?? (() => {
+        const index = /\bdata\[(\d+)\]/.exec(message)?.[1];
+        if (index !== undefined && typeof init.body === 'string') {
+          const range = JSON.parse(init.body)?.data?.[Number(index)]?.range;
+          if (typeof range === 'string') return fromRange(range);
+        }
+        const ranges = requestUrl.searchParams.getAll('ranges');
+        return ranges.length === 1 ? fromRange(ranges[0]) : undefined;
+      })();
+    return `（${FILES[file].title}${table ? `／${table}` : ''}）`;
   }
 
   private sid(file: FileKey): string {
@@ -205,10 +229,12 @@ export class SheetsBackend implements Backend {
     localStorage.setItem(doneKey, '1');
   }
 
-  /** 找到（或建立）這個 APP 的試算表，回傳現有的工作表（名稱 → sheetId） */
-  private async ensureFile(file: FileKey): Promise<Map<string, number>> {
-    const fields = 'fields=spreadsheetId,sheets.properties(title,sheetId)';
-    const toMap = (s: any) => new Map<string, number>(s.sheets.map((x: any) => [x.properties.title, x.properties.sheetId]));
+  /** 找到（或建立）這個 APP 的試算表，回傳現有工作表的欄數。 */
+  private async ensureFile(file: FileKey): Promise<Map<string, SheetGrid>> {
+    const fields = 'fields=spreadsheetId,sheets.properties(title,sheetId,gridProperties(columnCount))';
+    const toMap = (s: any) => new Map<string, SheetGrid>(s.sheets.map(({ properties }: any) => [
+      properties.title, { sheetId: properties.sheetId, columnCount: properties.gridProperties?.columnCount ?? 0 },
+    ]));
     const cached = localStorage.getItem(ID_KEY(file));
     if (cached) {
       try {
@@ -238,14 +264,15 @@ export class SheetsBackend implements Backend {
       }
       if (id) await this.safely(() => this.markFile(id!, file));
     }
-    let titles: Map<string, number>;
+    let titles: Map<string, SheetGrid>;
     if (id) {
       const s = await this.api(`${SHEETS}/${id}?${fields}`);
       titles = toMap(s);
     } else {
       id = await this.createFile(file);
       await this.safely(() => this.markFile(id!, file));
-      titles = new Map([INFO_SHEET, ...tablesOfFile(file)].map((t) => [t, -1]));
+      titles = new Map([[INFO_SHEET, { sheetId: -1, columnCount: 26 }],
+        ...tablesOfFile(file).map((t) => [t, { sheetId: -1, columnCount: gridForTable(t).columnCount }] as const)]);
     }
     this.ids[file] = id;
     localStorage.setItem(ID_KEY(file), id);
@@ -292,7 +319,7 @@ export class SheetsBackend implements Backend {
         },
         sheets: [
           { properties: { title: INFO_SHEET } },
-          ...tables.map((t) => ({ properties: { title: t, gridProperties: { frozenRowCount: 1 } } })),
+          ...tables.map((t) => ({ properties: { title: t, gridProperties: gridForTable(t) } })),
         ],
       }),
     });
@@ -329,7 +356,7 @@ export class SheetsBackend implements Backend {
   }
 
   /** 補上缺少的工作表、缺少的欄位（資料格式升級時用） */
-  private async ensureTables(file: FileKey, existingSheets: Map<string, number>) {
+  private async ensureTables(file: FileKey, existingSheets: Map<string, SheetGrid>) {
     const id = this.sid(file);
     const tables = tablesOfFile(file);
     const existing = [...existingSheets.keys()];
@@ -338,8 +365,11 @@ export class SheetsBackend implements Backend {
       if (existing.includes(t)) continue;
       // 舊名稱的工作表 → 改名（資料保留）
       const former = ((TABLES[t] as TableDef).formerNames ?? []).find((n) => existingSheets.has(n));
-      if (former) requests.push({ updateSheetProperties: { properties: { sheetId: existingSheets.get(former), title: t }, fields: 'title' } });
-      else requests.push({ addSheet: { properties: { title: t, gridProperties: { frozenRowCount: 1 } } } });
+      if (former) {
+        const grid = existingSheets.get(former)!;
+        requests.push({ updateSheetProperties: { properties: { sheetId: grid.sheetId, title: t }, fields: 'title' } });
+        existingSheets.set(t, grid);
+      } else requests.push({ addSheet: { properties: { title: t, gridProperties: gridForTable(t) } } });
     }
     if (!existing.includes(INFO_SHEET)) requests.push({ addSheet: { properties: { title: INFO_SHEET } } });
     if (requests.length) {
@@ -348,15 +378,22 @@ export class SheetsBackend implements Backend {
     const ranges = tables.map((t) => `ranges=${encodeURIComponent(`${q(t)}!1:1`)}`).join('&');
     const res = await this.api(`${SHEETS}/${id}/values:batchGet?${ranges}`);
     const writes: { range: string; values: string[][] }[] = [];
+    const expand: object[] = [];
     tables.forEach((t, i) => {
       const header: string[] = (res.valueRanges?.[i]?.values?.[0] ?? []).map((h: unknown) => String(h).trim());
       const add = TABLES[t].columns.map((c) => c.name).filter((n) => !header.includes(n));
       if (add.length) {
+        const grid = existingSheets.get(t);
+        const needed = header.length + add.length;
+        if (grid && grid.sheetId >= 0 && needed > grid.columnCount) {
+          expand.push({ appendDimension: { sheetId: grid.sheetId, dimension: 'COLUMNS', length: needed - grid.columnCount } });
+        }
         writes.push({ range: `${q(t)}!${colLetter(header.length)}1`, values: [add] });
         header.push(...add);
       }
       this.headers.set(t, header);
     });
+    if (expand.length) await this.api(`${SHEETS}/${id}:batchUpdate`, { method: 'POST', body: JSON.stringify({ requests: expand }) });
     // 結構有變（新增工作表或欄位）→ 重寫「說明」工作表
     if (requests.length || writes.length) {
       await this.api(`${SHEETS}/${id}/values/${encodeURIComponent(q(INFO_SHEET))}:clear`, { method: 'POST', body: '{}' });

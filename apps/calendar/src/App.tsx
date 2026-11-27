@@ -11,6 +11,9 @@ import { TagPicker, tagLabel } from '@life/ui/tag-picker';
 import {
   addDateDays,
   analyzeCalendarLocalTime,
+  calendarParentKey,
+  canParentCalendarEvent,
+  findCalendarParent,
   calendarRecurrenceEndText,
   calendarRecurrenceText,
   calendarReminderLabel,
@@ -170,12 +173,13 @@ export function App() {
   const openedId = open?.kind === 'detail' ? open.id : open?.kind === 'form' ? open.eventId : open?.kind === 'move-child' ? open.eventId : open?.kind === 'join-trip' ? open.parentId : null;
   const anniversaryDate = openedId?.startsWith('anniversary:') ? openedId.slice(-10) : null;
   const openedEvent = openedId ? expandedEvents.find((e) => e.id === openedId)
+    ?? findCalendarParent(snap, openedId)
     ?? (anniversaryDate ? expandPersonAnniversaries(snap, anniversaryDate, anniversaryDate).find((e) => e.id === openedId) : undefined)
     ?? null : null;
 
   const saveEvent = async (input: CalendarEventInput, current: CalendarEvent | null) => {
     if (input.timeType === 'point') input = { ...input, endDate: input.startDate, endTime: null };
-    const parent = input.parentEventId ? snap.events.find((e) => e.id === input.parentEventId) : null;
+    const parent = findCalendarParent(snap, input.parentEventId);
     if (parent && (input.startDate < parent.startDate || input.endDate > parent.endDate)) {
       api.showToast({ kind: 'error', text: `細項日期必須在主行程的 ${parent.startDate}～${parent.endDate} 之內` });
       return false;
@@ -200,7 +204,7 @@ export function App() {
     if (id) {
       setSelectedDate(input.startDate);
       setTab('calendar');
-      setOpen(null);
+      setOpen(parent ? { kind: 'detail', id: parent.id } : null);
     }
     return !!id;
   };
@@ -229,10 +233,10 @@ export function App() {
         }} />}
         <EventForm key={`${open.eventId ?? 'new'}-${open.date}`} snap={snap} event={openedEvent} initialDate={open.date} parentId={open.parentId} busy={api.busy} onAddPerson={(nickname, fullName) => api.run((store) => store.addPerson(nickname, fullName))} onAddTag={(name) => api.run((store) => store.addTag(name))} hideStartDate={tab === 'add' && !open.eventId && !open.parentId} onCancel={() => {
           if (open.eventId) setOpen({ kind: 'detail', id: open.eventId });
-          else { setOpen(null); setTab('calendar'); }
+          else { setOpen(open.parentId ? { kind: 'detail', id: open.parentId } : null); setTab('calendar'); }
         }} onSave={saveEvent} /></>
       ) : open?.kind === 'detail' && openedEvent ? (
-        <EventDetail api={api} snap={snap} event={openedEvent} onBack={() => setOpen(null)} onEdit={() => setOpen({ kind: 'form', eventId: openedEvent.id, date: openedEvent.startDate, parentId: openedEvent.parentEventId })} onOpen={(id) => setOpen({ kind: 'detail', id })} onAddChild={() => setOpen({ kind: 'form', eventId: null, date: openedEvent.startDate, parentId: openedEvent.id })} onJoinExisting={() => setOpen({ kind: 'join-trip', parentId: openedEvent.id })} onMoveChild={() => setOpen({ kind: 'move-child', eventId: openedEvent.id })} onRecurrenceAction={(action) => setOpen({ kind: 'recurrence-scope', event: openedEvent, action })} />
+        <EventDetail api={api} snap={snap} event={openedEvent} onBack={() => setOpen(null)} onEdit={() => setOpen({ kind: 'form', eventId: openedEvent.id, date: openedEvent.startDate, parentId: openedEvent.parentEventId })} onOpen={(id) => setOpen({ kind: 'detail', id })} onAddChild={() => setOpen({ kind: 'form', eventId: null, date: openedEvent.startDate, parentId: calendarParentKey(openedEvent) })} onJoinExisting={() => setOpen({ kind: 'join-trip', parentId: openedEvent.id })} onMoveChild={() => setOpen({ kind: 'move-child', eventId: openedEvent.id })} onRecurrenceAction={(action) => setOpen({ kind: 'recurrence-scope', event: openedEvent, action })} />
       ) : open?.kind === 'join-trip' && openedEvent ? (
         <JoinTripView api={api} snap={snap} parent={openedEvent} onCancel={() => setOpen({ kind: 'detail', id: openedEvent.id })} onDone={() => setOpen({ kind: 'detail', id: openedEvent.id })} />
       ) : open?.kind === 'move-child' && openedEvent ? (
@@ -481,7 +485,7 @@ function AgendaView({ snap, events, selectedMonth, openEvent }: { snap: Calendar
   // （2026-11-20 使用者決定：有細項的主行程在行程表預設收合，避免資料太長。）
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(events.flatMap((event) => event.parentEventId ? [event.parentEventId] : [])));
   const usableEvents = events.filter((e) => e.systemSource !== PERSON_ANNIVERSARY_SOURCE && (showCancelled || e.status !== 'cancelled'));
-  const ids = new Set(usableEvents.map((e) => e.id));
+  const ids = new Set(usableEvents.map(calendarParentKey));
   const roots = sortCalendarEvents(usableEvents.filter((e) => !e.parentEventId || !ids.has(e.parentEventId)));
   const historical = roots.filter((e) => e.endDate < todayKey());
   const currentYear = Number(todayKey().slice(0, 4));
@@ -519,12 +523,12 @@ function AgendaView({ snap, events, selectedMonth, openEvent }: { snap: Calendar
       {mode === 'history' && <div className="history-picker"><div className="history-options">{decades.map((d) => <button key={d} className={decade === d ? 'active' : ''} onClick={() => chooseDecade(d)}>{d}～{d + 9}</button>)}</div><div className="history-options">{years.map((y) => <button key={y} className={year === y ? 'active' : ''} onClick={() => setYear(y)}>{y} 年</button>)}</div></div>}
       <label className="show-cancelled"><input type="checkbox" checked={showCancelled} onChange={(e) => setShowCancelled(e.target.checked)} />顯示已取消行程</label>
     </div>
-    {monthGroups.size ? [...monthGroups.entries()].map(([monthKey, list]) => <div className="agenda-month-group" key={monthKey}><h3 className="agenda-month-title">{monthTitle(monthKey)}</h3>{list.map((event) => <AgendaItem key={event.id} snap={snap} events={usableEvents} event={event} collapsed={collapsed.has(event.id)} toggle={() => toggle(event.id)} openEvent={openEvent} />)}</div>) : <div className="card center muted">這個範圍沒有行程</div>}
+    {monthGroups.size ? [...monthGroups.entries()].map(([monthKey, list]) => <div className="agenda-month-group" key={monthKey}><h3 className="agenda-month-title">{monthTitle(monthKey)}</h3>{list.map((event) => <AgendaItem key={event.id} snap={snap} events={usableEvents} event={event} collapsed={collapsed.has(calendarParentKey(event))} toggle={() => toggle(calendarParentKey(event))} openEvent={openEvent} />)}</div>) : <div className="card center muted">這個範圍沒有行程</div>}
   </section>;
 }
 
 function AgendaItem({ snap, events, event, collapsed, toggle, openEvent }: { snap: CalendarSnapshot; events: CalendarEvent[]; event: CalendarEvent; collapsed: boolean; toggle: () => void; openEvent: (id: string) => void }) {
-  const children = sortCalendarEvents(events.filter((child) => child.parentEventId === event.id));
+  const children = sortCalendarEvents(events.filter((child) => child.parentEventId === calendarParentKey(event)));
   if (!children.length) return <section className="card agenda-item"><div className="agenda-date">{rangeText(event)}</div><EventRow snap={snap} event={event} onClick={() => openEvent(event.id)} /></section>;
   const groups = children.reduce((map, child) => {
     const list = map.get(child.startDate) ?? [];
@@ -571,7 +575,7 @@ function EventForm({ snap, event, initialDate, parentId, busy, hideStartDate = f
   onAddPerson: (nickname: string, fullName: string) => Promise<string | undefined>;
   onAddTag: (name: string) => Promise<string | undefined>;
 }) {
-  const initialParent = parentId ? snap.events.find((e) => e.id === parentId) : null;
+  const initialParent = findCalendarParent(snap, parentId);
   const [form, setForm] = useState<CalendarEventInput>(() => event ? eventInput(event) : {
     title: '', groupId: initialParent?.groupId ?? snap.defaultGroupId, parentEventId: parentId, timeType: 'point', startDate: initialDate, startTime: '09:00', startTimeZone: snap.currentTimeZone, startUtcOffset: null, startDisambiguation: 'earlier', endDate: initialDate, endTime: null, endTimeZone: snap.currentTimeZone, endUtcOffset: null, endDisambiguation: 'earlier', timeMode: 'fixedZone', timeZoneInferred: false, locationType: null, startPlace: null, endPlace: null, url: null, note: null, status: 'scheduled', recurrence: null, recurrenceParentId: null, recurrenceInstanceKey: null, recurrenceExceptions: [],
   });
@@ -580,12 +584,12 @@ function EventForm({ snap, event, initialDate, parentId, busy, hideStartDate = f
   const [timeError, setTimeError] = useState<string | null>(null);
   // （2026-11-20 使用者決定：主行程內新增時固定；月曆新增時可選，儲存前必須完整落在主行程日期內。）
   const parentLocked = !!event || !!parentId;
-  const selectedParent = form.parentEventId ? snap.events.find((e) => e.id === form.parentEventId) ?? null : null;
+  const selectedParent = findCalendarParent(snap, form.parentEventId);
   const effectiveEndDate = form.timeType === 'point' ? form.startDate : form.endDate;
   const startAnalysis = form.timeType !== 'allDay' && form.timeMode === 'fixedZone' ? localTimeAnalysis(form.startDate, form.startTime, form.startTimeZone) : null;
   const endAnalysis = form.timeType === 'range' && form.timeMode === 'fixedZone' ? localTimeAnalysis(form.endDate, form.endTime, form.endTimeZone) : null;
   const parents = snap.events.filter((candidate) => {
-    if (candidate.parentEventId || candidate.recurrence || candidate.id === event?.id || candidate.endDate <= candidate.startDate || candidate.status !== 'scheduled' || candidate.systemSource) return false;
+    if (!canParentCalendarEvent(candidate) || candidate.id === event?.id || candidate.status !== 'scheduled') return false;
     if (candidate.id === form.parentEventId) return true;
     return dateInRange(form.startDate, candidate.startDate, candidate.endDate) || dateInRange(effectiveEndDate, candidate.startDate, candidate.endDate);
   });
@@ -603,7 +607,7 @@ function EventForm({ snap, event, initialDate, parentId, busy, hideStartDate = f
       setTimeError('選擇的當地時間因日光節約調整而不存在，請先使用下方建議時間或自行修改。');
       return;
     }
-    const parent = input.parentEventId ? snap.events.find((item) => item.id === input.parentEventId) : null;
+    const parent = findCalendarParent(snap, input.parentEventId);
     if (parent && (input.startDate < parent.startDate || input.endDate > parent.endDate)) {
       setParentError(`細項日期必須在主行程的 ${parent.startDate}～${parent.endDate} 之內`);
       return;
@@ -623,7 +627,7 @@ function EventForm({ snap, event, initialDate, parentId, busy, hideStartDate = f
   return <form className="card event-form" onSubmit={submit}>
     <div className="form-head"><button type="button" className="icon-btn" onClick={onCancel} aria-label="返回"><Icon name="left" /></button><h2>{event ? '編輯行程' : initialParent ? `新增「${initialParent.title}」細項` : '新增行程'}</h2></div>
     {parentLocked && selectedParent && <label className="field">所屬主行程<span className="parent-fixed">{selectedParent.title}<small>{rangeText(selectedParent)}</small></span></label>}
-    {!parentLocked && <label className="field">所屬主行程<select value={form.parentEventId ?? ''} onChange={(e) => { setForm((current) => ({ ...current, parentEventId: e.target.value || null, recurrence: e.target.value ? null : current.recurrence })); setParentError(null); }}><option value="">不屬於主行程</option>{parents.map((parent) => <option key={parent.id} value={parent.id}>{parent.title}（{parent.startDate}～{parent.endDate}）</option>)}</select><small className="field-help">只列出包含開始或結束日期的主行程</small></label>}
+    {!parentLocked && <label className="field">所屬主行程<select value={form.parentEventId ?? ''} onChange={(e) => { setForm((current) => ({ ...current, parentEventId: e.target.value || null, recurrence: e.target.value ? null : current.recurrence })); setParentError(null); }}><option value="">不屬於主行程</option>{parents.map((parent) => <option key={parent.id} value={calendarParentKey(parent)}>{parent.title}（{parent.startDate}～{parent.endDate}）</option>)}</select><small className="field-help">只列出包含開始或結束日期的主行程</small></label>}
     {parentError && <p className="form-error">{parentError}</p>}
     <label className="field">標題<input value={form.title} onChange={(e) => set('title', e.target.value)} placeholder="可以先留空，會顯示未命名行程" /></label>
     <div className="type-choice">{([['range', '時段'], ['point', '時間點'], ['allDay', '全天']] as const).map(([value, label]) => <button type="button" key={value} className={form.timeType === value ? 'active' : ''} onClick={() => setForm((current) => ({ ...current, timeType: value, startTime: value === 'allDay' ? null : current.startTime ?? '09:00', endDate: value === 'point' ? current.startDate : current.endDate, endTime: value === 'range' ? current.endTime ?? '10:00' : null }))}>{label}</button>)}</div>
@@ -721,22 +725,22 @@ function EventTimeZoneDetails({ snap, event }: { snap: CalendarSnapshot; event: 
 
 function EventDetail({ api, snap, event, onBack, onEdit, onOpen, onAddChild, onJoinExisting, onMoveChild, onRecurrenceAction }: { api: CalendarApi; snap: CalendarSnapshot; event: CalendarEvent; onBack: () => void; onEdit: () => void; onOpen: (id: string) => void; onAddChild: () => void; onJoinExisting: () => void; onMoveChild: () => void; onRecurrenceAction: (action: 'cancel' | 'restore' | 'delete') => void }) {
   const [cancel, setCancel] = useState(false);
-  const children = sortCalendarEvents(snap.events.filter((e) => e.parentEventId === event.id));
+  const children = sortCalendarEvents(snap.events.filter((e) => e.parentEventId === calendarParentKey(event)));
   const childDays = children.reduce((map, child) => {
     const list = map.get(child.startDate) ?? [];
     list.push(child);
     map.set(child.startDate, list);
     return map;
   }, new Map<string, CalendarEvent[]>());
-  const parent = event.parentEventId ? snap.events.find((e) => e.id === event.parentEventId) : null;
-  const canHaveChildren = !event.recurrence && !event.parentEventId && event.endDate > event.startDate;
+  const parent = findCalendarParent(snap, event.parentEventId);
+  const canHaveChildren = canParentCalendarEvent(event);
   const remove = async () => {
     if (event.recurrence) return onRecurrenceAction('delete');
     if (!window.confirm(`確定刪除「${event.title}」？`)) return;
     const ok = await api.run((s) => s.deleteEvent(event).then(() => true));
     if (ok) onBack();
   };
-  return <section className={`card detail ${event.status === 'cancelled' ? 'cancelled' : ''}`}><div className="detail-head"><button className="icon-btn" onClick={onBack} aria-label="返回"><Icon name="left" /></button>{!event.systemSource && <button onClick={onEdit}><Icon name="pencil" size={17} /> 編輯</button>}</div>{event.status === 'cancelled' && <div className="cancel-badge">已取消</div>}<h2>{event.title}</h2><p className="detail-time">{rangeText(event)}・{timeText(event)}</p><EventTimeZoneDetails snap={snap} event={event} /><EventReminderDetails event={event} /><EventPeople event={event} snap={snap} /><EventTags event={event} snap={snap} /><p className="muted small">{groupOf(snap, event)?.name}{event.systemSource && '・系統資料'}</p>{event.recurrence && <div className="recurrence-detail"><b>{calendarRecurrenceText(event.recurrence)}</b><span>{calendarRecurrenceEndText(event.recurrence)}</span>{event.recurrenceOverride && <span>這一次有個別修改</span>}</div>}{parent && <button className="parent-link" onClick={() => onOpen(parent.id)}>主行程：{parent.title}<Icon name="right" size={16} /></button>}{event.startPlace && <p><b>{event.locationType === 'route' ? '路線' : '地點'}：</b>{event.startPlace}{event.endPlace ? ` → ${event.endPlace}` : ''}</p>}{event.url && <p><b>網址：</b><a href={event.url} target="_blank" rel="noreferrer">{event.url}</a></p>}{event.note && <div className="note-block"><b>備註</b><p>{event.note}</p></div>}{(canHaveChildren || children.length > 0) && <div className="itinerary"><div className="section-head"><h3>行程安排</h3>{event.status !== 'cancelled' && <span className="itinerary-buttons"><button className="link" onClick={onAddChild}><Icon name="plus" size={16} /> 新增細項</button><button className="link" onClick={onJoinExisting}>加入既有行程</button></span>}</div>{children.length ? <div className="itinerary-days">{[...childDays.entries()].map(([date, list]) => <div className="itinerary-day" key={date}><h4>第 {dateDiffDays(event.startDate, date) + 1} 天・{dateLabel(date)}</h4>{list.map((child) => <EventRow key={child.id} snap={snap} event={child} nested onClick={() => onOpen(child.id)} />)}</div>)}</div> : <p className="muted small">還沒有細項，可以新增或加入既有的交通、餐廳或景點。</p>}</div>}{!event.systemSource && <div className="detail-actions">{event.status === 'cancelled' ? <button onClick={() => event.recurrence ? onRecurrenceAction('restore') : api.run((s) => s.restoreEvent(event)).then(() => undefined)}>恢復行程</button> : <button className="danger" onClick={() => event.recurrence ? onRecurrenceAction('cancel') : setCancel(true)}>取消行程</button>}{event.parentEventId && <><button onClick={onMoveChild}>移到其他主行程</button><button onClick={() => api.run((s) => s.detachEvent(event))}>移出主行程</button></>}<button className="danger" disabled={children.length > 0} onClick={remove}>刪除</button></div>}{children.length > 0 && <p className="muted small">主行程仍有細項時不能刪除，請先將細項移出。</p>}{cancel && <div className="choice-panel"><b>要取消哪個範圍？</b>{children.length ? <><button className="danger" onClick={() => api.run((s) => s.cancelEvent(event, true)).then(() => setCancel(false))}>取消整趟（包含所有細項）</button><button onClick={() => api.run((s) => s.cancelEvent(event, false)).then(() => setCancel(false))}>只取消主行程，細項移出</button></> : <button className="danger" onClick={() => api.run((s) => s.cancelEvent(event, false)).then(() => setCancel(false))}>確認取消</button>}<button onClick={() => setCancel(false)}>返回</button></div>}</section>;
+  return <section className={`card detail ${event.status === 'cancelled' ? 'cancelled' : ''}`}><div className="detail-head"><button className="icon-btn" onClick={onBack} aria-label="返回"><Icon name="left" /></button>{!event.systemSource && <button onClick={onEdit}><Icon name="pencil" size={17} /> 編輯</button>}</div>{event.status === 'cancelled' && <div className="cancel-badge">已取消</div>}<h2>{event.title}</h2><p className="detail-time">{rangeText(event)}・{timeText(event)}</p><EventTimeZoneDetails snap={snap} event={event} /><EventReminderDetails event={event} /><EventPeople event={event} snap={snap} /><EventTags event={event} snap={snap} /><p className="muted small">{groupOf(snap, event)?.name}{event.systemSource && '・系統資料'}</p>{event.recurrence && <div className="recurrence-detail"><b>{calendarRecurrenceText(event.recurrence)}</b><span>{calendarRecurrenceEndText(event.recurrence)}</span>{event.recurrenceOverride && <span>這一次有個別修改</span>}</div>}{parent && <button className="parent-link" onClick={() => onOpen(parent.id)}>主行程：{parent.title}<Icon name="right" size={16} /></button>}{event.startPlace && <p><b>{event.locationType === 'route' ? '路線' : '地點'}：</b>{event.startPlace}{event.endPlace ? ` → ${event.endPlace}` : ''}</p>}{event.url && <p><b>網址：</b><a href={event.url} target="_blank" rel="noreferrer">{event.url}</a></p>}{event.note && <div className="note-block"><b>備註</b><p>{event.note}</p></div>}{(canHaveChildren || children.length > 0) && <div className="itinerary"><div className="section-head"><h3>行程安排</h3>{event.status !== 'cancelled' && <span className="itinerary-buttons"><button className="link" onClick={onAddChild}><Icon name="plus" size={16} /> 新增細項</button><button className="link" onClick={onJoinExisting}>加入既有行程</button></span>}</div>{children.length ? <div className="itinerary-days">{[...childDays.entries()].map(([date, list]) => <div className="itinerary-day" key={date}><h4>第 {dateDiffDays(event.startDate, date) + 1} 天・{dateLabel(date)}</h4>{list.map((child) => <EventRow key={child.id} snap={snap} event={child} nested onClick={() => onOpen(child.id)} />)}</div>)}</div> : <p className="muted small">還沒有細項，可以新增或加入既有行程。</p>}</div>}{!event.systemSource && <div className="detail-actions">{event.status === 'cancelled' ? <button onClick={() => event.recurrence ? onRecurrenceAction('restore') : api.run((s) => s.restoreEvent(event)).then(() => undefined)}>恢復行程</button> : <button className="danger" onClick={() => event.recurrence ? onRecurrenceAction('cancel') : setCancel(true)}>取消行程</button>}{event.parentEventId && <><button onClick={onMoveChild}>移到其他主行程</button><button onClick={() => api.run((s) => s.detachEvent(event))}>移出主行程</button></>}<button className="danger" disabled={children.length > 0} onClick={remove}>刪除</button></div>}{children.length > 0 && <p className="muted small">主行程仍有細項時不能刪除，請先將細項移出。</p>}{cancel && <div className="choice-panel"><b>要取消哪個範圍？</b>{children.length ? <><button className="danger" onClick={() => api.run((s) => s.cancelEvent(event, true)).then(() => setCancel(false))}>取消整趟（包含所有細項）</button><button onClick={() => api.run((s) => s.cancelEvent(event, false)).then(() => setCancel(false))}>只取消主行程，細項移出</button></> : <button className="danger" onClick={() => api.run((s) => s.cancelEvent(event, false)).then(() => setCancel(false))}>確認取消</button>}<button onClick={() => setCancel(false)}>返回</button></div>}</section>;
 }
 
 function RecurrenceScopeView({ api, data, onCancel, onDone }: { api: CalendarApi; data: Extract<Open, { kind: 'recurrence-scope' }>; onCancel: () => void; onDone: (date: string) => void }) {
@@ -760,7 +764,7 @@ function JoinTripView({ api, snap, parent, onCancel, onDone }: { api: CalendarAp
   const [selected, setSelected] = useState<Record<string, { startDate: string; endDate: string }>>({});
   const childParents = new Set(snap.events.filter((item) => item.parentEventId).map((item) => item.parentEventId));
   const overlaps = (item: CalendarEvent) => item.startDate <= parent.endDate && item.endDate >= parent.startDate;
-  const candidates = sortCalendarEvents(snap.events.filter((item) => !item.recurrence && !item.parentEventId && item.id !== parent.id && !item.systemSource && !childParents.has(item.id) && (showCancelled || item.status !== 'cancelled') && (showOtherDates || overlaps(item)) && (!query.trim() || item.title.includes(query.trim()))));
+  const candidates = sortCalendarEvents(snap.events.filter((item) => !item.recurrence && !item.isRecurrenceInstance && !item.parentEventId && item.id !== parent.id && !item.systemSource && !childParents.has(item.id) && (showCancelled || item.status !== 'cancelled') && (showOtherDates || overlaps(item)) && (!query.trim() || item.title.includes(query.trim()))));
   const grouped = candidates.reduce((map, item) => { const list = map.get(item.startDate) ?? []; list.push(item); map.set(item.startDate, list); return map; }, new Map<string, CalendarEvent[]>());
   const toggle = (item: CalendarEvent) => setSelected((old) => { const next = { ...old }; if (next[item.id]) delete next[item.id]; else next[item.id] = { startDate: item.startDate, endDate: item.endDate }; return next; });
   const setDateValue = (id: string, key: 'startDate' | 'endDate', value: string) => setSelected((old) => ({ ...old, [id]: { ...old[id], [key]: value } }));
@@ -774,9 +778,9 @@ function JoinTripView({ api, snap, parent, onCancel, onDone }: { api: CalendarAp
 
 function MoveChildView({ api, snap, event, onCancel, onDone }: { api: CalendarApi; snap: CalendarSnapshot; event: CalendarEvent; onCancel: () => void; onDone: () => void }) {
   const [parentId, setParentId] = useState('');
-  const parents = snap.events.filter((item) => !item.recurrence && !item.parentEventId && item.id !== event.parentEventId && item.endDate > item.startDate && !item.systemSource && item.status === 'scheduled' && event.startDate >= item.startDate && event.endDate <= item.endDate);
+  const parents = expandCalendarEvents(snap, event.startDate, event.endDate).filter((item) => canParentCalendarEvent(item) && item.id !== event.id && calendarParentKey(item) !== event.parentEventId && item.status === 'scheduled' && event.startDate >= item.startDate && event.endDate <= item.endDate);
   const save = async () => { const ok = await api.run((store) => store.moveEventToTrip(event, parentId).then(() => true)); if (ok) onDone(); };
-  return <section className="card chooser"><div className="form-head"><button className="icon-btn" onClick={onCancel} aria-label="返回"><Icon name="left" /></button><h2>移到其他主行程</h2></div><p><b>{event.title}</b></p><p className="muted small">只列出完整包含細項日期（{event.startDate}～{event.endDate}）的主行程；移動後不會改變日期或其他內容。</p><label className="field">新的主行程<select value={parentId} onChange={(e) => setParentId(e.target.value)}><option value="">請選擇</option>{parents.map((item) => <option key={item.id} value={item.id}>{item.title}（{item.startDate}～{item.endDate}）</option>)}</select></label>{!parents.length && <p className="form-error">目前沒有日期符合的其他主行程。</p>}<div className="form-actions"><button onClick={onCancel}>取消</button><button className="primary" disabled={!parentId || api.busy} onClick={save}>確認移動</button></div></section>;
+  return <section className="card chooser"><div className="form-head"><button className="icon-btn" onClick={onCancel} aria-label="返回"><Icon name="left" /></button><h2>移到其他主行程</h2></div><p><b>{event.title}</b></p><p className="muted small">只列出完整包含細項日期（{event.startDate}～{event.endDate}）的主行程；移動後不會改變日期或其他內容。</p><label className="field">新的主行程<select value={parentId} onChange={(e) => setParentId(e.target.value)}><option value="">請選擇</option>{parents.map((item) => <option key={item.id} value={calendarParentKey(item)}>{item.title}（{item.startDate}～{item.endDate}）</option>)}</select></label>{!parents.length && <p className="form-error">目前沒有日期符合的其他主行程。</p>}<div className="form-actions"><button onClick={onCancel}>取消</button><button className="primary" disabled={!parentId || api.busy} onClick={save}>確認移動</button></div></section>;
 }
 
 function TripChangeView({ api, data, onChange, onDone }: { api: CalendarApi; data: Extract<Open, { kind: 'trip-change' }>; onChange: (o: Open) => void; onDone: () => void }) {

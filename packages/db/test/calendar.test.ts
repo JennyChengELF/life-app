@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CalendarStore, dueCalendarReminders, emptyForm, expandCalendarEvents, formToTxn, LocalBackend, memoryStorage, MoneyStore, taiwanDayInfo } from '../src';
+import { calendarParentKey, CalendarStore, dueCalendarReminders, emptyForm, expandCalendarEvents, findCalendarParent, formToTxn, LocalBackend, memoryStorage, MoneyStore, taiwanDayInfo } from '../src';
 
 const base = (groupId: string) => ({
   title: '台南旅遊',
@@ -22,6 +22,34 @@ const base = (groupId: string) => ({
 });
 
 describe('行事曆資料', () => {
+  it('單日行程可加細項，重複行程的細項只屬於選定的那一次', async () => {
+    const store = new CalendarStore(new LocalBackend(memoryStorage()));
+    const { defaultGroupId } = await store.load();
+    const day = '2026-11-25';
+    const nextWeek = '2026-12-02';
+    const work = { ...base(defaultGroupId), title: '上班', startDate: day, endDate: day,
+      timeType: 'range' as const, startTime: '09:00', endTime: '18:00', timeMode: 'floatingLocal' as const };
+    const meeting = { ...work, title: '部門會議', startTime: '14:00', endTime: '15:00' };
+    await store.addEvent(work, 'ONE-DAY');
+    await store.addEvent({ ...meeting, parentEventId: 'ONE-DAY' }, 'ONE-DAY-DETAIL');
+    await store.addEvent({ ...work, recurrence: { frequency: 'weekly', interval: 1, weekDays: [3], end: 'count', count: 2 } }, 'WORK');
+    const first = findCalendarParent(await store.load(), `repeat:WORK:${day}`)!;
+    await store.addEvent({ ...meeting, parentEventId: calendarParentKey(first) }, 'WEEK-DETAIL');
+    await store.updateRecurringEvent(first, { ...first, title: '本週上班' }, 'single');
+    const snapshot = await store.load();
+    const occurrences = expandCalendarEvents(snapshot, day, nextWeek).filter((event) => event.recurrenceParentId === 'WORK');
+    const detail = snapshot.events.find((event) => event.id === 'WEEK-DETAIL')!;
+    expect(occurrences.map((event) => event.startDate)).toEqual([day, nextWeek]);
+    expect(occurrences.map((event) => calendarParentKey(event) === detail.parentEventId)).toEqual([true, false]);
+    expect(findCalendarParent(snapshot, detail.parentEventId)?.title).toBe('本週上班');
+    expect(snapshot.events.find((event) => event.id === 'ONE-DAY-DETAIL')?.parentEventId).toBe('ONE-DAY');
+    await store.updateRecurringEvent(occurrences[0], { ...occurrences[0], title: '未來上班' }, 'future');
+    const split = await store.load();
+    const shiftedDetail = split.events.find((event) => event.id === detail.id)!;
+    expect(shiftedDetail.parentEventId).not.toBe(detail.parentEventId);
+    expect(findCalendarParent(split, shiftedDetail.parentEventId)?.startDate).toBe(day);
+  });
+
   it('行事曆與記帳用同一份標籤 id，改名後兩邊仍保留關聯', async () => {
     const backend = new LocalBackend(memoryStorage());
     const calendar = new CalendarStore(backend);
@@ -280,11 +308,11 @@ describe('行事曆資料', () => {
     expect(expandCalendarEvents(snap, '2026-11-23', '2026-12-10').filter((item) => item.recurrenceParentId === 'REPEAT').map((item) => item.startDate)).toEqual(['2026-11-23', '2026-11-25', '2026-11-30', '2026-12-02']);
   });
 
-  it('重複行程不能同時作為主行程或細項', async () => {
+  it('作為細項的行程本身不能重複', async () => {
     const s = new CalendarStore(new LocalBackend(memoryStorage()));
     const group = (await s.load()).defaultGroupId;
     await s.addEvent(base(group), 'TRIP');
-    await expect(s.addEvent({ ...base(group), parentEventId: 'TRIP', startDate: '2026-11-22', endDate: '2026-11-22', recurrence: { frequency: 'daily', interval: 1, end: 'never' } }, 'INVALID')).rejects.toThrow('不能同時屬於主行程');
+    await expect(s.addEvent({ ...base(group), parentEventId: 'TRIP', startDate: '2026-11-22', endDate: '2026-11-22', recurrence: { frequency: 'daily', interval: 1, end: 'never' } }, 'INVALID')).rejects.toThrow('細項不能設為重複行程');
   });
 
   it('重複固定時間遇到夏令時間不存在的那次會略過', async () => {

@@ -84,6 +84,21 @@ describe('用藥紀錄與庫存', () => {
     expect((await store.load()).items[0].remaining).toBe(1);
   });
 
+  it('直接在試算表改 skipStock 為 TRUE，保留紀錄及歸屬日期並回補庫存', async () => {
+    const backend = new LocalBackend(memoryStorage());
+    const store = new MedStore(backend);
+    await store.saveItem(newId(), supplement, undefined, 10);
+    const item = (await store.load()).items[0];
+    await store.saveLogs(newId(), [dose(item.id, 2)]);
+    const log = (await store.load()).logs[0];
+    expect(log.stockEffect).toBe('total');
+    await backend.update('medLogs', [{ rowNumber: log.rowNumber, expectId: log.id, values: { skipStock: true } }]);
+    const after = await store.load();
+    expect(after.issues).toEqual([]);
+    expect(after.logs).toMatchObject([{ id: log.id, date, skipStock: true, stockEffect: 'none' }]);
+    expect(after.items[0].remaining).toBe(10);
+  });
+
   it('常用組合編輯可補庫存和建立新批次，組合仍只存品項與劑量', async () => {
     const store = new MedStore(new LocalBackend(memoryStorage()));
     await store.saveItem(newId(), chinese);

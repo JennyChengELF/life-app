@@ -195,6 +195,33 @@ export function sortCalendarEvents<T extends Pick<CalendarEvent, 'startDate' | '
   });
 }
 
+/** （2026-11-27 使用者決定：重複行程的細項只屬於選定的那一次。） */
+export function calendarParentKey(event: CalendarEvent): string {
+  return event.recurrenceParentId && event.recurrenceInstanceKey
+    ? `repeat:${event.recurrenceParentId}:${event.recurrenceInstanceKey}` : event.id;
+}
+
+function parseOccurrenceParentKey(parentKey: string | null) {
+  const match = /^repeat:(.+):(\d{4}-\d{2}-\d{2})$/.exec(parentKey ?? '');
+  return match ? { masterId: match[1], date: match[2] } : null;
+}
+
+export function findCalendarParent(snapshot: CalendarSnapshot, parentKey: string | null): CalendarEvent | undefined {
+  if (!parentKey) return undefined;
+  const saved = snapshot.events.find((event) => event.id === parentKey || calendarParentKey(event) === parentKey);
+  if (saved) return saved;
+  const occurrence = parseOccurrenceParentKey(parentKey);
+  if (!occurrence) return undefined;
+  const { masterId, date } = occurrence;
+  const master = snapshot.recurrenceMasters.find((event) => event.id === masterId);
+  return master && expandCalendarEvents({ ...snapshot, recurrenceMasters: [master] }, date, date)
+    .find((event) => event.id === parentKey);
+}
+
+export function canParentCalendarEvent(event: CalendarEvent): boolean {
+  return !event.parentEventId && !event.systemSource && (!event.recurrence || event.isRecurrenceInstance);
+}
+
 /** 依畫面需要的日期範圍展開重複行程，不把每一次發生都寫進試算表。 */
 export function expandCalendarEvents(snapshot: CalendarSnapshot, fromDate: string, toDate: string) {
   const events = [...snapshot.events];
@@ -363,7 +390,7 @@ function validateEvent(input: CalendarEventInput) {
   const separateRouteZones = input.timeMode === 'fixedZone' && input.locationType === 'route' && input.startTimeZone !== input.endTimeZone;
   if (input.timeType === 'range' && input.startDate === input.endDate && input.endTime! <= input.startTime! && !separateRouteZones) throw new Error('同一天的結束時間必須晚於開始時間');
   if (input.recurrence) parseCalendarRecurrence(input.recurrence);
-  if (input.recurrence && input.parentEventId) throw new Error('重複行程不能同時屬於主行程');
+  if (input.recurrence && input.parentEventId) throw new Error('細項不能設為重複行程');
   const reminders = parseCalendarReminders(input.reminders);
   if (input.timeType === 'allDay' && reminders.some((rule) => rule.kind !== 'custom')) throw new Error('全天行程請用指定日期與時間的提醒');
 }
@@ -847,8 +874,8 @@ export class CalendarStore {
     const snap = await this.load();
     if (!snap.groups.some((g) => g.id === prepared.groupId && !g.archived && g.kind === 'user')) throw new Error('請選擇可用的行事曆群組');
     if (prepared.parentEventId) {
-      const parent = snap.events.find((e) => e.id === prepared.parentEventId);
-      if (!parent) throw new Error('找不到主行程');
+      const parent = findCalendarParent(snap, prepared.parentEventId);
+      if (!parent || !canParentCalendarEvent(parent) || parent.status !== 'scheduled') throw new Error('找不到可用的主行程');
       const endDate = prepared.timeType === 'point' ? prepared.startDate : prepared.endDate;
       if (prepared.startDate < parent.startDate || endDate > parent.endDate) throw new Error(`細項日期必須在主行程的 ${parent.startDate}～${parent.endDate} 之內`);
       prepared.peopleIds ??= parent.peopleIds;
@@ -869,7 +896,7 @@ export class CalendarStore {
     validatePreparedEvent(prepared);
     if (prepared.recurrence && snap.events.some((item) => item.parentEventId === event.id)) throw new Error('已有細項的主行程不能改成重複行程');
     if (prepared.parentEventId) {
-      const parent = snap.events.find((item) => item.id === prepared.parentEventId);
+      const parent = findCalendarParent(snap, prepared.parentEventId);
       if (!parent) throw new Error('找不到主行程');
       const endDate = prepared.timeType === 'point' ? prepared.startDate : prepared.endDate;
       if (prepared.startDate < parent.startDate || endDate > parent.endDate) throw new Error(`細項日期必須在主行程的 ${parent.startDate}～${parent.endDate} 之內`);
@@ -918,8 +945,21 @@ export class CalendarStore {
     await this.rememberTimeZones(prepared);
   }
 
+  private shiftOccurrenceChildren(snapshot: CalendarSnapshot, sourceId: string, destinationId: string, delta: number, fromKey?: string): RowUpdate[] {
+    const now = Date.now();
+    return snapshot.events.flatMap((child) => {
+      const link = parseOccurrenceParentKey(child.parentEventId);
+      if (!link || link.masterId !== sourceId || (fromKey && link.date < fromKey)) return [];
+      const parentEventId = `repeat:${destinationId}:${addDateDays(link.date, delta)}`;
+      const shifted = prepareEventInput({ ...child, parentEventId,
+        startDate: addDateDays(child.startDate, delta), endDate: addDateDays(child.endDate, delta) }, child);
+      validatePreparedEvent(shifted);
+      return [{ rowNumber: child.rowNumber, values: { ...eventValues(shifted), updatedAt: now }, expectId: child.id }];
+    });
+  }
+
   private async updateAllRecurring(event: CalendarEvent, input: CalendarEventInput) {
-    const { master, overrides } = await this.recurrenceContext(event);
+    const { snap, master, overrides } = await this.recurrenceContext(event);
     const now = Date.now();
     const delta = dateDiffDays(event.startDate, input.startDate);
     const duration = dateDiffDays(input.startDate, input.endDate);
@@ -958,12 +998,13 @@ export class CalendarStore {
         updates.push({ rowNumber: override.rowNumber, values: { ...eventValues(shifted), updatedAt: now }, expectId: override.id });
       }
     }
+    if (delta) updates.push(...this.shiftOccurrenceChildren(snap, master.id, master.id, delta));
     await this.b.update('calendarEvents', updates);
     await this.rememberTimeZones(prepared);
   }
 
   private async splitRecurringSeries(event: CalendarEvent, input: CalendarEventInput, statusOnly = false) {
-    const { master, overrides, key } = await this.recurrenceContext(event);
+    const { snap, master, overrides, key } = await this.recurrenceContext(event);
     const now = Date.now();
     const beforeDates = calendarRecurrenceDates(master.recurrence!, master.startDate, master.startDate, addDateDays(key, -1));
     const beforeCount = beforeDates.length;
@@ -1023,6 +1064,7 @@ export class CalendarStore {
       validatePreparedEvent(shifted);
       updates.push({ rowNumber: override.rowNumber, values: { ...eventValues(shifted), updatedAt: now }, expectId: override.id });
     }
+    updates.push(...this.shiftOccurrenceChildren(snap, master.id, newSeriesId, delta, key));
     if (this.b.writeBatch) await this.b.writeBatch([{ table: 'calendarEvents', append, update: updates }]);
     else {
       await this.b.append('calendarEvents', append);
@@ -1049,8 +1091,12 @@ export class CalendarStore {
   }
 
   async deleteRecurringEvent(event: CalendarEvent, scope: CalendarRecurrenceScope) {
-    const { master, overrides, key } = await this.recurrenceContext(event);
+    const { snap, master, overrides, key } = await this.recurrenceContext(event);
     const now = Date.now();
+    if (snap.events.some((child) => {
+      const link = parseOccurrenceParentKey(child.parentEventId);
+      return link?.masterId === master.id && (scope === 'all' || (scope === 'single' ? link.date === key : link.date >= key));
+    })) throw new Error('選定範圍內仍有細項，請先將細項移出，再刪除主行程');
     if (scope === 'single') {
       const exceptions = [...new Set([...master.recurrenceExceptions, key])].sort();
       const updates: RowUpdate[] = [{ rowNumber: master.rowNumber, values: { exceptions: JSON.stringify(exceptions), updatedAt: now }, expectId: master.id }];
@@ -1130,17 +1176,21 @@ export class CalendarStore {
 
   /** 把一或多筆既有一般行程加入主行程；日期可在確認畫面修正，但儲存時必須完整落在期間內。 */
   async attachEventsToTrip(parent: CalendarEvent, actions: TripAttachAction[]) {
-    if (parent.parentEventId || parent.recurrence || parent.endDate <= parent.startDate || parent.systemSource) throw new Error('這筆不是可用的主行程');
     const snap = await this.load();
+    const currentParent = findCalendarParent(snap, calendarParentKey(parent));
+    if (!currentParent || !canParentCalendarEvent(currentParent) || currentParent.status !== 'scheduled') throw new Error('這筆不是可用的主行程');
+    parent = currentParent;
+    const parentKey = calendarParentKey(parent);
     const now = Date.now();
     const updates: RowUpdate[] = [];
     for (const action of actions) {
       const current = snap.events.find((item) => item.id === action.event.id);
-      if (!current || current.systemSource || current.parentEventId || current.recurrence || current.id === parent.id) throw new Error('選取的行程已不能加入');
+      if (!current || current.systemSource || current.parentEventId || current.recurrence || current.isRecurrenceInstance || current.id === parent.id
+        || snap.events.some((item) => item.parentEventId === current.id)) throw new Error('選取的行程已不能加入');
       const endDate = current.timeType === 'point' ? action.startDate : action.endDate;
       if (!DATE_RE.test(action.startDate) || !DATE_RE.test(endDate) || endDate < action.startDate) throw new Error(`「${current.title}」的日期不正確`);
       if (action.startDate < parent.startDate || endDate > parent.endDate) throw new Error(`「${current.title}」的日期必須在主行程的 ${parent.startDate}～${parent.endDate} 之內`);
-      const moved = prepareEventInput({ ...current, parentEventId: parent.id, startDate: action.startDate, endDate }, current);
+      const moved = prepareEventInput({ ...current, parentEventId: parentKey, startDate: action.startDate, endDate }, current);
       validatePreparedEvent(moved);
       updates.push({ rowNumber: current.rowNumber, values: { ...eventValues(moved), updatedAt: now }, expectId: current.id });
     }
@@ -1151,10 +1201,10 @@ export class CalendarStore {
   async moveEventToTrip(event: CalendarEvent, parentId: string) {
     if (!event.parentEventId || event.systemSource) throw new Error('這筆不是可移動的細項');
     const snap = await this.load();
-    const parent = snap.events.find((item) => item.id === parentId);
-    if (!parent || parent.parentEventId || parent.recurrence || parent.endDate <= parent.startDate || parent.systemSource || parent.status !== 'scheduled') throw new Error('找不到可用的主行程');
+    const parent = findCalendarParent(snap, parentId);
+    if (!parent || !canParentCalendarEvent(parent) || parent.status !== 'scheduled') throw new Error('找不到可用的主行程');
     if (event.startDate < parent.startDate || event.endDate > parent.endDate) throw new Error(`細項日期必須在主行程的 ${parent.startDate}～${parent.endDate} 之內`);
-    await this.b.update('calendarEvents', [{ rowNumber: event.rowNumber, values: { parentEventId: parent.id, updatedAt: Date.now() }, expectId: event.id }]);
+    await this.b.update('calendarEvents', [{ rowNumber: event.rowNumber, values: { parentEventId: calendarParentKey(parent), updatedAt: Date.now() }, expectId: event.id }]);
   }
 
   /** 取消整趟會連同細項；只取消主行程會解除細項。（2026-11-19 使用者決定） */
