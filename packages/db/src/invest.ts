@@ -239,6 +239,21 @@ export class InvestStore {
 
   async load(includeRemoved = false): Promise<InvestSnapshot> {
     const [assets, events] = await Promise.all([this.backend.read('investAssets'), this.backend.read('investEvents')]);
+    // （2026-11-27 使用者決定：直接在試算表建立的有代號標的也要可用。）
+    const now = Date.now();
+    const updates = assets.filter((row) => isActive(row) && text(row.values.symbol)).flatMap((row) => {
+      const v = row.values;
+      const values: RowValues = {};
+      if (!text(v.id)) values.id = newId(now);
+      if (v.createdAt == null && !row.errors.includes('createdAt')) values.createdAt = now;
+      if (v.updatedAt == null && !row.errors.includes('updatedAt')) values.updatedAt = now;
+      return Object.keys(values).length ? [{ rowNumber: row.rowNumber, expectId: String(v.id ?? ''), values }] : [];
+    });
+    if (updates.length) {
+      await this.backend.update('investAssets', updates);
+      const byRow = new Map(updates.map((row) => [row.rowNumber, row.values]));
+      for (const row of assets) Object.assign(row.values, byRow.get(row.rowNumber));
+    }
     return {
       assets: assets.filter(isActive).map(({ values }) => fromRow(blankAsset, values)).filter((a) => a.id && a.symbol),
       events: events.filter(isActive).map(({ values }) => fromRow(blankInvestEvent('buy', ''), values))

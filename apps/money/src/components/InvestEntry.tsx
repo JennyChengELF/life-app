@@ -18,30 +18,36 @@ export function InvestEntry({ txn, api }: { txn: Txn; api: MoneyApi }) {
   useEffect(() => {
     if (!investmentId) return;
     let live = true;
-    void investmentDetail(investmentId).then((result) => {
+    void investmentDetail(txn.id).then((result) => {
       if (!live) return;
-      if (result.event && result.asset) setDetail(result);
+      if (result.length) setDetail(result);
       else setError('找不到連結的投資紀錄。');
     }).catch(() => { if (live) setError('無法讀取投資明細，可重開這筆交易再試。'); });
     return () => { live = false; };
-  }, [investmentId, investmentDetail]);
+  }, [txn.id, investmentId, investmentDetail]);
 
   if (!investmentId) {
     if (txn.direction !== '出' && txn.direction !== '入') return null;
     if (!txn.lines.some((line) => line.category?.startsWith('投資'))) return null;
     return <section className="card"><a className="link" href={investUrl({ moneyTxn: txn.id, date: txn.date })}>補填或連結投資明細</a></section>;
   }
-  const url = investUrl({ fromMoney: '1', event: investmentId, date: txn.date });
-  const event = detail?.event;
-  const asset = detail?.asset;
-  const estimate = asset && event ? impliedInvestPrice(event, asset) : null;
   return <section className="card">
-    <h2>{event ? INVEST_KINDS[event.kind] : '投資明細'}{asset && ` · ${asset.symbol} ${asset.name}`}</h2>
-    {event && asset ? <p>{event.tradeDate || '成交日待補'} · {event.quantity ?? '待補'} {asset.kind === 'stock' ? '股' : '單位'}
-      {event.price != null && ` · ${asset.kind === 'stock' ? '成交價' : '淨值'} ${event.price} ${asset.currency}`}
-      {estimate != null && ` · 推算單價 ${estimate}`}{event.fx != null && ` · 匯率 ${event.fx}`}
-      {investOriginal(event) != null && ` · 原幣金額 ${investOriginal(event)} ${asset.currency}`}</p> : <p className="hint">{error || '讀取投資明細中…'}</p>}
-    {event && asset && txn.investmentGenerated && <p className="hint">自動摘要 · {investmentMemo(event, asset)}</p>}
-    <a className="link" href={url}>修改投資交易</a>
+    <h2>投資明細{detail && detail.length > 1 ? `（${detail.length} 筆）` : ''}</h2>
+    {!detail && <p className="hint">{error || '讀取投資明細中…'}</p>}
+    <ul className="invest-money-links">{detail?.map(({ event, asset }) => {
+      const estimate = asset ? impliedInvestPrice(event, asset) : null;
+      const original = investOriginal(event);
+      return <li key={event.id}>
+        <strong>{INVEST_KINDS[event.kind]}{asset && ` · ${asset.symbol} ${asset.name}`}</strong>
+        {asset && <p>{event.tradeDate || '成交日待補'} · {event.quantity ?? '待補'} {asset.kind === 'stock' ? '股' : '單位'}
+          {event.price != null && ` · ${asset.kind === 'stock' ? '成交價' : '淨值'} ${event.price} ${asset.currency}`}
+          {estimate != null && ` · 推算單價 ${estimate}`}{event.fx != null && ` · 匯率 ${event.fx}`}
+          {original != null && ` · 原幣金額 ${original} ${asset.currency}`}</p>}
+        {asset && event.moneyMode === 'generated' && <p className="hint">自動摘要 · {investmentMemo(event, asset)}</p>}
+        <a className="link" href={investUrl({ fromMoney: '1', event: event.id, date: txn.date })}>修改投資交易</a>
+      </li>;
+    })}</ul>
+    {txn.direction === '出' && !txn.investmentGenerated &&
+      <a className="link" href={investUrl({ moneyTxn: txn.id, date: txn.date })}>補填或連結其他投資明細</a>}
   </section>;
 }

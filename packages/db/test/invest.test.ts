@@ -145,6 +145,51 @@ describe('投資 APP', () => {
     expect(ledger[0]).toMatchObject({ id: cashId, investmentId: id, note: '舊記帳', amount: 400 });
   });
 
+  it('標的從試算表新增時補空白系統欄位，已存在的內容保留', async () => {
+    const { backend, store } = await setup();
+    await backend.append('investAssets', [
+      { symbol: 'EXAMPLE', name: '測試標的', createdAt: 1234 },
+      { id: 'existing', symbol: 'UNKNOWN', updatedAt: 4321 },
+      { name: '無代號' },
+    ]);
+    const snap = await store.load();
+    expect(snap.assets.map((a) => a.symbol)).toEqual(['TEST', 'EXAMPLE', 'UNKNOWN']);
+    const rows = await backend.read('investAssets');
+    expect(rows[1].values).toMatchObject({ id: snap.assets[1].id, createdAt: 1234, name: '測試標的' });
+    expect(rows[1].values.updatedAt).toBeGreaterThan(10000);
+    expect(rows[2].values).toMatchObject({ id: 'existing', updatedAt: 4321 });
+    expect(rows[2].values.createdAt).toBeGreaterThan(10000);
+    expect(rows[3].values.id).toBeNull();
+    await store.load();
+    expect((await backend.read('investAssets'))[1].values.updatedAt).toBe(rows[1].values.updatedAt);
+  });
+
+  it('一次銀行扣款可對應三檔，金額不符時不能分列，解除一筆不刪扣款和其他投資', async () => {
+    const { bridge, store } = await setup();
+    await store.saveAsset({ ...stock, id: 'second', symbol: 'SECOND' });
+    await store.saveAsset({ ...stock, id: 'third', symbol: 'THIRD' });
+    const id = await bridge.money.saveTxn({
+      time: startOfDay(date), dateOnly: true, direction: '出', account: '測試銀行', amount: 600, paidBy: null,
+      currency: null, toAccount: null, toAmount: null, store: null, branch: null, statementText: null, note: '整筆扣款',
+      tagIds: [], lines: [{ kind: '支出', amount: 600, category: '投資' }],
+    });
+    const first = await bridge.link(event({ id: '', quantity: 1, price: 100, cashAmount: 100 }), id);
+    const second = await bridge.link(event({ id: '', asset: 'second', quantity: 2, price: 100, cashAmount: 200 }), id);
+    await expect(bridge.allocatePurchases(id)).rejects.toThrow('核對差額');
+    const third = await bridge.link(event({ id: '', asset: 'third', quantity: 3, price: 100, cashAmount: 300 }), id);
+    expect(new Set([first, second, third]).size).toBe(3);
+    await bridge.allocatePurchases(id);
+    const [txn] = (await bridge.money.load()).txns;
+    expect(txn).toMatchObject({ id, investmentId: first, amount: 600, note: '整筆扣款' });
+    expect(txn.lines.map((line) => [line.amount, line.note])).toEqual([
+      [100, '股票TEST'], [200, '股票SECOND'], [300, '股票THIRD'],
+    ]);
+    const group = (await store.load()).events;
+    await bridge.unlink(group.find((e) => e.id === first)!);
+    expect((await store.load()).events.filter((e) => e.moneyId === id).map((e) => e.id)).toEqual([second, third]);
+    expect((await bridge.money.load()).txns).toMatchObject([{ id, investmentId: second, amount: 600 }]);
+  });
+
   it('已知格式分表預覽和匯入，不建立記帳，重貼時標示可能重複', async () => {
     const { backend, store, bridge } = await setup();
     const buy = { date, symbol: '00900', quantity: 2, price: 33, fee: 3 };

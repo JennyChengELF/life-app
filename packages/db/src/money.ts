@@ -2257,9 +2257,11 @@ export class MoneyStore {
     return existing.id;
   }
 
-  async setInvestmentLink(txnId: string, investmentId: string | null) {
+  async setInvestmentLink(txnId: string, investmentId: string | null, expectedId?: string | null) {
     const txn = (await this.fresh()).txns.find((t) => t.id === txnId);
-    if (!txn || txn.investmentGenerated || (investmentId && txn.investmentId && txn.investmentId !== investmentId)) {
+    if (!txn || txn.investmentGenerated || (expectedId !== undefined
+      ? (txn.investmentId ?? null) !== expectedId
+      : investmentId && txn.investmentId && txn.investmentId !== investmentId)) {
       throw new Error('找不到可連結的記帳交易，或該筆已連到其他投資紀錄');
     }
     await this.b.update('moneyTransactions', [{

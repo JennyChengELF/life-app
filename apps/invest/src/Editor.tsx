@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { WeekDateStrip } from '@life/ui/week-date-strip';
 import {
   blankInvestEvent, canGenerateCash, dividendEligibility, dividendEstimate, impliedInvestPrice, INVEST_KINDS, investCategory,
   investIsDividend, investIsPurchase, investIsSale, investmentMemo, type InvestEvent, type InvestKind,
@@ -17,8 +18,10 @@ export function dividendHint(e: InvestEvent, snap: InvestSnapshot) {
     : `股數待核對：通知單比 APP ${diff > 0 ? '多' : '少'} ${format(Math.abs(diff))}，請檢查漏記交易或日期。`;
 }
 
-export function Editor({ initial, snap, money, busy, fromMoney, onSave, onCash, onMoney, onRemove, onUnlink, onCancel }: {
+export function Editor({ initial, day, onDate, snap, money, busy, fromMoney, linking, onSave, onCash, onMoney, onRemove, onUnlink, onCancel }: {
+  day: string; onDate: (date: string) => void;
   initial: InvestEvent; snap: InvestSnapshot; money: MoneySnapshot | null; busy: boolean; fromMoney: boolean;
+  linking?: boolean;
   onSave: (e: InvestEvent, cash: boolean) => void; onCash: () => void; onMoney: (e: InvestEvent, id: string) => void;
   onRemove: (e: InvestEvent) => void; onUnlink: (e: InvestEvent) => void; onCancel: () => void;
 }) {
@@ -37,7 +40,11 @@ export function Editor({ initial, snap, money, busy, fromMoney, onSave, onCash, 
       patch({ [field]: e.currentTarget.value === '' ? null : e.currentTarget.valueAsNumber })} />
   </label>;
   const date = (field: 'tradeDate' | 'cashDate' | 'secondDate' | 'exDate', label: string) => <label className="field">{label}
-    <input type="date" value={draft[field]} onChange={(e) => patch({ [field]: e.currentTarget.value })} />
+    <input type="date" value={draft[field]} onChange={(e) => {
+      const value = e.currentTarget.value;
+      patch({ [field]: value });
+      if (value && (field === 'tradeDate' || (field === 'cashDate' && draft.kind === 'dividend'))) onDate(value);
+    }} />
   </label>;
   const text = (field: 'cashCurrency' | 'note', label: string) => <label className="field">{label}
     <input value={draft[field]} onChange={(e) => patch({ [field]: e.currentTarget.value })} />
@@ -57,7 +64,7 @@ export function Editor({ initial, snap, money, busy, fromMoney, onSave, onCash, 
   const generated = draft.moneyMode === 'generated';
   const historic = draft.moneyMode === 'linked';
   const linkedTxn = money?.txns.find((txn) => txn.id === draft.moneyId);
-  const linkOptions = (money?.txns ?? []).filter((txn) => !txn.investmentId &&
+  const linkOptions = (money?.txns ?? []).filter((txn) => (!txn.investmentId || (draft.kind === 'buy' && !txn.investmentGenerated)) &&
     txn.direction === (isCashDividend || investIsSale(draft) ? '入' : '出')).sort((x, y) => y.date.localeCompare(x.date));
   function enableCash() {
     if (!wantCash) {
@@ -67,6 +74,10 @@ export function Editor({ initial, snap, money, busy, fromMoney, onSave, onCash, 
     setWantCash((v) => !v);
   }
   return <form className="card" onSubmit={(ev) => { ev.preventDefault(); onSave(draft, showCash); }}>
+    <WeekDateStrip selected={(isCashDividend ? draft.cashDate : draft.tradeDate) || draft.cashDate || day} setDate={(date) => {
+      patch(isCashDividend ? { cashDate: date } : { tradeDate: date });
+      onDate(date);
+    }} />
     <h2>{draft.id ? '修改投資紀錄' : '新增投資紀錄'}</h2>
     <div className="invest-grid">
       <label className="field">交易種類<select value={draft.kind} disabled={!!draft.id} onChange={(e) => changeKind(e.currentTarget.value as InvestKind)}>
@@ -110,7 +121,7 @@ export function Editor({ initial, snap, money, busy, fromMoney, onSave, onCash, 
       {showCash && <button type="button" className="btn" onClick={() => patch({ cashAmount: forecast })}>使用推算金額</button>}
     </p>}
     {text('note', '補充備註')}
-    {gen && !fromMoney && !generated && <div className="invest-actions">
+    {gen && !fromMoney && !generated && !linking && <div className="invest-actions">
       <button type="button" className="btn" onClick={enableCash}>{wantCash ? '先只存投資' : '產生記帳'}</button>
       {!!draft.id && <button type="button" className="btn" onClick={() => { onCash(); setShowLink((v) => !v); }}>連到既有記帳</button>}
     </div>}

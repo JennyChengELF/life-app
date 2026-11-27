@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Backend, MoneySnapshot, TxnInput } from '@life/db';
-import { AuthError, GoogleAuth, InvestMoney, InvestStore, LocalBackend, SheetsBackend, MoneyStore, type Txn } from '@life/db';
+import { AuthError, GoogleAuth, InvestMoney, InvestStore, investmentsForMoney, LocalBackend, SheetsBackend, MoneyStore, type Txn } from '@life/db';
 
 const CLIENT_ID = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined)?.trim() ?? '';
 /** 網址加 ?local 可強制用本機測試模式 */
@@ -38,20 +38,22 @@ export function useMoney() {
     await investInit.current;
   }, [backend]);
 
-  const investmentDetail = useCallback(async (id: string) => {
+  const investmentDetail = useCallback(async (moneyId: string) => {
     await connectInvest();
     const snapshot = await new InvestStore(backend).load(true);
-    const event = snapshot.events.find((row) => row.id === id);
-    return { event, asset: snapshot.assets.find((asset) => asset.id === event?.asset) };
+    return investmentsForMoney(snapshot.events, moneyId).map((event) => ({
+      event, asset: snapshot.assets.find((asset) => asset.id === event.asset),
+    }));
   }, [backend, connectInvest]);
 
   const deleteLinkedTxn = useCallback(async (txn: Txn) => {
     if (txn.investmentId) {
       await connectInvest();
       const bridge = new InvestMoney(backend);
-      const row = (await bridge.investments.load(true)).events.find((e) => e.id === txn.investmentId);
-      if (row?.moneyMode === 'generated') { await bridge.remove(row); return; }
-      if (row?.moneyMode === 'linked') await bridge.unlink(row);
+      const rows = investmentsForMoney((await bridge.investments.load(true)).events, txn.id);
+      const generated = rows.find((row) => row.moneyMode === 'generated');
+      if (generated) { await bridge.remove(generated); return; }
+      for (const row of rows) if (row.moneyMode === 'linked') await bridge.unlink(row);
     }
     await store.deleteTxn(txn);
   }, [backend, connectInvest, store]);

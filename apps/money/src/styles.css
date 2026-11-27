@@ -354,3 +354,5 @@ button.bt-row:hover, .bt-row.open { background: var(--bg); }
 .batch-form { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 12px; }
 .batch-preview { font-weight: 600; color: var(--accent-strong); }
 .batch-list .grow { flex: 1; }
+.invest-money-links { list-style: none; padding: 0; }
+.invest-money-links > li + li { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }

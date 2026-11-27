@@ -30,6 +30,15 @@ export function canGenerateCash(e: InvestEvent) {
   return investIsPurchase(e) || investIsSale(e) || e.kind === 'dividend' || (e.kind === 'switch' && !!e.externalFee);
 }
 
+export function investmentsForMoney(events: InvestEvent[], moneyId: string) {
+  return events.filter((event) => event.moneyId === moneyId && !event.removePending);
+}
+
+function withMoneyLock<T>(moneyId: string, action: () => Promise<T>): Promise<T> {
+  const locks = globalThis.navigator?.locks;
+  return locks ? locks.request(`life-invest-money-${moneyId}`, action) : action();
+}
+
 export function investmentCashInput(e: InvestEvent, a: InvestAsset): TxnInput {
   if (!canGenerateCash(e) || !e.cashDate || !e.cashAccount) throw new Error('請填扣款／入帳日和記帳帳戶');
   const income = investIsSale(e) || e.kind === 'dividend';
@@ -96,6 +105,14 @@ export class InvestMoney {
     const asset = assets.find((a) => a.id === linked.asset);
     if (!asset) throw new Error('找不到投資標的');
     const prior = events.find((e) => e.id === linked.id);
+    if (investmentsForMoney(events, linked.moneyId).some((row) => row.id !== linked.id)) {
+      if (!prior || linked.cashAmount !== prior.cashAmount || linked.cashAccount !== prior.cashAccount ||
+        linked.cashDate !== prior.cashDate || linked.cashCurrency !== prior.cashCurrency) {
+        throw new Error('這筆扣款有多檔投資，請在記帳 APP 編輯整筆扣款');
+      }
+      await this.investments.saveEvent({ ...linked, pending: false });
+      return { id };
+    }
     const ledger = await this.money.load();
     const existing = ledger.txns.find((txn) => txn.id === linked.moneyId);
     const priorAsset = assets.find((a) => a.id === prior?.asset);
@@ -165,7 +182,8 @@ export class InvestMoney {
     const id = existing.investmentId;
     if (!id || !existing.investmentGenerated) throw new Error('找不到這筆連動的投資紀錄');
     const save = async () => {
-      const event = (await this.investments.load()).events.find((e) => e.id === id && e.moneyId === existing.id && e.moneyMode === 'generated');
+      const group = investmentsForMoney((await this.investments.load()).events, existing.id);
+      const event = group.find((e) => e.id === id && e.moneyMode === 'generated');
       if (!event) throw new Error('找不到這筆連動的投資紀錄');
       const ledger = await this.money.load();
       const account = ledger.accounts.find((a) => a.name === input.account);
@@ -174,9 +192,14 @@ export class InvestMoney {
         (input.origCurrency && input.twdStatus !== 'final')) {
         throw new Error('投資記帳須保留原本的收支方向，並填寫實際收付款帳戶與金額');
       }
+      if (group.length > 1 && (input.amount !== existing.amount || input.twdAmount !== existing.twdAmount ||
+        input.account !== existing.account || input.origCurrency !== existing.origCurrency || toDateKey(input.time) !== existing.date)) {
+        throw new Error('這筆扣款有多檔投資。請先解除其他投資連結，再調整整筆金額、日期或帳戶');
+      }
       const txnId = await this.money.saveTxn({
         ...input, investmentId: id, investmentGenerated: true, investmentDeferred: existing.investmentDeferred,
       }, existing, existing.id);
+      if (group.length > 1) return txnId;
       const cashDate = toDateKey(input.time);
       const cashAmount = roundMoney(amount, account.currency);
       const cash = event.kind === 'switch' ? { externalFee: cashAmount } : { cashAmount };
@@ -193,39 +216,100 @@ export class InvestMoney {
   }
 
   async link(event: InvestEvent, moneyId: string) {
+    return withMoneyLock(moneyId, () => this.linkLocked(event, moneyId));
+  }
+
+  private async linkLocked(event: InvestEvent, moneyId: string) {
     if (event.moneyMode === 'generated') throw new Error('這筆已有自動產生的記帳');
     if (event.moneyId && event.moneyId !== moneyId) throw new Error('請先解除前一筆記帳連結');
-    const id = event.id || `money-${moneyId}`;
+    const id = event.id || newId();
     const snapshot = await this.money.load();
     const txn = snapshot.txns.find((t) => t.id === moneyId);
-    if (!txn || (txn.investmentId && txn.investmentId !== id)) throw new Error('該筆記帳已連到其他投資');
+    if (!txn) throw new Error('找不到這筆記帳');
+    const siblings = investmentsForMoney((await this.investments.load()).events, moneyId).filter((e) => e.id !== id);
+    // （2026-11-27 使用者決定：一筆定期定額扣款可對應多檔買進。）
+    if (siblings.length && (event.kind !== 'buy' || siblings.some((e) => e.kind !== 'buy'))) {
+      throw new Error('同一筆記帳連結多筆投資時，請選擇買進紀錄');
+    }
+    if (siblings.length && txn.investmentGenerated && siblings.some((e) => e.moneyMode === 'generated' && e.cashAmount === txn.amount)) {
+      throw new Error('這筆記帳原本以全部金額建立單一投資。請用既有扣款的方式建立多檔連結');
+    }
     const expected = investIsSale(event) || event.kind === 'dividend' ? '入' : '出';
     if (txn.direction !== expected) throw new Error('請選擇對應的支出或收入');
     const currency = snapshot.accounts.find((a) => a.name === txn.account)?.currency ?? txn.currency;
     const confirmedCash = event.kind === 'dividend' && txn.amount != null
       ? { cashAmount: txn.amount, cashCurrency: currency || event.cashCurrency } : {};
-    const linked = { ...event, ...confirmedCash, id, moneyId, moneyMode: 'linked' as const, pending: true };
+    const linked = { ...event, ...confirmedCash, id, moneyId, cashDate: event.cashDate || txn.date,
+      moneyMode: 'linked' as const, pending: true };
     await this.investments.saveEvent(linked);
-    await this.money.setInvestmentLink(moneyId, id);
+    if (!txn.investmentId) await this.money.setInvestmentLink(moneyId, id, null);
     await this.investments.saveEvent({ ...linked, pending: false });
     return linked.id;
   }
 
   async unlink(event: InvestEvent) {
+    return withMoneyLock(event.moneyId, () => this.unlinkLocked(event));
+  }
+
+  private async unlinkLocked(event: InvestEvent) {
     if (event.moneyMode !== 'linked') throw new Error('這筆不是手動連結');
     const txn = (await this.money.load()).txns.find((t) => t.id === event.moneyId);
-    if (txn?.investmentId === event.id) await this.money.setInvestmentLink(event.moneyId, null);
+    if (txn?.investmentId === event.id) {
+      const other = investmentsForMoney((await this.investments.load()).events, event.moneyId).find((e) => e.id !== event.id);
+      await this.money.setInvestmentLink(event.moneyId, other?.id ?? null, event.id);
+    }
     await this.investments.saveEvent({ ...event, moneyId: '', moneyMode: '', pending: false });
   }
 
   async remove(event: InvestEvent) {
     if (event.moneyMode === 'linked') await this.unlink(event);
     if (event.moneyMode === 'generated') {
+      if (investmentsForMoney((await this.investments.load()).events, event.moneyId).some((row) => row.id !== event.id)) {
+        throw new Error('此扣款還連著其他投資，請先解除其他連結');
+      }
       await this.investments.saveEvent({ ...event, removePending: true, pending: true });
       const txn = (await this.money.load()).txns.find((t) => t.id === event.moneyId);
       if (txn?.investmentId === event.id && txn.investmentGenerated) await this.money.deleteTxn(txn);
     }
     await this.investments.removeEvent(event);
+  }
+
+  /** 將同一筆實扣按連上的標的分列。只在使用者主動確認後更換支出明細。 */
+  async allocatePurchases(moneyId: string) {
+    return withMoneyLock(moneyId, async () => {
+      const [ledger, snap] = await Promise.all([this.money.load(), this.investments.load()]);
+      const txn = ledger.txns.find((row) => row.id === moneyId);
+      const group = investmentsForMoney(snap.events, moneyId);
+      if (!txn || !txn.account || txn.direction !== '出' || txn.origCurrency ||
+        txn.lines.some((line) => line.kind !== '支出' || line.amount <= 0) ||
+        group.length < 2 || group.some((event) => event.kind !== 'buy' || event.pending)) {
+        throw new Error('請先完成多筆買進的連結。分列限同幣別、只有正數支出明細的扣款');
+      }
+      const currency = ledger.accounts.find((account) => account.name === txn.account)?.currency ?? 'TWD';
+      let total = 0;
+      const lines = group.flatMap((event) => {
+        const asset = snap.assets.find((row) => row.id === event.asset);
+        if (!asset) throw new Error('找不到投資標的');
+        if (event.cashAmount != null && event.cashCurrency !== currency) {
+          throw new Error(`請將 ${asset.symbol} 的實扣金額填成銀行扣款幣別 ${currency}`);
+        }
+        const purchase = investmentCashInput({ ...event, cashAccount: txn.account!, cashDate: txn.date, cashCurrency: currency }, asset);
+        total += purchase.amount ?? 0;
+        return purchase.lines.map((line) => {
+          const old = txn.lines.find((prev) => prev.note && prev.note === line.note);
+          const single = txn.lines.length === 1 ? txn.lines[0] : undefined;
+          const retained = single?.category && line.category && single.category.startsWith(`${line.category} / `)
+            ? single.category : line.category;
+          return { ...line, category: old?.category ?? retained, budget: old?.budget ?? single?.budget ?? null };
+        });
+      });
+      if (roundMoney(total, currency) !== txn.amount) {
+        throw new Error(`各檔金額加總 ${roundMoney(total, currency)} ${currency}，銀行實扣 ${txn.amount} ${currency}。請核對差額後再更新明細`);
+      }
+      await this.money.ensureInvestmentCategories(lines.flatMap((line) => line.category
+        ? [{ path: line.category, kind: '支出' as const, invested: true }] : []));
+      await this.money.saveTxn({ ...txn, lines }, txn, txn.investmentGenerated ? txn.id : undefined);
+    });
   }
 
   async cashDividendAmount(event: InvestEvent) {
