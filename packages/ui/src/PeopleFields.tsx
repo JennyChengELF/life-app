@@ -10,7 +10,7 @@ export function PeopleFields({ people, selected, onChange, onAdd, busy }: {
   people: CalendarPerson[];
   selected: string[];
   onChange: (ids: string[]) => void;
-  onAdd: (nickname: string, fullName: string) => Promise<string | undefined>;
+  onAdd?: (nickname: string, fullName: string) => Promise<string | undefined>;
   busy: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -28,7 +28,7 @@ export function PeopleFields({ people, selected, onChange, onAdd, busy }: {
     setFullName('');
   };
   const savePerson = async () => {
-    if (busy || !nickname.trim() || exact) return;
+    if (!onAdd || busy || !nickname.trim() || exact) return;
     const id = await onAdd(nickname, fullName);
     if (!id) return;
     onChange([...selected, id]);
@@ -56,7 +56,7 @@ export function PeopleFields({ people, selected, onChange, onAdd, busy }: {
           {personLabel(person)} <span aria-hidden="true">＋</span>
         </button>)}
       </div> : <p className="muted small">沒有符合的可選人物</p>}
-      {!adding ? <button type="button" className="link" disabled={busy} onClick={() => { setNickname(query.trim()); setAdding(true); }}>＋ 新增共用人物</button> : (
+      {onAdd && (!adding ? <button type="button" className="link" disabled={busy} onClick={() => { setNickname(query.trim()); setAdding(true); }}>＋ 新增共用人物</button> : (
         <div className="person-add" onKeyDown={(e) => {
           if (e.key !== 'Enter' || e.nativeEvent.isComposing || !(e.target instanceof HTMLInputElement)) return;
           e.preventDefault();
@@ -71,7 +71,7 @@ export function PeopleFields({ people, selected, onChange, onAdd, busy }: {
             <button type="button" className="primary" disabled={busy || !nickname.trim() || !!exact} onClick={savePerson}>新增並選取</button>
           </div>
         </div>
-      )}
+      ))}
     </div>}
   </section>;
 }

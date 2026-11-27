@@ -39,6 +39,8 @@ export interface Backend {
   /** 回傳新增的列號 */
   append(table: TableName, rows: RowValues[]): Promise<number[]>;
   update(table: TableName, updates: RowUpdate[]): Promise<void>;
+  /** 同份試算表多筆新增或更新一次提交。 */
+  writeBatch?(writes: TableWrite[]): Promise<void>;
   /** 試算表網址（本機模式為 null） */
   fileUrl(file: FileKey): string | null;
 }

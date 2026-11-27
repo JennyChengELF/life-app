@@ -82,6 +82,10 @@ export interface CalendarEventInput {
   reminders?: CalendarReminder[];
   peopleIds?: string[];
   tagIds?: string[];
+  bujoEnabled?: boolean;
+  bujoSeriesId?: string | null;
+  bujoDateShift?: number;
+  bujoBoundary?: string | null;
 }
 
 export interface CalendarEvent extends CalendarEventInput {
@@ -312,6 +316,10 @@ function eventValues(input: CalendarEventInput): RowValues {
     reminders: reminders.length ? JSON.stringify(reminders) : null,
     ...(input.peopleIds === undefined ? {} : { peopleIds: uniquePersonIds(input.peopleIds).join(',') || null }),
     ...(input.tagIds === undefined ? {} : { tagIds: writeTagIds(input.tagIds) }),
+    ...(input.bujoEnabled === undefined ? {} : { bujoEnabled: input.bujoEnabled }),
+    ...(input.bujoSeriesId === undefined ? {} : { bujoSeriesId: input.bujoSeriesId }),
+    ...(input.bujoDateShift === undefined ? {} : { bujoDateShift: input.bujoDateShift || null }),
+    ...(input.bujoBoundary === undefined ? {} : { bujoBoundary: input.bujoBoundary }),
     recurrence: serializeCalendarRecurrence(input.recurrence ?? null),
     recurrenceParentId: input.recurrenceParentId ?? null,
     recurrenceInstanceKey: input.recurrenceInstanceKey ?? null,
@@ -677,6 +685,10 @@ export class CalendarStore {
         reminders,
         peopleIds: uniquePersonIds((str(r.values.peopleIds) ?? '').split(',')),
         tagIds: readTagIds(r.values.tagIds),
+        bujoEnabled: bool(r.values.bujoEnabled),
+        bujoSeriesId: str(r.values.bujoSeriesId),
+        bujoDateShift: Math.trunc(num(r.values.bujoDateShift)),
+        bujoBoundary: str(r.values.bujoBoundary),
         createdVia: str(r.values.createdVia) ?? 'sheet',
         createdAt: num(r.values.createdAt, now),
         updatedAt: num(r.values.updatedAt, now),
@@ -889,13 +901,20 @@ export class CalendarStore {
     validateEvent(overrideInput);
     const prepared = prepareEventInput(overrideInput, event);
     validatePreparedEvent(prepared);
-    if (event.recurrenceOverride) {
-      await this.b.update('calendarEvents', [{ rowNumber: event.rowNumber, values: { ...eventValues(prepared), updatedAt: now }, expectId: event.id }]);
-    } else {
-      await this.b.append('calendarEvents', [{ ...eventValues(prepared), createdVia: this.via, id: newId(now), createdAt: now, updatedAt: now }]);
-    }
     const exceptions = [...new Set([...master.recurrenceExceptions, key])].sort();
-    await this.b.update('calendarEvents', [{ rowNumber: master.rowNumber, values: { exceptions: JSON.stringify(exceptions), updatedAt: now }, expectId: master.id }]);
+    const parentUpdate = { rowNumber: master.rowNumber, values: { exceptions: JSON.stringify(exceptions), updatedAt: now }, expectId: master.id };
+    if (event.recurrenceOverride) {
+      await this.b.update('calendarEvents', [
+        { rowNumber: event.rowNumber, values: { ...eventValues(prepared), updatedAt: now }, expectId: event.id }, parentUpdate,
+      ]);
+    } else {
+      const append = [{ ...eventValues(prepared), createdVia: this.via, id: newId(now), createdAt: now, updatedAt: now }];
+      if (this.b.writeBatch) await this.b.writeBatch([{ table: 'calendarEvents', append, update: [parentUpdate] }]);
+      else {
+        await this.b.append('calendarEvents', append);
+        await this.b.update('calendarEvents', [parentUpdate]);
+      }
+    }
     await this.rememberTimeZones(prepared);
   }
 
@@ -905,6 +924,7 @@ export class CalendarStore {
     const delta = dateDiffDays(event.startDate, input.startDate);
     const duration = dateDiffDays(input.startDate, input.endDate);
     const shiftedExceptions = master.recurrenceExceptions.map((date) => addDateDays(date, delta));
+    const changeBujo = input.bujoEnabled !== undefined && input.bujoEnabled !== event.bujoEnabled;
     const masterInput: CalendarEventInput = {
       ...input,
       parentEventId: null,
@@ -914,12 +934,15 @@ export class CalendarStore {
       recurrenceParentId: null,
       recurrenceInstanceKey: null,
       recurrenceExceptions: shiftedExceptions,
+      bujoEnabled: changeBujo ? input.bujoEnabled : master.bujoEnabled,
+      bujoDateShift: (master.bujoDateShift ?? 0) + delta,
+      bujoBoundary: master.bujoBoundary ? addDateDays(master.bujoBoundary, delta) : null,
     };
     validateEvent(masterInput);
     const prepared = prepareEventInput(masterInput, master);
     validatePreparedEvent(prepared);
     const updates: RowUpdate[] = [{ rowNumber: master.rowNumber, values: { ...eventValues(prepared), updatedAt: now }, expectId: master.id }];
-    if (delta) {
+    if (delta || changeBujo) {
       for (const override of overrides) {
         const shifted = prepareEventInput({
           ...override,
@@ -929,6 +952,7 @@ export class CalendarStore {
           recurrenceParentId: master.id,
           recurrenceInstanceKey: addDateDays(override.recurrenceInstanceKey!, delta),
           recurrenceExceptions: [],
+          bujoEnabled: changeBujo ? input.bujoEnabled : override.bujoEnabled,
         }, override);
         validatePreparedEvent(shifted);
         updates.push({ rowNumber: override.rowNumber, values: { ...eventValues(shifted), updatedAt: now }, expectId: override.id });
@@ -938,7 +962,7 @@ export class CalendarStore {
     await this.rememberTimeZones(prepared);
   }
 
-  private async splitRecurringSeries(event: CalendarEvent, input: CalendarEventInput) {
+  private async splitRecurringSeries(event: CalendarEvent, input: CalendarEventInput, statusOnly = false) {
     const { master, overrides, key } = await this.recurrenceContext(event);
     const now = Date.now();
     const beforeDates = calendarRecurrenceDates(master.recurrence!, master.startDate, master.startDate, addDateDays(key, -1));
@@ -955,6 +979,7 @@ export class CalendarStore {
       .filter((date) => date > key || (date === key && !overrideKeys.has(key)))
       .map((date) => addDateDays(date, delta));
     const newSeriesId = newId(now);
+    const changeBujo = !statusOnly && input.bujoEnabled !== undefined && input.bujoEnabled !== event.bujoEnabled;
     const newInput: CalendarEventInput = {
       ...input,
       parentEventId: null,
@@ -962,18 +987,25 @@ export class CalendarStore {
       recurrenceParentId: null,
       recurrenceInstanceKey: null,
       recurrenceExceptions: newExceptions,
+      // （2026-11-26 使用者決定：改期與分段後，子彈筆記沿用同一筆及同一組統計。）
+      bujoEnabled: changeBujo ? input.bujoEnabled : master.bujoEnabled,
+      bujoSeriesId: master.bujoSeriesId ?? master.id,
+      bujoDateShift: (master.bujoDateShift ?? 0) + delta,
+      bujoBoundary: master.bujoBoundary ? addDateDays(master.bujoBoundary, delta) : null,
     };
     validateEvent(newInput);
     const prepared = prepareEventInput(newInput);
     validatePreparedEvent(prepared);
-    await this.b.append('calendarEvents', [{ ...eventValues(prepared), createdVia: this.via, id: newSeriesId, createdAt: now, updatedAt: now }]);
-
+    const append = [{ ...eventValues(prepared), createdVia: this.via, id: newSeriesId, createdAt: now, updatedAt: now }];
+    const boundary = statusOnly || !prepared.bujoEnabled
+      ? key
+      : calendarRecurrenceDates(newRule, prepared.startDate, prepared.startDate, addDateDays(prepared.startDate, 200000), 1)[0] ?? key;
     const originalValues: RowValues = beforeCount
-      ? { recurrence: serializeCalendarRecurrence({ ...oldRule, end: 'count', count: beforeCount }), exceptions: JSON.stringify(master.recurrenceExceptions.filter((date) => date < key)), updatedAt: now }
+      ? { recurrence: serializeCalendarRecurrence({ ...oldRule, end: 'count', count: beforeCount }), exceptions: JSON.stringify(master.recurrenceExceptions.filter((date) => date < key)), bujoBoundary: boundary, updatedAt: now }
       : { deletedAt: now, updatedAt: now };
     const updates: RowUpdate[] = [{ rowNumber: master.rowNumber, values: originalValues, expectId: master.id }];
     for (const override of overrides.filter((item) => item.recurrenceInstanceKey! >= key)) {
-      if (override.recurrenceInstanceKey === key) {
+      if (override.recurrenceInstanceKey === key && !(statusOnly && override.bujoEnabled !== master.bujoEnabled)) {
         updates.push({ rowNumber: override.rowNumber, values: { deletedAt: now, updatedAt: now }, expectId: override.id });
         continue;
       }
@@ -985,11 +1017,17 @@ export class CalendarStore {
         recurrenceParentId: newSeriesId,
         recurrenceInstanceKey: addDateDays(override.recurrenceInstanceKey!, delta),
         recurrenceExceptions: [],
+        bujoEnabled: changeBujo ? input.bujoEnabled : override.bujoEnabled,
+        status: statusOnly ? input.status : override.status,
       }, override);
       validatePreparedEvent(shifted);
       updates.push({ rowNumber: override.rowNumber, values: { ...eventValues(shifted), updatedAt: now }, expectId: override.id });
     }
-    await this.b.update('calendarEvents', updates);
+    if (this.b.writeBatch) await this.b.writeBatch([{ table: 'calendarEvents', append, update: updates }]);
+    else {
+      await this.b.append('calendarEvents', append);
+      await this.b.update('calendarEvents', updates);
+    }
     await this.rememberTimeZones(prepared);
   }
 
@@ -1001,7 +1039,7 @@ export class CalendarStore {
 
   async setRecurringEventStatus(event: CalendarEvent, status: CalendarEventStatus, scope: CalendarRecurrenceScope) {
     if (scope === 'single') return this.saveSingleRecurrenceOverride(event, { ...event, status, recurrence: null });
-    if (scope === 'future') return this.splitRecurringSeries(event, { ...event, status });
+    if (scope === 'future') return this.splitRecurringSeries(event, { ...event, status }, true);
     const { master, overrides } = await this.recurrenceContext(event);
     const now = Date.now();
     await this.b.update('calendarEvents', [
@@ -1029,7 +1067,7 @@ export class CalendarStore {
     }
     const beforeCount = calendarRecurrenceDates(master.recurrence!, master.startDate, master.startDate, addDateDays(key, -1)).length;
     const originalValues: RowValues = beforeCount
-      ? { recurrence: serializeCalendarRecurrence({ ...master.recurrence!, end: 'count', count: beforeCount }), exceptions: JSON.stringify(master.recurrenceExceptions.filter((date) => date < key)), updatedAt: now }
+      ? { recurrence: serializeCalendarRecurrence({ ...master.recurrence!, end: 'count', count: beforeCount }), exceptions: JSON.stringify(master.recurrenceExceptions.filter((date) => date < key)), bujoBoundary: key, updatedAt: now }
       : { deletedAt: now, updatedAt: now };
     await this.b.update('calendarEvents', [
       { rowNumber: master.rowNumber, values: originalValues, expectId: master.id },

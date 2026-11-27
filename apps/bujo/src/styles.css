@@ -5,9 +5,14 @@
 .bujo-row h2, .bujo-row .field { margin: 0; }
 .bujo-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: end; gap: 12px; }
 .bujo-fields, .bujo-type { border: 0; padding: 0; margin: 0; min-width: 0; }
-.bujo-type { display: flex; gap: 16px; }
-.bujo-type legend { font-weight: 600; margin-bottom: 4px; }
-.bujo-columns input { min-width: 0; width: 100%; }
+.bujo-editor h2 { margin-bottom: 16px; }
+.bujo-type legend { font-weight: 600; margin-bottom: 6px; }
+.bujo-choice { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.bujo-choice label { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 12px; cursor: pointer; }
+.bujo-choice label:has(input:checked) { color: var(--accent-strong); border-color: var(--accent); background: var(--accent-soft); }
+.bujo-choice input { margin: 0; }
+.bujo-editor .field > :is(input, select, textarea) { display: block; width: 100%; min-width: 0; margin-top: 5px; color: var(--text); }
+.bujo-editor .field > textarea { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--bg); font: inherit; resize: vertical; }
 .bujo-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
 .bujo-actions .danger { color: var(--bad); }
 .bujo-section h3 { margin: 16px 0 0; }
@@ -18,7 +23,7 @@
 .bujo-item-title { display: block; text-align: left; background: none; border: none; padding: 0; color: var(--text); }
 .bujo-item small { display: block; color: var(--muted); }
 .bujo-complete { flex: none; }
-.bujo-jump { max-width: 230px; }
+.bujo-month-nav { margin-bottom: 10px; }
 .bujo-entry-form { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; margin-top: 12px; }
 .bujo-entry-form .field { margin: 0; }
 .bujo-note { white-space: pre-wrap; overflow-wrap: anywhere; }

@@ -151,6 +151,12 @@ button.link { border: 0; background: none; color: var(--accent); padding: 4px 6p
 .settings { max-width: 640px; }
 .field { display: block; margin-bottom: 10px; font-size: 0.9rem; color: var(--muted); }
 .field input { margin-top: 4px; color: var(--text); }
+.people-fields { border-top: 1px solid var(--line); padding: 8px 0; }
+.selected-people { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0; padding: 0; list-style: none; }
+.selected-people li { display: flex; align-items: center; border-radius: 10px; padding: 2px 5px 2px 9px; background: var(--accent-soft); font-size: .88rem; overflow-wrap: anywhere; }
+.people-choices { display: grid; gap: 4px; max-height: 220px; overflow: auto; margin-bottom: 6px; }
+.people-choices button { display: flex; justify-content: space-between; gap: 8px; text-align: start; overflow-wrap: anywhere; }
+.person-add { padding: 10px; border: 1px solid var(--line); border-radius: 10px; }
 .check { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .check input { width: 18px; height: 18px; }
 

@@ -127,12 +127,7 @@ select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset:
 .more-toggle { border: 0; background: none; color: var(--accent); padding-left: 0; margin-bottom: 8px; }
 .more-fields { border-top: 1px solid var(--line); padding-top: 12px; }
 .reminder-fields { border-top: 1px solid var(--line); padding-top: 8px; }
-.people-fields { border-top: 1px solid var(--line); padding: 8px 0; }
-.selected-people { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0; padding: 0; list-style: none; }
-.selected-people li { display: flex; align-items: center; border-radius: 10px; padding: 2px 5px 2px 9px; background: var(--accent-soft); font-size: .88rem; overflow-wrap: anywhere; }
-.people-choices { display: grid; gap: 4px; max-height: 220px; overflow: auto; margin-bottom: 6px; }
-.people-choices button { display: flex; justify-content: space-between; gap: 8px; text-align: start; overflow-wrap: anywhere; }
-.person-add { padding: 10px; border: 1px solid var(--line); border-radius: 10px; }
+.calendar-bujo-option { display: flex; gap: 8px; align-items: center; border-top: 1px solid var(--line); padding-top: 10px; }
 .reminder-toggle { display: block; }
 .reminder-rule { margin: 8px 0; padding: 10px; border: 1px solid var(--line); border-radius: 10px; }
 .recurrence-fields { margin-bottom: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); }

@@ -115,12 +115,12 @@ export class SheetsBackend implements Backend {
   /** 新增版本的日期欄套用一致格式；每個 schema 版本每份檔案只做一次。 */
   private async ensureDateFormats(file: FileKey) {
     const id = this.sid(file);
-    const formatVersion = file === 'bujo' ? 21 : file === 'meds' ? 20 : 19;
+    const formatVersion = file === 'bujo' ? 22 : file === 'meds' ? 20 : 19;
     const done = `life.dateFormats.${id}.${formatVersion}`;
     if (localStorage.getItem(done)) return;
     // 只處理本輪新增的表，不覆蓋使用者在既有 APP 試算表自行選的日期顯示格式。
-    const formatTables: TableName[] = file === 'period' || file === 'meds' || file === 'bujo'
-      ? tablesOfFile(file) : file === 'health' ? ['healthConditionLogs'] : [];
+    const formatTables: TableName[] = file === 'period' || file === 'meds' ? tablesOfFile(file)
+      : file === 'bujo' ? ['bujoCalendarCompletions', 'bujoSchedules'] : file === 'health' ? ['healthConditionLogs'] : [];
     if (!formatTables.length) {
       localStorage.setItem(done, '1');
       return;

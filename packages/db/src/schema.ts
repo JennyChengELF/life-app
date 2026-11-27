@@ -23,8 +23,9 @@
  * 19：共用人物增加國曆／農曆生日、祭日與聯繫狀態（2026-11-25）
  * 20：新增用藥記錄 APP（2026-11-26）
  * 21：新增子彈筆記 APP（2026-11-26）
+ * 22：子彈筆記與行事曆連動（2026-11-26）
  */
-export const SCHEMA_VERSION = 21;
+export const SCHEMA_VERSION = 22;
 
 export type ColType = 'datetime' | 'date' | 'number' | 'text' | 'bool' | 'any';
 
@@ -82,6 +83,9 @@ export const TABLES = {
     columns: [
       { name: 'title', type: 'text', label: '待辦名稱' },
       { name: 'note', type: 'text', label: '備註（選填）' },
+      { name: 'place', type: 'text', label: '手動輸入的地點（選填）' },
+      { name: 'organizationId', type: 'text', label: '共用機構編號（選填）' },
+      { name: 'peopleIds', type: 'text', label: '共用人物編號，以逗號分隔' },
       { name: 'startDate', type: 'date', label: '開始日' },
       { name: 'dueDate', type: 'date', label: '到期日' },
       { name: 'completedDate', type: 'date', label: '實際完成日（空白代表未勾選）' },
@@ -95,6 +99,9 @@ export const TABLES = {
       { name: 'seriesId', type: 'text', label: '同一重複待辦的編號（APP 自動填）' },
       { name: 'title', type: 'text', label: '待辦名稱' },
       { name: 'note', type: 'text', label: '備註（選填）' },
+      { name: 'place', type: 'text', label: '手動輸入的地點（選填）' },
+      { name: 'organizationId', type: 'text', label: '共用機構編號（選填）' },
+      { name: 'peopleIds', type: 'text', label: '共用人物編號，以逗號分隔' },
       { name: 'weekday', type: 'number', label: '星期（0 是星期日，6 是星期六）' },
       { name: 'time', type: 'text', label: '出現時間（24 小時，如 00:00）' },
       { name: 'effectiveAt', type: 'datetime', label: '此版本何時開始生效' },
@@ -109,6 +116,15 @@ export const TABLES = {
       { name: 'scheduleId', type: 'text', label: '排程版本編號' },
       { name: 'occurrenceDate', type: 'date', label: '原訂出現日' },
       { name: 'completedDate', type: 'date', label: '實際完成日（空白代表取消完成）' },
+      ...systemCols,
+    ],
+  },
+  bujoCalendarCompletions: {
+    file: 'bujo', description: '行事曆待辦的實際完成日和完成時的資料；行程刪除後仍可回查。',
+    columns: [
+      { name: 'entryKey', type: 'text', label: '連動待辦的固定識別鍵' },
+      { name: 'completedDate', type: 'date', label: '實際完成日；空白代表取消完成' },
+      { name: 'details', type: 'text', label: '供回查的行程摘要 JSON（APP 自動填）' },
       ...systemCols,
     ],
   },
@@ -549,6 +565,10 @@ export const TABLES = {
       { name: 'recurrenceParentId', type: 'text', label: '重複行程原規則 id' },
       { name: 'recurrenceInstanceKey', type: 'text', label: '重複行程原發生日期 / 實例鍵' },
       { name: 'exceptions', type: 'text', label: '重複行程略過的發生日期' },
+      { name: 'bujoEnabled', type: 'bool', label: '同時加入子彈筆記（TRUE）' },
+      { name: 'bujoSeriesId', type: 'text', label: '分段前的連動系列編號（APP 自動填）' },
+      { name: 'bujoDateShift', type: 'number', label: '連動系列與原識別日期的差（APP 自動填）' },
+      { name: 'bujoBoundary', type: 'date', label: '排程分段或截斷的原界線（APP 自動填）' },
       { name: 'reminders', type: 'text', label: '行程提醒設定 JSON' },
       { name: 'createdVia', type: 'text', label: '在哪裡輸入（calendar、sheet）' },
       ...systemCols,

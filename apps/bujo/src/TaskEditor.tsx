@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { parseDateText, type BujoSchedule, type BujoTask } from '@life/db';
 import { TagPicker } from '@life/ui/tag-picker';
 import { TimeField } from '@life/ui/time-field';
+import { PeopleFields } from '@life/ui/people-fields';
 import type { BujoApi } from './useBujo';
 
 export const weekdays = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
@@ -20,6 +21,9 @@ export function TaskEditor({ api, date, task, schedule, onDirty, onClose, onSave
   const [title, setTitle] = useState(initial?.title ?? '');
   const [note, setNote] = useState(initial?.note ?? '');
   const [tags, setTags] = useState(initial?.tagIds ?? []);
+  const [organizationId, setOrganizationId] = useState(initial?.organizationId ?? '');
+  const [place, setPlace] = useState(initial?.place ?? '');
+  const [peopleIds, setPeopleIds] = useState(initial?.peopleIds ?? []);
   const [startDate, setStartDate] = useState(task?.startDate ?? date);
   const [dueDate, setDueDate] = useState(task?.dueDate ?? date);
   const [weekday, setWeekday] = useState(schedule?.weekday ?? new Date(`${date}T00:00:00`).getDay());
@@ -27,21 +31,25 @@ export function TaskEditor({ api, date, task, schedule, onDirty, onClose, onSave
   const weekly = kind === 'weekly';
 
   const save = async () => {
-    const fields = { title, note, tagIds: tags };
+    const fields = { title, note, tagIds: tags, organizationId, place: organizationId ? '' : place, peopleIds };
     const saved = weekly
       ? await api.save(() => api.store.saveSchedule({ ...fields, weekday, time }, schedule?.seriesId))
       : await api.save(() => api.store.saveTask({ ...fields, startDate, dueDate }, task));
     if (saved) onSaved(weekly ? undefined : parseDateText(startDate) ?? undefined);
   };
 
-  return <section className="card">
+  const organizations = api.snap?.organizations ?? [];
+  const choices = organizations.filter((org) => !org.archived || org.id === organizationId);
+  return <section className="card bujo-editor">
     <h2>{schedule ? '修改重複待辦' : task ? '修改待辦' : '新增待辦'}</h2>
     <form onSubmit={(e) => { e.preventDefault(); void save(); }} onChange={onDirty}>
       <fieldset className="bujo-fields" disabled={api.busy}>
         {!initial && <fieldset className="bujo-type">
           <legend>待辦類型</legend>
-          <label><input type="radio" name="kind" checked={!weekly} onChange={() => setKind('one')} /> 一般待辦</label>
-          <label><input type="radio" name="kind" checked={weekly} onChange={() => setKind('weekly')} /> 每週重複</label>
+          <div className="bujo-choice">
+            <label><input type="radio" name="kind" checked={!weekly} onChange={() => setKind('one')} /> 一般待辦</label>
+            <label><input type="radio" name="kind" checked={weekly} onChange={() => setKind('weekly')} /> 每週重複</label>
+          </div>
         </fieldset>}
         <label className="field">待辦名稱<input value={title} onChange={(e) => setTitle(e.target.value)} required /></label>
         {weekly ? <div className="bujo-columns">
@@ -57,7 +65,17 @@ export function TaskEditor({ api, date, task, schedule, onDirty, onClose, onSave
           }} /></label>
           <label className="field">到期日<input type="date" required min={startDate} value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></label>
         </div>}
-        <label className="field">備註<textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} /></label>
+        <div className="bujo-columns">
+          <label className="field">地點／機構<select value={organizationId} onChange={(e) => setOrganizationId(e.target.value)}>
+            <option value="">選擇共用機構</option>
+            {organizationId && !choices.some(({ id }) => id === organizationId) && <option value={organizationId}>找不到的機構</option>}
+            {choices.map((org) => <option key={org.id} value={org.id}>{org.name}{org.archived ? '（已停用）' : ''}</option>)}
+          </select></label>
+          {!organizationId && <label className="field">自訂地點<input value={place} onChange={(e) => setPlace(e.target.value)} /></label>}
+        </div>
+        <label className="field">備註<textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} /></label>
+        <PeopleFields people={api.snap?.calendar.people ?? []} selected={peopleIds}
+          onChange={(ids) => { setPeopleIds(ids); onDirty(); }} busy={api.busy} />
         <TagPicker tags={api.snap?.tags ?? []} selected={tags} busy={api.busy}
           onChange={(ids) => { setTags(ids); onDirty(); }} onAdd={api.addTag} />
       </fieldset>

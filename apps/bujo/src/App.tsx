@@ -7,6 +7,7 @@ import { AppSwitcher } from '@life/ui/app-switcher';
 import { AppTabs, type AppTabItem } from '@life/ui/app-tabs';
 import { Icon } from '@life/ui/icon';
 import { MonthCalendar } from '@life/ui/month-calendar';
+import { personLabel } from '@life/ui/people-fields';
 import { tagLabel } from '@life/ui/tag-picker';
 import { TaskEditor, weekdays } from './TaskEditor';
 import { useBujo, type BujoApi } from './useBujo';
@@ -20,7 +21,12 @@ const tabs: AppTabItem<Tab>[] = [
   { key: 'more', label: '更多', icon: 'more' },
 ];
 const home = import.meta.env.DEV ? `http://${location.hostname}:5172/` : '../';
-const statuses = { open: '待完成', upcoming: '尚未開始', completed: '已完成', missed: '未完成' };
+const statuses = { open: '待完成', upcoming: '尚未開始', completed: '已完成', missed: '未完成', cancelled: '已取消' };
+
+function shiftMonth(month: string, amount: number) {
+  const [year, value] = month.split('-').map(Number);
+  return toDateKey(new Date(year, value - 1 + amount, 1).getTime()).slice(0, 7);
+}
 
 function useClock() {
   const [now, setNow] = useState(Date.now);
@@ -42,12 +48,24 @@ function useClock() {
   return now;
 }
 
-function Tags({ fields, api }: { fields: BujoFields; api: BujoApi }) {
-  if (!fields.tagIds.length) return null;
-  return <ul className="shared-tag-chips">{fields.tagIds.map((id) => <li key={id}>{tagLabel(api.snap?.tags ?? [], id)}</li>)}</ul>;
+function EntryFields({ fields, api }: { fields: BujoFields; api: BujoApi }) {
+  const place = api.snap?.organizations.find(({ id }) => id === fields.organizationId)?.name
+    ?? (fields.organizationId ? '找不到的機構' : fields.place);
+  return <>
+    {place && <small>地點／機構：{place}</small>}
+    {!!fields.peopleIds?.length && <small>相關人物：{fields.peopleIds.map((id) =>
+      personLabel(api.snap?.calendar.people.find((person) => person.id === id))).join('、')}</small>}
+    {!!fields.tagIds.length && <ul className="shared-tag-chips">{fields.tagIds.map((id) =>
+      <li key={id}>{tagLabel(api.snap?.tags ?? [], id)}</li>)}</ul>}
+  </>;
 }
 
 function dates(entry: BujoOccurrence) {
+  if (entry.calendarStatus) {
+    return entry.seriesId
+      ? `${entry.startDate} ${toHHmm(entry.availableAt)} · 行事曆重複行程`
+      : `${entry.startDate === entry.dueDate ? entry.startDate : `${entry.startDate} ～ ${entry.dueDate}`} · 行事曆`;
+  }
   if (entry.scheduleId) return `${entry.startDate} ${toHHmm(entry.availableAt)} · 每週重複`;
   return entry.startDate === entry.dueDate ? entry.startDate : `${entry.startDate} ～ ${entry.dueDate}`;
 }
@@ -66,6 +84,7 @@ function DayList({ entries, day, now, api, onDetails, onAdd }: {
     { title: day > today ? '預定待辦' : '待完成', rows: data.open, quick: day === today },
     { title: '已完成', rows: data.completed, quick: false },
     { title: '未完成', rows: data.missed, quick: false },
+    { title: '已取消', rows: data.cancelled, quick: false },
   ].filter(({ rows }) => rows.length);
   return <section className="card">
     <div className="bujo-row"><h2>{day} 的待辦</h2><button className="primary" type="button" disabled={api.busy} onClick={onAdd}>新增待辦</button></div>
@@ -77,7 +96,7 @@ function DayList({ entries, day, now, api, onDetails, onAdd }: {
           <button className="bujo-item-title" type="button" disabled={api.busy} onClick={() => onDetails(entry.id)}>
             <strong>{entry.title}</strong><small>{dates(entry)}</small>
           </button>
-          <Tags fields={entry} api={api} />
+          <EntryFields fields={entry} api={api} />
         </div>
         {quick && <button className="link bujo-complete" type="button" disabled={api.busy}
           aria-label={`完成「${entry.title}」`} onClick={() => {
@@ -109,11 +128,15 @@ function EntryDetails({ entry, now, api, close, onEdit, onOutcome }: {
 
   return <section className="card">
     <div className="bujo-row"><h2>{entry.title}</h2><button className="link" type="button" disabled={api.busy} onClick={close}>返回</button></div>
-    <p className="muted">{dates(entry)} · {statuses[status]}</p>
+    <p className="muted">{dates(entry)} · {statuses[status]}
+      {entry.completedDate && entry.calendarStatus === 'cancelled' && ' · 原行程已取消'}
+      {entry.calendarStatus === 'unlinked' && ' · 原行程已移除或解除連動'}
+    </p>
     {entry.note && <p className="bujo-note">{entry.note}</p>}
-    <Tags fields={entry} api={api} />
-    {entry.availableAt <= now && <form className="bujo-entry-form" onSubmit={(e) => { e.preventDefault(); void complete(day); }}>
-      <label className="field">實際完成日<input type="date" value={day} required min={entry.startDate} max={today}
+    <div className="bujo-item"><EntryFields fields={entry} api={api} /></div>
+    {status !== 'cancelled' && (entry.completedDate || entry.availableAt <= now) && <form className="bujo-entry-form" onSubmit={(e) => { e.preventDefault(); void complete(day); }}>
+      <label className="field">實際完成日<input type="date" value={day} required
+        min={entry.completedDate && entry.completedDate < entry.startDate ? entry.completedDate : entry.startDate} max={today}
         disabled={api.busy} onChange={(e) => setDay(e.target.value)} /></label>
       <button className="primary" type="submit" disabled={api.busy}>{entry.completedDate ? '更新完成日' : status === 'missed' ? '補登完成' : '勾選完成'}</button>
       {entry.completedDate && <button className="link" type="button" disabled={api.busy} onClick={() => void complete(null)}>取消完成</button>}
@@ -135,7 +158,7 @@ function More({ api, schedules, onEdit }: { api: BujoApi; schedules: BujoSchedul
       <ul className="bujo-list">{schedules.map((schedule) => <li key={schedule.seriesId}>
         <div className="bujo-item"><strong>{schedule.title}</strong>
           <small>每週{weekdays[schedule.weekday].slice(2)} {schedule.time}{schedule.stopped && ' · 已停用'}</small>
-          <Tags fields={schedule} api={api} />
+          <EntryFields fields={schedule} api={api} />
         </div>
         {!schedule.stopped && <div className="bujo-actions">
           <button className="link" type="button" disabled={api.busy} onClick={() => onEdit(schedule.id)}>修改</button>
@@ -224,16 +247,21 @@ export function App() {
               const mark = dailyMarks.get(day);
               return mark ? { label: mark, marks: [{ color: mark === '已完成' ? 'var(--ok)' : 'var(--warn)' }] } : null;
             }} />
-            <label className="field bujo-jump">跳到日期<input type="date" value={date}
-              onChange={(e) => { if (e.target.value) setDate(e.target.value); }} /></label>
             <DayList entries={entries} day={date} now={now} api={api} onAdd={() => changeTab('add')}
               onDetails={(id) => { setEditor({ kind: 'details', id }); window.scrollTo(0, 0); }} />
           </>)}
         {tab === 'stats' && <section className="card">
-          <div className="bujo-row"><h2>重複待辦統計</h2>
-            <label className="field">月份<input type="month" value={month} max={today.slice(0, 7)}
-              onChange={(e) => { if (e.target.value) setMonth(e.target.value); }} /></label>
+          <div className="date-calendar-nav bujo-month-nav">
+            <button className="icon-btn" type="button" aria-label="上個月" onClick={() => setMonth(shiftMonth(month, -1))}>
+              <Icon name="left" />
+            </button>
+            <button className="date-calendar-title" type="button" onClick={() => setMonth(today.slice(0, 7))}>
+              {month.slice(0, 4)} 年 {month.slice(5)} 月<small>回到本月</small>
+            </button>
+            <button className="icon-btn" type="button" aria-label="下個月" disabled={month >= today.slice(0, 7)}
+              onClick={() => setMonth(shiftMonth(month, 1))}><Icon name="right" /></button>
           </div>
+          <h2>重複待辦統計</h2>
           {counts.length ? <table className="bujo-stats">
             <thead><tr><th scope="col">待辦</th><th scope="col">完成次數</th><th scope="col">漏做次數</th></tr></thead>
             <tbody>{counts.map((row) => <tr key={row.seriesId}><th scope="row">{row.title}</th><td>{row.completed}</td><td>{row.missed}</td></tr>)}</tbody>

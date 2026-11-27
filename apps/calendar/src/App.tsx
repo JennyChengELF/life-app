@@ -6,7 +6,7 @@ import { WeekDateStrip } from '@life/ui/week-date-strip';
 import { TimeField } from '@life/ui/time-field';
 import { CalendarReminderList } from '@life/ui/calendar-reminder-list';
 import { ReminderFields } from './ReminderFields';
-import { PeopleFields, personLabel } from './PeopleFields';
+import { PeopleFields, personLabel } from '@life/ui/people-fields';
 import { TagPicker, tagLabel } from '@life/ui/tag-picker';
 import {
   addDateDays,
@@ -120,6 +120,7 @@ const eventInput = (e: CalendarEvent): CalendarEventInput => ({
   reminders: e.reminders ?? [],
   peopleIds: e.peopleIds ?? [],
   tagIds: e.tagIds ?? [],
+  bujoEnabled: e.bujoEnabled ?? false,
 });
 
 function requestedDate() {
@@ -670,6 +671,8 @@ function EventForm({ snap, event, initialDate, parentId, busy, hideStartDate = f
     />
     <TagPicker tags={snap.sharedTags} selected={form.tagIds ?? selectedParent?.tagIds ?? []} busy={busy} onChange={(ids) => set('tagIds', ids)} onAdd={onAddTag} />
     <ReminderFields rules={form.reminders ?? []} allDay={form.timeType === 'allDay'} startDate={form.startDate} startTime={form.startTime} onChange={(rules) => set('reminders', rules)} />
+    <label className="calendar-bujo-option"><input type="checkbox" checked={form.bujoEnabled ?? false}
+      onChange={(e) => set('bujoEnabled', e.target.checked)} /> 同時加入子彈筆記待辦</label>
     <div className="form-actions"><button type="button" onClick={onCancel}>取消</button><button className="primary" disabled={busy}>儲存</button></div>
   </form>;
 }

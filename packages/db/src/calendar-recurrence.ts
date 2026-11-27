@@ -148,7 +148,7 @@ function matches(rule: CalendarRecurrence, startDate: string, date: string) {
   return (current.year - start.year) % interval === 0 && current.month === start.month && current.day === start.day;
 }
 
-export function calendarRecurrenceDates(ruleInput: CalendarRecurrence, startDate: string, fromDate: string, toDate: string) {
+export function calendarRecurrenceDates(ruleInput: CalendarRecurrence, startDate: string, fromDate: string, toDate: string, limit = Infinity) {
   const rule = parseCalendarRecurrence(ruleInput)!;
   if (!DATE_RE.test(startDate) || !DATE_RE.test(fromDate) || !DATE_RE.test(toDate) || toDate < fromDate) return [];
   const lastDate = rule.end === 'date' && rule.until! < toDate ? rule.until! : toDate;
@@ -157,7 +157,7 @@ export function calendarRecurrenceDates(ruleInput: CalendarRecurrence, startDate
   let occurrenceCount = 0;
   let date = startDate;
   let guard = 0;
-  while (date <= lastDate && guard < 200000) {
+  while (date <= lastDate && guard < 200000 && result.length < limit) {
     if (matches(rule, startDate, date)) {
       occurrenceCount += 1;
       if (date >= fromDate) result.push(date);

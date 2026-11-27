@@ -1,4 +1,6 @@
 import type { Backend, RowUpdate, TableRow } from './backend';
+import { CalendarStore, type CalendarSnapshot } from './calendar';
+import { bujoCalendarOccurrences, type BujoCalendarCompletion } from './bujo-calendar';
 import { newId } from './ids';
 import { loadSharedTags, readTagIds, writeTagIds } from './shared-tags';
 import { addDays, endOfDay, parseDateText, parseDateTimeText, startOfDay, toDateKey } from './time';
@@ -7,6 +9,9 @@ export interface BujoFields {
   title: string;
   note: string;
   tagIds: string[];
+  place?: string;
+  organizationId?: string | null;
+  peopleIds?: string[];
 }
 
 interface StoredRow {
@@ -50,6 +55,9 @@ export interface BujoOccurrence extends BujoFields {
   expiresAt: number;
   historyDate: string;
   completedDate: string | null;
+  calendarStatus?: 'scheduled' | 'cancelled' | 'unlinked';
+  statDate?: string;
+  seriesTitle?: string;
 }
 
 const text = (v: unknown) => String(v ?? '').trim();
@@ -61,11 +69,19 @@ const instanceKey = (id: string, day: string) => `${id}:${day}`;
 function taskFields(input: BujoFields) {
   const title = input.title.trim();
   if (!title) throw new Error('請填待辦名稱');
-  return { title, note: input.note.trim() || null, tagIds: writeTagIds(input.tagIds) };
+  return {
+    title, note: input.note.trim() || null, tagIds: writeTagIds(input.tagIds),
+    place: input.place?.trim() || null, organizationId: input.organizationId || null,
+    peopleIds: writeTagIds(input.peopleIds ?? []),
+  };
 }
 
 function readFields(row: TableRow): BujoFields {
-  return { title: text(row.values.title), note: text(row.values.note), tagIds: readTagIds(row.values.tagIds) };
+  return {
+    title: text(row.values.title), note: text(row.values.note), tagIds: readTagIds(row.values.tagIds),
+    place: text(row.values.place), organizationId: text(row.values.organizationId) || null,
+    peopleIds: readTagIds(row.values.peopleIds),
+  };
 }
 
 function groupSchedules(schedules: BujoSchedule[]) {
@@ -90,12 +106,13 @@ function firstWeeklyDate(weekday: number, since: number) {
 
 export function bujoTaskStatus(task: BujoOccurrence, now: number) {
   if (task.completedDate) return 'completed';
+  if (task.calendarStatus === 'cancelled' || task.calendarStatus === 'unlinked') return 'cancelled';
   if (now >= task.expiresAt) return 'missed';
   return now < task.availableAt ? 'upcoming' : 'open';
 }
 
 export function bujoDayEntries(entries: BujoOccurrence[], day: string, now: number) {
-  const open: BujoOccurrence[] = [], completed: BujoOccurrence[] = [], missed: BujoOccurrence[] = [];
+  const open: BujoOccurrence[] = [], completed: BujoOccurrence[] = [], missed: BujoOccurrence[] = [], cancelled: BujoOccurrence[] = [];
   for (const entry of entries) {
     const status = bujoTaskStatus(entry, now);
     if (status === 'completed' && entry.completedDate === day) completed.push(entry);
@@ -103,10 +120,11 @@ export function bujoDayEntries(entries: BujoOccurrence[], day: string, now: numb
     if (status === 'completed') continue;
     // （2026-11-26 暫定：一般待辦於到期日查漏做，重複待辦於原訂出現日查漏做。）
     if (status === 'missed' && entry.historyDate === day) missed.push(entry);
+    if (status === 'cancelled' && entry.historyDate === day) cancelled.push(entry);
     if ((status === 'open' || status === 'upcoming') && entry.startDate <= day && day <= entry.dueDate
       && (day !== toDateKey(now) || status === 'open')) open.push(entry);
   }
-  return { open, completed, missed };
+  return { open, completed, missed, cancelled };
 }
 
 export function bujoMonthlyStats(entries: BujoOccurrence[], schedules: BujoSchedule[], month: string, now: number) {
@@ -114,9 +132,10 @@ export function bujoMonthlyStats(entries: BujoOccurrence[], schedules: BujoSched
   const counts = new Map<string, { seriesId: string; title: string; completed: number; missed: number }>();
   for (const entry of entries) {
     // （2026-11-26 使用者決定：每次依原訂出現日歸月；到期前尚未完成不算漏做。）
-    if (!entry.seriesId || !entry.startDate.startsWith(month) || entry.availableAt > now) continue;
+    if (!entry.seriesId || !(entry.statDate ?? entry.startDate).startsWith(month) || (!entry.completedDate && entry.availableAt > now)
+      || entry.calendarStatus === 'cancelled') continue;
     const count = counts.get(entry.seriesId) ?? {
-      seriesId: entry.seriesId, title: latest.get(entry.seriesId) ?? entry.title, completed: 0, missed: 0,
+      seriesId: entry.seriesId, title: latest.get(entry.seriesId) ?? entry.seriesTitle ?? entry.title, completed: 0, missed: 0,
     };
     const status = bujoTaskStatus(entry, now);
     if (status === 'completed') count.completed++;
@@ -126,7 +145,7 @@ export function bujoMonthlyStats(entries: BujoOccurrence[], schedules: BujoSched
   return [...counts.values()].sort((a, b) => a.title.localeCompare(b.title, 'zh-Hant'));
 }
 
-export function bujoOccurrences(snap: Pick<BujoSnapshot, 'tasks' | 'schedules' | 'completions'>, through: string): BujoOccurrence[] {
+export function bujoOccurrences(snap: BujoSnapshot, through: string): BujoOccurrence[] {
   const entries: BujoOccurrence[] = snap.tasks.map((task) => ({
     ...task,
     scheduleId: null, seriesId: null,
@@ -157,7 +176,10 @@ export function bujoOccurrences(snap: Pick<BujoSnapshot, 'tasks' | 'schedules' |
       const regularExpiry = parseDateTimeText(`${addDays(day, 7)} ${schedule.time}`)!;
       const next = occurrences[index + 1];
       // （2026-11-26 使用者決定：排程修改保留已出現的一筆，下一次出現才結束；停用則仍按原期限。）
-      const expiresAt = next && nextVersionAt <= regularExpiry ? next.at : regularExpiry;
+      const regularExpiryDay = toDateKey(regularExpiry);
+      const nextDate = next && nextVersionAt < startOfDay(regularExpiryDay) ? next.day : regularExpiryDay;
+      // （2026-11-26 使用者決定：下一筆所在日的 00:00 截止，避免同天出現前後兩筆。）
+      const expiresAt = startOfDay(nextDate <= day ? addDays(day, 1) : nextDate);
       entries.push({
         ...schedule, id, scheduleId: schedule.id,
         startDate: day, dueDate: toDateKey(expiresAt - 1), availableAt: at, expiresAt,
@@ -165,15 +187,25 @@ export function bujoOccurrences(snap: Pick<BujoSnapshot, 'tasks' | 'schedules' |
       });
     }
   }
+  entries.push(...bujoCalendarOccurrences(snap.calendar, snap.calendarCompletions, through));
   return entries.sort((a, b) => a.availableAt - b.availableAt);
 }
 
-type BujoTable = 'bujoTasks' | 'bujoSchedules' | 'bujoCompletions';
+type BujoTable = 'bujoTasks' | 'bujoSchedules' | 'bujoCompletions' | 'bujoCalendarCompletions';
+
+interface BujoOrganization {
+  id: string;
+  name: string;
+  archived: boolean;
+}
 
 export interface BujoSnapshot {
   tasks: BujoTask[];
   schedules: BujoSchedule[];
   completions: BujoCompletion[];
+  calendar: CalendarSnapshot;
+  calendarCompletions: BujoCalendarCompletion[];
+  organizations: BujoOrganization[];
   tags: Awaited<ReturnType<typeof loadSharedTags>>;
   issues: string[];
 }
@@ -208,12 +240,14 @@ export class BujoStore {
   }
 
   async load(): Promise<BujoSnapshot> {
-    const [tasks, schedules, completions, tags] = await Promise.all([
+    const [tasks, schedules, completions, calendarCompletions, tags, calendar, organizations] = await Promise.all([
       this.backend.read('bujoTasks'), this.backend.read('bujoSchedules'),
-      this.backend.read('bujoCompletions'), loadSharedTags(this.backend),
+      this.backend.read('bujoCompletions'), this.backend.read('bujoCalendarCompletions'), loadSharedTags(this.backend),
+      new CalendarStore(this.backend).load(Date.now(), { includeTags: false }),
+      this.loadOrganizations(),
     ]);
     const issues: string[] = [];
-    const [parsedTasks, parsedSchedules, parsedCompletions] = await Promise.all([
+    const [parsedTasks, parsedSchedules, parsedCompletions, parsedCalendarCompletions] = await Promise.all([
       this.read<BujoTask>('bujoTasks', tasks, issues, (row) => {
         const fields = readFields(row);
         const startDate = date(row.values.startDate), dueDate = date(row.values.dueDate);
@@ -235,8 +269,37 @@ export class BujoStore {
         if (!scheduleId || !occurrenceDate || (completedDate && completedDate < occurrenceDate)) return null;
         return { scheduleId, occurrenceDate, completedDate };
       }),
+      this.read<BujoCalendarCompletion>('bujoCalendarCompletions', calendarCompletions, issues, (row) => {
+        const entryKey = text(row.values.entryKey), completedDate = date(row.values.completedDate);
+        try {
+          const details = JSON.parse(text(row.values.details)) as BujoOccurrence | null;
+          if (!entryKey.startsWith('calendar:') || !details || details.id !== entryKey
+            || typeof details.title !== 'string' || !date(details.startDate) || !date(details.historyDate)
+            || !Array.isArray(details.tagIds) || (details.peopleIds && !Array.isArray(details.peopleIds))
+            || !Number.isFinite(details.availableAt) || !Number.isFinite(details.expiresAt)) return null;
+          return { entryKey, completedDate, details };
+        } catch {
+          return null;
+        }
+      }),
     ]);
-    return { tasks: parsedTasks, schedules: parsedSchedules, completions: parsedCompletions, tags, issues };
+    return {
+      tasks: parsedTasks, schedules: parsedSchedules, completions: parsedCompletions, tags, issues,
+      calendar, calendarCompletions: parsedCalendarCompletions, organizations,
+    };
+  }
+
+  private async loadOrganizations(): Promise<BujoOrganization[]> {
+    const organizations: BujoOrganization[] = [], fixes: RowUpdate[] = [];
+    for (const row of await this.backend.read('hubOrganizations')) {
+      const name = text(row.values.name);
+      if (row.empty || row.values.deletedAt != null || !name) continue;
+      const currentId = text(row.values.id), now = Date.now(), id = currentId || newId(now);
+      if (!currentId) fixes.push({ rowNumber: row.rowNumber, expectId: '', values: { id, createdAt: now, updatedAt: now } });
+      organizations.push({ id, name, archived: row.values.archived === true });
+    }
+    if (fixes.length) await this.backend.update('hubOrganizations', fixes);
+    return organizations.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
   }
 
   async saveTask(input: BujoTaskInput, existing?: BujoTask, now = Date.now()) {
@@ -272,10 +335,23 @@ export class BujoStore {
 
   async setCompletion(entry: BujoOccurrence, completedDate: string | null, snap: BujoSnapshot, now = Date.now()) {
     const done = completedDate === null ? null : date(completedDate);
-    if (completedDate !== null && (!done || done < entry.startDate || done > toDateKey(now) || entry.availableAt > now)) {
+    const earliest = entry.completedDate && entry.completedDate < entry.startDate ? entry.completedDate : entry.startDate;
+    if (completedDate !== null && (!done || done < earliest || done > toDateKey(now) || (!entry.completedDate && entry.availableAt > now))) {
       throw new Error('完成日須介於待辦開始日和今天之間');
     }
     const values = { completedDate: done, updatedAt: now };
+    if (entry.calendarStatus) {
+      // （2026-11-26 暫定：行程取消或刪除時，已記下的實際完成紀錄保留。）
+      if (!entry.completedDate && entry.calendarStatus !== 'scheduled') throw new Error('這筆行程已取消或移除');
+      const previous = [...snap.calendarCompletions].reverse().find((item) => item.entryKey === entry.id);
+      const details = JSON.stringify({ ...entry, completedDate: null });
+      if (previous) {
+        await this.backend.update('bujoCalendarCompletions', [{ rowNumber: previous.rowNumber, expectId: previous.id, values: { ...values, details } }]);
+      } else if (done) {
+        await this.backend.append('bujoCalendarCompletions', [{ id: newId(now), entryKey: entry.id, ...values, details, createdAt: now }]);
+      }
+      return;
+    }
     if (!entry.scheduleId) {
       const task = snap.tasks.find(({ id }) => id === entry.id);
       if (!task) throw new Error('找不到這筆待辦，請重新整理');

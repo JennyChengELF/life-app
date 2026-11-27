@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { addSharedTag, AuthError, BujoStore, GoogleAuth, LocalBackend, SheetsBackend, type BujoSnapshot } from '@life/db';
+import { addSharedTag, AuthError, BujoStore, GoogleAuth, installTaiwanCalendarResource, LocalBackend, SheetsBackend, type BujoSnapshot } from '@life/db';
 
 const clientId = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined)?.trim();
 const forceLocal = new URLSearchParams(location.search).has('local');
@@ -21,7 +21,15 @@ export function useBujo() {
 
   const load = async () => {
     if (!initialized.current) {
-      if (backend instanceof SheetsBackend) await backend.init(['hub', 'bujo']);
+      if (!import.meta.env.DEV) {
+        try {
+          const response = await fetch('../calendar/taiwan-calendar.json', { cache: 'no-cache' });
+          if (response.ok) installTaiwanCalendarResource(await response.json());
+        } catch {
+          // 無法載入部署資源時使用與行事曆共用的內建資料。
+        }
+      }
+      if (backend instanceof SheetsBackend) await backend.init(['hub', 'calendar', 'bujo']);
       else await backend.init();
       initialized.current = true;
     }
@@ -78,6 +86,13 @@ export function useBujo() {
       if (!(e instanceof AuthError)) setError('已儲存，但畫面更新失敗。請重新整理。');
     }
   };
+
+  useEffect(() => {
+    if (status !== 'ready') return;
+    const refreshLinkedEvents = () => { void run(load); };
+    window.addEventListener('focus', refreshLinkedEvents);
+    return () => window.removeEventListener('focus', refreshLinkedEvents);
+  }, [status]);
 
   return {
     snap, status, busy, error, notice, store, local: !auth, fileUrl: backend.fileUrl('bujo'),
