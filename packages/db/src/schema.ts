@@ -25,7 +25,7 @@
  * 21：新增子彈筆記 APP（2026-11-26）
  * 22：子彈筆記與行事曆連動（2026-11-26）
  */
-export const SCHEMA_VERSION = 22;
+export const SCHEMA_VERSION = 23;
 
 export type ColType = 'datetime' | 'date' | 'number' | 'text' | 'bool' | 'any';
 
@@ -36,7 +36,7 @@ export interface ColumnDef {
   label: string;
 }
 
-export type FileKey = 'water' | 'health' | 'bowel' | 'hub' | 'money' | 'calendar' | 'period' | 'meds' | 'bujo';
+export type FileKey = 'water' | 'health' | 'bowel' | 'hub' | 'money' | 'calendar' | 'period' | 'meds' | 'bujo' | 'invest';
 
 export interface FileDef {
   /** 試算表檔名（不加版本號） */
@@ -60,6 +60,7 @@ export const FILES: Record<FileKey, FileDef> = {
   period: { title: '生活APP-生理期', description: '生理期 APP 的資料：經期起訖、每日出血、預測與提醒設定' },
   meds: { title: '生活APP-用藥記錄', description: '藥品、保健品、批次、補貨、服用紀錄和常用組合' },
   bujo: { title: '生活APP-子彈筆記', description: '一般待辦、每週待辦排程與各次完成紀錄' },
+  invest: { title: '生活APP-投資', description: '投資標的、交易、基金換購、保單基金、股利及估值' },
 };
 
 export interface TableDef {
@@ -77,7 +78,125 @@ const systemCols: ColumnDef[] = [
   { name: 'deletedAt', type: 'datetime', label: '刪除時間（有值代表已刪除；APP 自動填）' },
 ];
 
+const pasteFields: Record<string, ColumnDef> = {
+  date: { name: 'date', type: 'date', label: '成交／扣款／入帳日期' },
+  symbol: { name: 'symbol', type: 'text', label: '代號（請設為文字）' },
+  quantity: { name: 'quantity', type: 'number', label: '股數／單位數' },
+  price: { name: 'price', type: 'number', label: '成交價格或原始成交淨值' },
+  fee: { name: 'fee', type: 'number', label: '手續費或匯費（可空白）' },
+  tax: { name: 'tax', type: 'number', label: '交易稅或扣繳稅（可空白）' },
+  cashAmount: { name: 'cashAmount', type: 'number', label: '台幣實扣／實收金額' },
+  fx: { name: 'fx', type: 'number', label: '每單位外幣的台幣金額' },
+  exDate: { name: 'exDate', type: 'date', label: '除權／除息日' },
+  perUnit: { name: 'perUnit', type: 'number', label: '每股／單位配息或每股配發股數' },
+  eligible: { name: 'eligible', type: 'number', label: '通知單有資格領取的持有股數（可空白）' },
+};
+
+function investmentPaste(description: string, fields: string[]): TableDef {
+  return { file: 'invest', description, columns: [...fields.map((field) => pasteFields[field]), ...systemCols] };
+}
+
 export const TABLES = {
+  investAssets: {
+    file: 'invest', description: '同一代號與保管帳戶的持有部位；代號請以文字輸入。',
+    columns: [
+      { name: 'symbol', type: 'text', label: '標的代號' },
+      { name: 'name', type: 'text', label: '標的名稱' },
+      { name: 'kind', type: 'text', label: '股票／基金／保單基金（stock / fund / policy）' },
+      { name: 'account', type: 'text', label: '券商或保單名稱' },
+      { name: 'currency', type: 'text', label: '計價幣別' },
+      { name: 'market', type: 'text', label: '交易所或市場' },
+      { name: 'quoteUrl', type: 'text', label: '公開淨值來源' },
+      { name: 'quote', type: 'number', label: '最新價格或淨值' },
+      { name: 'quoteDate', type: 'date', label: '估值日期' },
+      { name: 'quoteSource', type: 'text', label: '估值來源' },
+      { name: 'quoteFx', type: 'number', label: '估值用台幣匯率' },
+      { name: 'quoteFxDate', type: 'date', label: '估值匯率日期' },
+      ...systemCols,
+    ],
+  },
+  investEvents: {
+    file: 'invest', description: '每筆投資動作一列。換購的換入在同一列；記帳只對應真實資金移動。',
+    columns: [
+      { name: 'kind', type: 'text', label: '交易種類' },
+      { name: 'asset', type: 'text', label: '標的編號' },
+      { name: 'tradeDate', type: 'date', label: '成交／實際價格／換出日期' },
+      { name: 'cashDate', type: 'date', label: '銀行扣款／入帳日期' },
+      { name: 'secondAsset', type: 'text', label: '換入的基金編號' },
+      { name: 'secondDate', type: 'date', label: '換入日期' },
+      { name: 'exDate', type: 'date', label: '除權息日' },
+      { name: 'quantity', type: 'number', label: '股數或單位數' },
+      { name: 'price', type: 'number', label: '成交價格或淨值' },
+      { name: 'secondQuantity', type: 'number', label: '換入單位數' },
+      { name: 'secondPrice', type: 'number', label: '換入淨值' },
+      { name: 'originalAmount', type: 'number', label: '原幣成交／分配金額' },
+      { name: 'secondAmount', type: 'number', label: '換入金額（換入幣別）' },
+      { name: 'cashAmount', type: 'number', label: '實收／實扣金額' },
+      { name: 'cashCurrency', type: 'text', label: '實扣／實收幣別' },
+      { name: 'fx', type: 'number', label: '每單位原幣的台幣金額（換購則為換入幣別）' },
+      { name: 'fee', type: 'number', label: '手續費或匯費（原幣）' },
+      { name: 'tax', type: 'number', label: '交易稅或扣繳稅（原幣）' },
+      { name: 'healthFee', type: 'number', label: '二代健保補充保費' },
+      { name: 'externalFee', type: 'number', label: '換購時從銀行另扣的手續費' },
+      { name: 'eligible', type: 'number', label: '通知單上的符合配發資格股數' },
+      { name: 'perUnit', type: 'number', label: '每股／單位配息金額或每股配發股數' },
+      { name: 'cashAccount', type: 'text', label: '記帳收付款帳戶' },
+      { name: 'category', type: 'text', label: '記帳分類完整路徑' },
+      { name: 'moneyId', type: 'text', label: '記帳交易編號（APP 管理）' },
+      { name: 'moneyMode', type: 'text', label: '連動方式（APP 管理）' },
+      { name: 'pending', type: 'bool', label: '待同步（APP 管理）' },
+      { name: 'removePending', type: 'bool', label: '待同步刪除（APP 管理）' },
+      { name: 'note', type: 'text', label: '補充備註' },
+      ...systemCols,
+    ],
+  },
+  investPaste: {
+    file: 'invest', description: '舊資料貼上區。請依欄名貼上值，再回投資 APP 預覽並確認匯入。',
+    columns: [
+      { name: 'kind', type: 'text', label: '買／賣／基金買／基金贖回／股利／配股' },
+      { name: 'date', type: 'date', label: '股票成交日、基金扣款／入帳日、股利入帳日或配股入股日' },
+      { name: 'symbol', type: 'text', label: '標的代號（請設為文字）' },
+      { name: 'quantity', type: 'number', label: '股數／單位數／實際配股數' },
+      { name: 'price', type: 'number', label: '股票成交價或基金淨值' },
+      { name: 'fee', type: 'number', label: '手續費／匯費' },
+      { name: 'tax', type: 'number', label: '交易稅／扣繳稅' },
+      { name: 'cashAmount', type: 'number', label: '基金實扣／實收或股利實收（台幣）' },
+      { name: 'fx', type: 'number', label: '每單位原幣的台幣金額' },
+      { name: 'exDate', type: 'date', label: '除權息日' },
+      { name: 'perUnit', type: 'number', label: '每股／單位配息或每股配發股數' },
+      { name: 'eligible', type: 'number', label: '通知單有資格領取的持有股數' },
+      ...systemCols,
+    ],
+  },
+  investMarketQuotes: {
+    file: 'invest', description: '公開股價查詢公式（由 APP 維護）。',
+    columns: [
+      { name: 'ticker', type: 'text', label: '交易所和股票代號' },
+      { name: 'price', type: 'number', label: '價格' },
+      { name: 'priceDate', type: 'date', label: '報價日期' },
+    ],
+  },
+  investFundQuotes: {
+    file: 'invest', description: '公開基金來源的試算表備援查詢（由 APP 維護）。首次外部資料查詢可能需在試算表允許存取。',
+    columns: [
+      { name: 'key', type: 'text', label: '公開來源及基金級別對照' },
+      { name: 'value', type: 'text', label: '公開淨值與日期' },
+    ],
+  },
+  investPasteStockBuy: investmentPaste('舊股票買進：成交日、代號、股數、每股成交價、手續費。',
+    ['date', 'symbol', 'quantity', 'price', 'fee', 'cashAmount', 'fx']),
+  investPasteStockSell: investmentPaste('舊股票賣出：成交日、代號、股數、每股成交價、手續費、交易稅。',
+    ['date', 'symbol', 'quantity', 'price', 'fee', 'tax', 'cashAmount', 'fx']),
+  investPasteFundBuy: investmentPaste('舊基金買進：扣款日、代號、台幣實扣、取得單位數、匯率。',
+    ['date', 'symbol', 'cashAmount', 'quantity', 'fx', 'price']),
+  investPasteFundRedeem: investmentPaste('舊基金贖回：入帳日、代號、台幣實收、贖回單位數、匯率。',
+    ['date', 'symbol', 'cashAmount', 'quantity', 'fx', 'price']),
+  investPasteStockDividend: investmentPaste('舊股票配息：入帳日、代號、除息日、每股股利、匯費。',
+    ['date', 'symbol', 'exDate', 'perUnit', 'fee', 'cashAmount', 'eligible', 'tax', 'fx']),
+  investPasteFundDividend: investmentPaste('舊基金配息：入帳日、代號、除息日、每單位股利、匯費。',
+    ['date', 'symbol', 'exDate', 'perUnit', 'fee', 'cashAmount', 'fx', 'eligible']),
+  investPasteStockShares: investmentPaste('舊股票配股：實際入股日、代號、實際配發股數；其餘可空白。',
+    ['date', 'symbol', 'quantity', 'perUnit', 'exDate', 'eligible']),
   bujoTasks: {
     file: 'bujo', description: '一次性待辦；開始日和到期日均含當天。',
     columns: [
@@ -648,6 +767,9 @@ export const TABLES = {
       { name: 'twdStatus', type: 'text', label: '台幣金額狀態（pending、estimated、final）' },
       { name: 'rewardFor', type: 'text', label: '回饋收入所對應的原消費交易 id' },
       { name: 'paymentCount', type: 'number', label: '分開付款的明細筆數（APP 自動填）' },
+      { name: 'investmentId', type: 'text', label: '對應的投資交易 ID（APP 管理）' },
+      { name: 'investmentGenerated', type: 'bool', label: '由投資連動產生（APP 管理）' },
+      { name: 'investmentDeferred', type: 'bool', label: '配息發放日前不計帳戶餘額（APP 管理）' },
       { name: 'feeFor', type: 'text', label: '國外交易手續費所對應的原消費交易 id（APP 自動填）' },
       { name: 'agreedRate', type: 'number', label: '外幣代付約定匯率：1 單位原幣值多少台幣（選填）' },
       { name: 'settles', type: 'text', label: '還款結清的原代付交易 id 與各筆匯率（APP 自動填）' },

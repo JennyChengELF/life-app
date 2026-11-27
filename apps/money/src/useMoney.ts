@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Backend, MoneySnapshot } from '@life/db';
-import { AuthError, GoogleAuth, LocalBackend, SheetsBackend, MoneyStore } from '@life/db';
+import { AuthError, GoogleAuth, InvestMoney, InvestStore, LocalBackend, SheetsBackend, MoneyStore, type Txn } from '@life/db';
 
 const CLIENT_ID = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined)?.trim() ?? '';
 /** 網址加 ?local 可強制用本機測試模式 */
@@ -30,6 +30,31 @@ export function useMoney() {
   /** 初始化（確認試算表）只做一次；同時呼叫的會共用同一個 */
   const initPromise = useRef<Promise<void> | null>(null);
   const toastTimer = useRef<number>();
+  const investInit = useRef<Promise<void> | null>(null);
+
+  const connectInvest = useCallback(async () => {
+    investInit.current ??= (backend instanceof SheetsBackend ? backend.init(['invest']) : backend.init())
+      .catch((e) => { investInit.current = null; throw e; });
+    await investInit.current;
+  }, [backend]);
+
+  const investmentDetail = useCallback(async (id: string) => {
+    await connectInvest();
+    const snapshot = await new InvestStore(backend).load(true);
+    const event = snapshot.events.find((row) => row.id === id);
+    return { event, asset: snapshot.assets.find((asset) => asset.id === event?.asset) };
+  }, [backend, connectInvest]);
+
+  const deleteLinkedTxn = useCallback(async (txn: Txn) => {
+    if (txn.investmentId) {
+      await connectInvest();
+      const bridge = new InvestMoney(backend);
+      const row = (await bridge.investments.load(true)).events.find((e) => e.id === txn.investmentId);
+      if (row?.moneyMode === 'generated') { await bridge.remove(row); return; }
+      if (row?.moneyMode === 'linked') await bridge.unlink(row);
+    }
+    await store.deleteTxn(txn);
+  }, [backend, connectInvest, store]);
 
   const showToast = useCallback((t: Omit<Toast, 'id'>, ms = 6000) => {
     window.clearTimeout(toastTimer.current);
@@ -139,6 +164,7 @@ export function useMoney() {
   const signOut = useCallback(() => {
     auth?.signOut();
     initPromise.current = null;
+    investInit.current = null;
     setSnap(null);
     setStatus('need-connect');
   }, [auth]);
@@ -155,6 +181,8 @@ export function useMoney() {
     connect,
     refresh,
     run,
+    investmentDetail,
+    deleteLinkedTxn,
     signOut,
     fileUrl: () => backend.fileUrl('money'),
   };

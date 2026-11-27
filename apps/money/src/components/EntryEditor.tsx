@@ -300,7 +300,7 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
 
   const remove = async () => {
     if (!txn || !confirm('確定刪除這一筆嗎？')) return;
-    const ok = await api.run((s) => s.deleteTxn(txn).then(() => true));
+    const ok = await api.run(() => api.deleteLinkedTxn(txn).then(() => true));
     if (ok) {
       api.showToast({ kind: 'info', text: '已刪除' });
       onClose();

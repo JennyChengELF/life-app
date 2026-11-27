@@ -12,6 +12,7 @@
     "dev:period": "pnpm --filter period dev",
     "dev:meds": "pnpm --filter meds dev",
     "dev:bujo": "pnpm --filter bujo dev",
+    "dev:invest": "pnpm --filter invest dev",
     "build": "pnpm -r --filter ./apps/* build",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck"

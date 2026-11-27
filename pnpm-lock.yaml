@@ -6,7 +6,9 @@ settings:
 
 importers:
 
-  apps/bujo:
+  .: {}
+
+  apps/bowel:
     dependencies:
       '@life/db':
         specifier: workspace:*
@@ -37,9 +39,7 @@ importers:
         specifier: 5.4.11
         version: 5.4.11
 
-  .: {}
-
-  apps/bowel:
+  apps/bujo:
     dependencies:
       '@life/db':
         specifier: workspace:*
@@ -133,6 +133,37 @@ importers:
         version: 5.4.11
 
   apps/hub:
+    dependencies:
+      '@life/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@life/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
+      react:
+        specifier: 18.3.1
+        version: 18.3.1
+      react-dom:
+        specifier: 18.3.1
+        version: 18.3.1(react@18.3.1)
+    devDependencies:
+      '@types/react':
+        specifier: 18.3.12
+        version: 18.3.12
+      '@types/react-dom':
+        specifier: 18.3.1
+        version: 18.3.1
+      '@vitejs/plugin-react':
+        specifier: 4.3.4
+        version: 4.3.4(vite@5.4.11)
+      typescript:
+        specifier: 5.6.3
+        version: 5.6.3
+      vite:
+        specifier: 5.4.11
+        version: 5.4.11
+
+  apps/invest:
     dependencies:
       '@life/db':
         specifier: workspace:*

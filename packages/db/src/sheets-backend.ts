@@ -125,7 +125,7 @@ export class SheetsBackend implements Backend {
     return id ? `https://docs.google.com/spreadsheets/d/${id}/edit` : null;
   }
 
-  async init(files: readonly FileKey[] = (Object.keys(FILES) as FileKey[]).filter((file) => file !== 'meds' && file !== 'bujo')) {
+  async init(files: readonly FileKey[] = (Object.keys(FILES) as FileKey[]).filter((file) => file !== 'meds' && file !== 'bujo' && file !== 'invest')) {
     const folder = await this.safely(() => this.ensureFolder());
     for (const file of files) {
       const sheetTitles = await this.ensureFile(file);
@@ -139,11 +139,11 @@ export class SheetsBackend implements Backend {
   /** 新增版本的日期欄套用一致格式；每個 schema 版本每份檔案只做一次。 */
   private async ensureDateFormats(file: FileKey) {
     const id = this.sid(file);
-    const formatVersion = file === 'bujo' ? 22 : file === 'meds' ? 20 : 19;
+    const formatVersion = file === 'invest' || file === 'money' ? 23 : file === 'bujo' ? 22 : file === 'meds' ? 20 : 19;
     const done = `life.dateFormats.${id}.${formatVersion}`;
     if (localStorage.getItem(done)) return;
     // 只處理本輪新增的表，不覆蓋使用者在既有 APP 試算表自行選的日期顯示格式。
-    const formatTables: TableName[] = file === 'period' || file === 'meds' ? tablesOfFile(file)
+    const formatTables: TableName[] = file === 'period' || file === 'meds' || file === 'invest' ? tablesOfFile(file)
       : file === 'bujo' ? ['bujoCalendarCompletions', 'bujoSchedules'] : file === 'health' ? ['healthConditionLogs'] : [];
     if (!formatTables.length) {
       localStorage.setItem(done, '1');
@@ -157,13 +157,15 @@ export class SheetsBackend implements Backend {
       if (sheetId == null) continue;
       const header = this.header(table);
       for (const col of TABLES[table].columns as ColumnDef[]) {
-        if (col.type !== 'date' && col.type !== 'datetime') continue;
+        const symbol = file === 'invest' && col.name === 'symbol';
+        if (!symbol && col.type !== 'date' && col.type !== 'datetime') continue;
         const index = header.indexOf(col.name);
         if (index < 0) continue;
         requests.push({
           repeatCell: {
             range: { sheetId, startRowIndex: 1, startColumnIndex: index, endColumnIndex: index + 1 },
-            cell: { userEnteredFormat: { numberFormat: { type: col.type === 'date' ? 'DATE' : 'DATE_TIME', pattern: col.type === 'date' ? 'yyyy-mm-dd' : 'yyyy-mm-dd hh:mm' } } },
+            cell: { userEnteredFormat: { numberFormat: symbol ? { type: 'TEXT' }
+              : { type: col.type === 'date' ? 'DATE' : 'DATE_TIME', pattern: col.type === 'date' ? 'yyyy-mm-dd' : 'yyyy-mm-dd hh:mm' } } },
             fields: 'userEnteredFormat.numberFormat',
           },
         });
@@ -524,6 +526,58 @@ export class SheetsBackend implements Backend {
       method: 'POST',
       body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data }),
     });
+  }
+
+  /** 只建立公開股票代號的估值公式；報價進試算表後由 APP 再讀取。 */
+  async readInvestmentMarketQuotes(tickers: string[]) {
+    const valid = [...new Set(tickers.filter((ticker) =>
+      /^(?:(?:NASDAQ|NYSE|NYSEARCA|AMEX):)?[A-Z][A-Z0-9.-]{0,14}$/.test(ticker) || /^(?:TPE|TWO):\d{4,6}[A-Z]?$/.test(ticker)))];
+    const table = 'investMarketQuotes';
+    const first = await this.read(table);
+    const present = new Set(first.map((row) => row.values.ticker));
+    const missing = valid.filter((ticker) => !present.has(ticker));
+    if (missing.length) {
+      const id = this.sid('invest');
+      const values = missing.map((ticker) => this.header(table).map((field) => {
+        if (field === 'ticker') return ticker;
+        if (field === 'price') return `=IFERROR(GOOGLEFINANCE("${ticker}","price"),"")`;
+        if (field === 'priceDate') return `=IFERROR(TEXT(GOOGLEFINANCE("${ticker}","tradetime"),"yyyy-mm-dd"),"")`;
+        return '';
+      }));
+      await this.api(`${SHEETS}/${id}/values/${encodeURIComponent(`${q(table)}!A1`)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+        { method: 'POST', body: JSON.stringify({ values }) });
+    }
+    const rows = missing.length ? await this.read(table) : first;
+    return rows.flatMap(({ values }) => typeof values.ticker === 'string' && valid.includes(values.ticker)
+      && typeof values.price === 'number' && values.price > 0 && typeof values.priceDate === 'string'
+      ? [{ ticker: values.ticker, price: values.price, date: values.priceDate }] : []);
+  }
+
+  async readInvestmentFundQuotes(items: { key: string; url: string; xpath: string }[]) {
+    const valid = items.filter(({ url, xpath, key }) => {
+      try {
+        const u = new URL(url);
+        return key.length < 1200 && xpath.length < 700 && u.protocol === 'https:' && !u.username && !u.password &&
+          ['www.anuefund.com', 'am.jpmorgan.com', 'www.eastspring.com.tw'].includes(u.hostname);
+      } catch { return false; }
+    });
+    const table = 'investFundQuotes';
+    const rows = await this.read(table);
+    const known = new Set(rows.map(({ values }) => values.key));
+    const newRows = valid.filter((item) => !known.has(item.key));
+    const quote = (value: string) => `"${value.replace(/"/g, '""')}"`;
+    if (newRows.length) {
+      const id = this.sid('invest');
+      const values = newRows.map(({ key, url, xpath }) => this.header(table).map((field) => {
+        if (field === 'key') return encodeCell('text', key);
+        if (field === 'value') return `=LET(result,IMPORTXML(${quote(url)},${quote(xpath)}),IF(ROWS(result)=1,INDEX(result,1,1),""))`;
+        return '';
+      }));
+      await this.api(`${SHEETS}/${id}/values/${encodeURIComponent(`${q(table)}!A1`)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+        { method: 'POST', body: JSON.stringify({ values }) });
+    }
+    return new Map((newRows.length ? await this.read(table) : rows).flatMap(({ values }) =>
+      typeof values.key === 'string' && typeof values.value === 'string' && !values.value.startsWith('#') ? [[values.key, values.value] as const] : []));
   }
 
   /** 同份試算表的補貨、批次與服用紀錄一次寫入。 */

@@ -8,7 +8,7 @@
 import type { Backend, RowUpdate, RowValues, TableRow } from './backend';
 import { newId } from './ids';
 import type { TableName } from './schema';
-import { startOfDay, toDateKey } from './time';
+import { startOfDay, todayKey, toDateKey } from './time';
 import { addSharedTag, loadSharedTags, readTagIds, writeTagIds, type SharedTag } from './shared-tags';
 
 // ───────────── 選項 ─────────────
@@ -171,6 +171,9 @@ export interface TxnInput {
   twdStatus?: TwdStatus | null;
   rewardFor?: string | null;
   feeFor?: string | null;
+  investmentId?: string | null;
+  investmentGenerated?: boolean;
+  investmentDeferred?: boolean;
   /** 約定 1 單位原幣值多少台幣，只用於朋友先付。 */
   agreedRate?: number | null;
   settles?: AdvanceSettlement[];
@@ -776,6 +779,9 @@ function toTxn(r: TableRow, date: string, lines: Line[], cardPayments: CardPayme
     twdStatus: str(v.twdStatus) as TwdStatus | null,
     rewardFor: str(v.rewardFor),
     feeFor: str(v.feeFor),
+    investmentId: str(v.investmentId),
+    investmentGenerated: v.investmentGenerated === true,
+    investmentDeferred: v.investmentDeferred === true,
     agreedRate: num(v.agreedRate),
     settles: parseAdvanceSettlements(v.settles) ?? [],
     lines,
@@ -1030,6 +1036,8 @@ export function accountBalance(acc: Account, txns: Txn[], upTo?: string): number
   let bal = acc.type === '信用卡' ? -acc.openingBalance : acc.openingBalance;
   for (const t of txns) {
     if (t.date <= acc.openingDate) continue;
+    // （2026-11-27 使用者決定：提前產生的現金股利至發放日才入帳。）
+    if (t.investmentDeferred && t.date > todayKey()) continue;
     if (upTo && t.date > upTo) continue;
     bal += accountDelta(t, acc.name, acc.currency);
   }
@@ -1190,7 +1198,7 @@ export function monthStats(txns: Txn[], categories: Pick<Category, 'path' | 'isI
     for (const l of txnReportLines(t)) {
       if (l.kind !== '支出' && l.kind !== '收入') continue;
       const s = by.get(cur) ?? { currency: cur, income: 0, expense: 0, realIncome: 0, realExpense: 0, expenseByTop: [], incomeByTop: [], expenseByPath: new Map(), incomeByPath: new Map(), _e: new Map(), _i: new Map() };
-      const real = !invest.has(l.category ?? '');
+      const real = t.investmentGenerated ? t.investmentDeferred && l.kind === '收入' : !invest.has(l.category ?? '');
       const top = topCategory(l.category ?? '（沒有分類）');
       if (l.kind === '支出') {
         s.expense += l.amount;
@@ -2084,8 +2092,12 @@ export class MoneyStore {
   // ── 交易 ──
 
   /** 新增或修改一筆交易（含明細）。修改時：明細依順序覆蓋，多的標記刪除 */
-  async saveTxn(input: TxnInput, existing?: Txn): Promise<string> {
+  async saveTxn(input: TxnInput, existing?: Txn, investmentTransactionId?: string): Promise<string> {
     const snap = await this.fresh();
+    if (investmentTransactionId) {
+      existing = snap.txns.find((t) => t.id === investmentTransactionId);
+      if (existing && (existing.investmentId !== input.investmentId || !existing.investmentGenerated)) throw new Error('這筆記帳已連到其他投資紀錄');
+    }
     const p = checkTxn(input, { ...snap, statements: snap.statements });
     if (p.length) throw new Error(p.join('；'));
     const linked = settlementsByAdvance(snap.txns, existing?.id);
@@ -2131,6 +2143,11 @@ export class MoneyStore {
       twdStatus: input.origCurrency ? input.twdStatus ?? 'pending' : null,
       rewardFor: input.rewardFor ?? null,
       ...(input.feeFor !== undefined ? { feeFor: input.feeFor } : {}),
+      ...(input.investmentId !== undefined ? {
+        investmentId: input.investmentId,
+        investmentGenerated: input.investmentGenerated === true,
+        investmentDeferred: input.investmentDeferred === true,
+      } : {}),
       agreedRate: input.agreedRate ?? null,
       settles: input.settles?.length ? JSON.stringify(input.settles) : null,
       paymentCount: input.payments?.length || null,
@@ -2164,8 +2181,25 @@ export class MoneyStore {
     const fundingValues = (x: PaymentInput, i: number): RowValues => ({ account: x.account, amount: x.amount, sort: i + 1, updatedAt: now });
     const appendFunding = (id: string, start: number) => funding.slice(start).map((x, i) => ({ ...fundingValues(x, start + i), transaction: id, id: newId(now), createdAt: now }));
 
+    if (investmentTransactionId && this.b.writeBatch) {
+      // （2026-11-27 使用者決定：同步重試使用同一個記帳編號，不重複入帳。）
+      const id = investmentTransactionId;
+      const old = existing?.lines ?? [];
+      await this.b.writeBatch([
+        { table: 'moneyTransactions', ...(existing
+          ? { update: [{ rowNumber: existing.rowNumber, expectId: id, values: txValues }] }
+          : { append: [{ ...txValues, id, createdVia: this.via, createdAt: now }] }) },
+        { table: 'moneyLines', update: old.map((row, i) => ({
+          rowNumber: row.rowNumber, expectId: row.id,
+          values: input.lines[i] ? lineValues(input.lines[i], i) : { deletedAt: now, updatedAt: now },
+        })), append: input.lines.slice(old.length).map((l, i) => ({
+          ...lineValues(l, i + old.length), transaction: id, id: newId(now), createdAt: now,
+        })) },
+      ]);
+      return id;
+    }
     if (!existing) {
-      const id = newId(now);
+      const id = investmentTransactionId ?? newId(now);
       await this.b.append('moneyTransactions', [{ ...txValues, id, createdVia: this.via, createdAt: now }]);
       if (input.lines.length) {
         await this.b.append(
@@ -2215,6 +2249,34 @@ export class MoneyStore {
     })));
     if (funding.length > oldFunding.length) await this.b.append('moneyPayments', appendFunding(existing.id, oldFunding.length));
     return existing.id;
+  }
+
+  async setInvestmentLink(txnId: string, investmentId: string | null) {
+    const txn = (await this.fresh()).txns.find((t) => t.id === txnId);
+    if (!txn || txn.investmentGenerated || (investmentId && txn.investmentId && txn.investmentId !== investmentId)) {
+      throw new Error('找不到可連結的記帳交易，或該筆已連到其他投資紀錄');
+    }
+    await this.b.update('moneyTransactions', [{
+      rowNumber: txn.rowNumber, expectId: txn.id, values: { investmentId, updatedAt: Date.now() },
+    }]);
+  }
+
+  async ensureInvestmentCategories(paths: { path: string; kind: CategoryKind; invested: boolean }[]) {
+    const snap = await this.fresh();
+    const now = Date.now();
+    let sort = Math.max(0, ...snap.categories.map((c) => c.sort ?? 0));
+    const values: RowValues[] = [];
+    const known = new Set(snap.categories.map((category) => category.path));
+    for (const { path, kind, invested } of paths) {
+      const names = normPath(path).split(' / ');
+      for (let i = 1; i <= names.length; i++) {
+        const prefix = names.slice(0, i).join(' / ');
+        if (known.has(prefix)) continue;
+        known.add(prefix);
+        values.push({ path: prefix, kind, isInvest: invested && i === names.length, sort: ++sort, id: newId(now), createdAt: now, updatedAt: now });
+      }
+    }
+    if (values.length) await this.b.append('moneyCategories', values);
   }
 
   /** 刪除只做標記（交易和明細一起） */

@@ -9,6 +9,13 @@ const ENTRIES: { mode: EntryForm['mode']; icon: IconName; title: string; detail:
   { mode: '還款', icon: 'user', title: '還款', detail: '人物之間的借還款' },
 ];
 
-export function AddMenu({ date, setDate, open }: { date: string; setDate: (date: string) => void; open: (mode: EntryForm['mode']) => void }) {
-  return <div className="money-add"><WeekDateStrip selected={date} setDate={setDate} /><h2>新增記帳</h2><div className="money-entry-grid">{ENTRIES.map((entry) => <button key={entry.mode} type="button" onClick={() => open(entry.mode)}><Icon name={entry.icon} /><b>{entry.title}</b><small>{entry.detail}</small></button>)}</div></div>;
+export function AddMenu({ date, setDate, open, openInvestment }: {
+  date: string; setDate: (date: string) => void; open: (mode: EntryForm['mode']) => void; openInvestment: () => void;
+}) {
+  return <div className="money-add"><WeekDateStrip selected={date} setDate={setDate} /><h2>新增記帳</h2>
+    <div className="money-entry-grid">{ENTRIES.map((entry) => <button key={entry.mode} type="button" onClick={() => open(entry.mode)}>
+      <Icon name={entry.icon} /><b>{entry.title}</b><small>{entry.detail}</small></button>)}
+      <button type="button" onClick={openInvestment}><Icon name="chart" /><b>投資交易</b><small>買進、賣出或贖回</small></button>
+    </div>
+  </div>;
 }

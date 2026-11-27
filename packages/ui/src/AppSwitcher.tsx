@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Icon, type IconName } from './Icon';
 
-export type LifeAppKey = 'hub' | 'water' | 'health' | 'bowel' | 'money' | 'calendar' | 'period' | 'meds' | 'bujo';
+export type LifeAppKey = 'hub' | 'water' | 'health' | 'bowel' | 'money' | 'calendar' | 'period' | 'meds' | 'bujo' | 'invest';
 
 interface AppDefinition {
   key: LifeAppKey;
@@ -22,6 +22,7 @@ const APPS: AppDefinition[] = [
   { key: 'period', label: '生理期', path: 'period/', icon: 'calendar', calendarHash: '#calendar' },
   { key: 'meds', label: '用藥記錄', path: 'meds/', icon: 'pill' },
   { key: 'bujo', label: '子彈筆記', path: 'bujo/', icon: 'book' },
+  { key: 'invest', label: '投資', path: 'invest/', icon: 'chart' },
 ];
 
 const DEV_PORTS: Record<LifeAppKey, number> = {
@@ -34,6 +35,7 @@ const DEV_PORTS: Record<LifeAppKey, number> = {
   period: 5178,
   meds: 5179,
   bujo: 5180,
+  invest: 5181,
 };
 
 function appUrl(app: AppDefinition, homeUrl: string, date?: string) {
