@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   accountBalance, blankAsset, blankInvestEvent, dividendEligibility, dividendEstimate, impliedInvestPrice,
-  importInvestRows, InvestMoney, investPortfolio, LocalBackend, memoryStorage, monthStats, previewInvestImport,
+  importInvestRows, InvestMoney, investmentCashInput, investPortfolio, investPurchaseAmounts, LocalBackend, memoryStorage, monthStats, previewInvestImport,
   startOfDay, type InvestAsset, type InvestEvent,
 } from '../src';
 
@@ -51,6 +51,38 @@ describe('投資 APP', () => {
     const buy = event({ asset: fund.id, quantity: 12, cashAmount: 4000, fx: 32, tradeDate: '', cashDate: date });
     expect(impliedInvestPrice(buy, usdFund)).toBeCloseTo(10.4167, 4);
     expect(investPortfolio([usdFund], [buy], end).positions.get(fund.id)).toMatchObject({ quantity: 12, cost: 125, twdCost: 4000 });
+  });
+
+  it('股票以成交價重算原幣金額，同幣別扣款含手續費並依記帳幣別取位', () => {
+    const buy = event({ quantity: 43, price: 91.93, originalAmount: 999, fee: 1 });
+    expect(investPurchaseAmounts(buy, stock)).toMatchObject({ stockAmount: 3952.99, suggestedCash: 3954, fx: 1 });
+    const usdStock = { ...stock, currency: 'USD' };
+    const usdBuy = event({ quantity: 2, price: 50, fee: 1, fx: 32, cashCurrency: 'USD' });
+    expect(investPurchaseAmounts(usdBuy, usdStock)).toMatchObject({ stockAmount: 100, suggestedCash: 101, estimatedTwd: 3232 });
+  });
+
+  it('台幣實扣回推股票匯率時依費用幣別計算，記帳分列費用', () => {
+    const usdStock = { ...stock, currency: 'USD' };
+    const buy = event({ quantity: 2, price: 50, cashAmount: 3250, fee: 50, feeCurrency: 'TWD',
+      cashDate: date, cashAccount: '測試銀行' });
+    const rate = investPurchaseAmounts(buy, usdStock);
+    expect(rate).toMatchObject({ stockAmount: 100, suggestedCash: null, inferredFx: 32, estimatedTwd: null });
+    expect(investPurchaseAmounts({ ...buy, fee: 1, feeCurrency: 'USD' }, usdStock).inferredFx).toBeCloseTo(3250 / 101, 9);
+    const ledger = investmentCashInput({ ...buy, fx: rate.inferredFx, fxSource: 'inferred' }, usdStock);
+    expect(ledger.amount).toBe(3250);
+    expect(ledger.lines.map((line) => line.amount)).toEqual([3200, 50]);
+    expect(investPurchaseAmounts({ ...buy, fx: 33, fxSource: 'reference' }, usdStock))
+      .toMatchObject({ fx: 33, inferredFx: null, estimatedTwd: 3350 });
+  });
+
+  it('基金優先依實扣推算淨值；只有公告淨值時可回推匯率，缺值時保留空白', () => {
+    const buy = event({ asset: fund.id, quantity: 195.2, price: 15.36, cashAmount: 3000 });
+    expect(impliedInvestPrice(buy, fund)).toBeCloseTo(3000 / 195.2, 8);
+    const usdFund = { ...fund, currency: 'USD' };
+    const usdBuy = event({ asset: fund.id, quantity: 5.325, cashAmount: 3000 });
+    expect(investPurchaseAmounts(usdBuy, usdFund)).toMatchObject({ fx: null, fundPrice: null });
+    expect(investPurchaseAmounts({ ...usdBuy, price: 20.28 }, usdFund).inferredFx).toBeCloseTo(3000 / 5.325 / 20.28, 8);
+    expect(impliedInvestPrice({ ...usdBuy, fx: 27.7825 }, usdFund)).toBeCloseTo(20.2782, 4);
   });
 
   it('台股股利只核對除息日前持股，配股發放才加股數', () => {

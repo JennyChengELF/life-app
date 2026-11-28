@@ -148,6 +148,9 @@ export const TABLES = {
       { name: 'removePending', type: 'bool', label: '待同步刪除（APP 管理）' },
       { name: 'note', type: 'text', label: '補充備註' },
       ...systemCols,
+      { name: 'feeCurrency', type: 'text', label: '另列手續費幣別（空白沿用標的計價幣別）' },
+      { name: 'fxSource', type: 'text', label: '交易匯率來源（空白為手填）' },
+      { name: 'fxDate', type: 'date', label: '參考匯率報價日期' },
     ],
   },
   investPaste: {

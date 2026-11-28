@@ -41,7 +41,8 @@ export function InvestEntry({ txn, api }: { txn: Txn; api: MoneyApi }) {
         <strong>{INVEST_KINDS[event.kind]}{asset && ` · ${asset.symbol} ${asset.name}`}</strong>
         {asset && <p>{event.tradeDate || '成交日待補'} · {event.quantity ?? '待補'} {asset.kind === 'stock' ? '股' : '單位'}
           {event.price != null && ` · ${asset.kind === 'stock' ? '成交價' : '淨值'} ${event.price} ${asset.currency}`}
-          {estimate != null && ` · 推算單價 ${estimate}`}{event.fx != null && ` · 匯率 ${event.fx}`}
+          {estimate != null && ` · ${asset.kind === 'fund' && event.kind === 'buy' ? '推算淨值' : '推算單價'} ${estimate} ${asset.currency}`}
+          {event.fx != null && ` · ${event.fxSource === 'reference' ? '參考匯率' : event.fxSource === 'inferred' ? '推算匯率' : '匯率'} ${event.fx}`}
           {original != null && ` · 原幣金額 ${original} ${asset.currency}`}</p>}
         {asset && event.moneyMode === 'generated' && <p className="hint">自動摘要 · {investmentMemo(event, asset)}</p>}
         <a className="link" href={investUrl({ fromMoney: '1', event: event.id, date: txn.date })}>修改投資交易</a>

@@ -1,5 +1,6 @@
 import type { Backend, RowValues, TableRow } from './backend';
 import { newId } from './ids';
+import { roundMoney } from './money';
 import { parseDateText, todayKey } from './time';
 
 export const INVEST_KINDS = {
@@ -44,7 +45,10 @@ export interface InvestEvent {
   cashAmount: number | null;
   cashCurrency: string;
   fx: number | null;
+  fxSource: '' | 'reference' | 'inferred';
+  fxDate: string;
   fee: number | null;
+  feeCurrency: string;
   tax: number | null;
   healthFee: number | null;
   externalFee: number | null;
@@ -68,7 +72,8 @@ export function blankInvestEvent(kind: InvestKind = 'buy', date = todayKey()): I
   return {
     id: '', kind, asset: '', tradeDate: date, cashDate: '', secondAsset: '', secondDate: '', exDate: '',
     quantity: null, price: null, secondQuantity: null, secondPrice: null, originalAmount: null, secondAmount: null,
-    cashAmount: null, cashCurrency: 'TWD', fx: null, fee: null, tax: null, healthFee: null, externalFee: null,
+    cashAmount: null, cashCurrency: 'TWD', fx: null, fxSource: '', fxDate: '', fee: null, feeCurrency: '',
+    tax: null, healthFee: null, externalFee: null,
     eligible: null, perUnit: null, cashAccount: '', category: '', moneyId: '', moneyMode: '', pending: false,
     removePending: false, note: '',
   };
@@ -92,7 +97,55 @@ export const investOriginal = (e: InvestEvent) =>
   e.originalAmount ?? (e.quantity != null && e.price != null ? round(e.quantity * e.price) : null);
 const deductions = (e: InvestEvent) => (e.fee ?? 0) + (e.tax ?? 0) + (e.healthFee ?? 0);
 
+export function investFeeInCurrency(e: InvestEvent, a: InvestAsset, currency: string, fx = e.fx) {
+  if (!e.fee) return 0;
+  const source = e.feeCurrency || a.currency;
+  if (source === currency) return e.fee;
+  if (fx && source === a.currency && currency === 'TWD') return e.fee * fx;
+  if (fx && source === 'TWD' && currency === a.currency) return e.fee / fx;
+  return null;
+}
+
+// （2026-11-28 使用者決定：買進股票依股數與成交價重算；基金優先依銀行實扣及交易匯率推算淨值。）
+export function investPurchaseAmounts(e: InvestEvent, a: InvestAsset) {
+  const stock = a.kind === 'stock';
+  const stockAmount = stock && e.quantity != null && e.price != null
+    ? round(e.quantity * e.price) : null;
+  const original = stock ? stockAmount ?? e.originalAmount
+    : e.quantity != null && e.price != null ? round(e.quantity * e.price) : null;
+  const pricingCurrency = a.currency;
+  const sameCurrency = !!pricingCurrency && pricingCurrency === e.cashCurrency;
+  const feeInCash = sameCurrency ? investFeeInCurrency(e, a, e.cashCurrency, e.fxSource === 'inferred' ? null : e.fx) : null;
+  const suggestedCash = stock && sameCurrency && stockAmount != null && feeInCash != null
+    ? roundMoney(stockAmount + feeInCash, e.cashCurrency) : null;
+  const enteredFx = e.fxSource !== 'inferred' ? e.fx : null;
+  let inferredFx: number | null = null;
+  if (!enteredFx && pricingCurrency && pricingCurrency !== 'TWD' && e.cashCurrency === 'TWD' &&
+    e.cashAmount && original && (stock || e.price != null)) {
+    const feeCurrency = e.feeCurrency || pricingCurrency;
+    const cash = e.cashAmount - (feeCurrency === 'TWD' ? e.fee ?? 0 : 0);
+    const native = original + (feeCurrency === pricingCurrency ? e.fee ?? 0 : 0);
+    if (cash > 0 && (!e.fee || feeCurrency === 'TWD' || feeCurrency === pricingCurrency)) inferredFx = round(cash / native);
+  }
+  const fx = pricingCurrency === 'TWD' ? 1 : enteredFx ?? inferredFx;
+  const fundFx = sameCurrency ? 1 : pricingCurrency && e.cashCurrency === 'TWD' ? enteredFx : null;
+  const fundPrice = a.kind === 'fund' && fundFx && e.cashAmount != null && e.quantity
+    ? round(e.cashAmount / fundFx / e.quantity) : null;
+  let estimatedTwd: number | null = null;
+  const cash = e.cashAmount ?? suggestedCash;
+  if (pricingCurrency && pricingCurrency !== 'TWD' && enteredFx) {
+    if (sameCurrency && cash != null) {
+      estimatedTwd = roundMoney(cash * enteredFx, 'TWD');
+    } else if (e.cashCurrency === 'TWD' && original != null && (stock || e.price != null)) {
+      const feeInTwd = investFeeInCurrency(e, a, 'TWD', enteredFx);
+      if (feeInTwd != null) estimatedTwd = roundMoney(original * enteredFx + feeInTwd, 'TWD');
+    }
+  }
+  return { stockAmount, suggestedCash, fx, inferredFx, fundPrice, estimatedTwd };
+}
+
 export function impliedInvestPrice(e: InvestEvent, a: InvestAsset) {
+  if (e.kind === 'buy' && a.kind === 'fund') return investPurchaseAmounts(e, a).fundPrice;
   if (e.price != null || e.cashAmount == null || !e.quantity) return null;
   const fx = a.currency === e.cashCurrency ? 1 : e.cashCurrency === 'TWD' ? e.fx : null;
   return fx ? round(e.cashAmount / e.quantity / fx) : null;
@@ -100,11 +153,14 @@ export function impliedInvestPrice(e: InvestEvent, a: InvestAsset) {
 
 function amountForPosition(e: InvestEvent, a: InvestAsset, direction: 'buy' | 'sell') {
   const gross = investOriginal(e);
-  const fromTrade = gross == null ? null : round(gross + (direction === 'buy' ? deductions(e) : -deductions(e)));
+  const nativeFee = investFeeInCurrency(e, a, a.currency);
+  const costs = nativeFee == null ? null : nativeFee + (e.tax ?? 0) + (e.healthFee ?? 0);
+  const fromTrade = gross == null || costs == null ? null : round(gross + (direction === 'buy' ? costs : -costs));
   const cash = e.cashAmount;
   const twdCash = cash != null && e.cashCurrency === 'TWD' ? cash : null;
   const nativeCash = cash != null && e.cashCurrency === a.currency ? cash : null;
-  const native = nativeCash ?? fromTrade ?? (twdCash != null && e.fx && a.currency ? round(twdCash / e.fx) : null);
+  const convertedCash = twdCash != null && e.fx && a.currency ? round(twdCash / e.fx) : null;
+  const native = nativeCash ?? (e.kind === 'buy' && a.kind === 'fund' ? convertedCash ?? fromTrade : fromTrade ?? convertedCash);
   return { native, twd: twdCash ?? (native == null ? null : a.currency === 'TWD' ? native : e.fx ? round(native * e.fx) : null) };
 }
 
@@ -221,6 +277,7 @@ export function validateInvest(e: InvestEvent, assets: InvestAsset[]) {
     throw new Error('股數、金額和匯率須為非負數字');
   }
   if (e.fx === 0) throw new Error('匯率須大於 0');
+  if (e.fee && e.feeCurrency && e.feeCurrency !== a.currency && e.feeCurrency !== e.cashCurrency) throw new Error('手續費幣別須符合計價或扣款幣別');
   if (e.quantity === 0 || e.secondQuantity === 0) throw new Error('交易股數或單位數須大於 0');
   if (e.kind === 'switch') {
     if ((a.kind !== 'fund' && a.kind !== 'policy') || !assets.some((target) =>
@@ -295,8 +352,14 @@ export class InvestStore {
   }
 
   async saveEvent(event: InvestEvent) {
-    validateInvest(event, (await this.load()).assets);
-    return this.save('investEvents', { ...event });
+    const { assets } = await this.load();
+    validateInvest(event, assets);
+    const asset = assets.find((item) => item.id === event.asset);
+    const inferred = event.fxSource === 'inferred' && asset ? investPurchaseAmounts(event, asset).inferredFx : null;
+    const values = event.fxSource === 'inferred'
+      ? { ...event, fx: inferred, fxSource: inferred == null ? '' : 'inferred', fxDate: '' }
+      : event;
+    return this.save('investEvents', { ...values });
   }
 
   async saveCashLinks(events: InvestEvent[], assets: InvestAsset[]) {

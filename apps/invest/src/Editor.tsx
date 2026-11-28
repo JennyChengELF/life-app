@@ -2,9 +2,14 @@ import { useState } from 'react';
 import { WeekDateStrip } from '@life/ui/week-date-strip';
 import {
   blankInvestEvent, canGenerateCash, dividendEligibility, dividendEstimate, impliedInvestPrice, INVEST_KINDS, investCategory,
-  investIsDividend, investIsPurchase, investIsSale, investmentMemo, isInvestmentCashBatch, type InvestEvent, type InvestKind,
+  investIsDividend, investIsPurchase, investIsSale, investPurchaseAmounts, investmentMemo, isInvestmentCashBatch, type InvestEvent, type InvestKind,
   type InvestSnapshot, type MoneySnapshot,
 } from '@life/db';
+import { ExchangeRateLookup } from './ExchangeRateLookup';
+
+const currencies = ['TWD', 'USD', 'JPY', 'EUR', 'KRW', 'HKD', 'CNY', 'GBP', 'AUD', 'CAD', 'SGD', 'THB'];
+const currencyName = (currency: string) => currency === 'TWD' ? '新台幣 TWD' : currency;
+const unitLabel = (label: string, currency: string) => currency ? `${label}（${currency}）` : label;
 
 export const format = (n: number | null | undefined) => n == null ? '—'
   : new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 10 }).format(n);
@@ -33,12 +38,42 @@ export function Editor({ initial, day, onDate, snap, money, busy, fromMoney, lin
   const [showLink, setShowLink] = useState(false);
   const [showQuickAsset, setShowQuickAsset] = useState(false);
   const [symbol, setSymbol] = useState('');
+  const [pickedCashCurrency, setPickedCashCurrency] = useState(!!initial.id || !!initial.cashAccount);
   const a = snap.assets.find((asset) => asset.id === draft.asset);
   const typePending = a?.kind === 'pending';
-  const patch = (value: Partial<InvestEvent>) => setDraft((e) => ({ ...e, ...value }));
+  const patch = (value: Partial<InvestEvent>) => setDraft((previous) => {
+    const next = { ...previous, ...value };
+    const asset = snap.assets.find((item) => item.id === next.asset);
+    const priorCurrency = snap.assets.find((item) => item.id === previous.asset)?.currency;
+    const changedPricing = next.asset !== previous.asset && priorCurrency !== asset?.currency;
+    const changedCashCurrency = next.cashCurrency !== previous.cashCurrency;
+    if (changedPricing || (next.cashDate !== previous.cashDate && next.fxSource === 'reference')) {
+      next.fx = null;
+      next.fxSource = '';
+      next.fxDate = '';
+    }
+    if (next.kind !== 'buy' || (asset?.kind !== 'stock' && asset?.kind !== 'fund')) return next;
+    if (changedCashCurrency) next.cashAmount = null;
+    if (next.feeCurrency && next.feeCurrency !== asset.currency && next.feeCurrency !== next.cashCurrency) next.feeCurrency = '';
+    const tradeChanged = next.asset !== previous.asset || next.quantity !== previous.quantity || next.price !== previous.price;
+    const amounts = investPurchaseAmounts(next, asset);
+    if (asset.kind === 'stock' && tradeChanged) next.originalAmount = amounts.stockAmount;
+    const feeChanged = next.fee !== previous.fee || next.feeCurrency !== previous.feeCurrency;
+    if (asset.kind === 'stock' && asset.currency && asset.currency === next.cashCurrency &&
+      (tradeChanged || changedCashCurrency || feeChanged)) next.cashAmount = amounts.suggestedCash;
+    if (tradeChanged || changedCashCurrency || feeChanged || next.cashAmount !== previous.cashAmount ||
+      next.fx !== previous.fx || next.fxSource !== previous.fxSource || next.cashDate !== previous.cashDate) {
+      const rate = investPurchaseAmounts(next, asset);
+      next.fx = rate.fx;
+      if (asset.currency === 'TWD') { next.fxSource = ''; next.fxDate = ''; }
+      else if (rate.inferredFx != null) next.fxSource = 'inferred';
+      else if (next.fxSource === 'inferred') next.fxSource = '';
+    }
+    return next;
+  });
   const changeKind = (kind: InvestKind) => setDraft((e) => ({
     ...blankInvestEvent(kind, kind === 'dividend' ? '' : e.tradeDate || e.cashDate), id: e.id,
-    asset: e.asset, cashDate: e.cashDate || (kind === 'dividend' ? e.tradeDate : ''),
+    asset: e.asset, cashDate: e.cashDate || (kind === 'dividend' ? e.tradeDate : ''), cashCurrency: e.cashCurrency,
   }));
   const num = (field: keyof InvestEvent, label: string) => <label className="field">{label}
     <input type="number" step="any" min="0" value={String(draft[field] ?? '')} onChange={(e) =>
@@ -51,13 +86,20 @@ export function Editor({ initial, day, onDate, snap, money, busy, fromMoney, lin
       if (value && (field === 'tradeDate' || (field === 'cashDate' && draft.kind === 'dividend'))) onDate(value);
     }} />
   </label>;
-  const text = (field: 'cashCurrency' | 'note', label: string) => <label className="field">{label}
+  const text = (field: 'note', label: string) => <label className="field">{label}
     <input value={draft[field]} onChange={(e) => patch({ [field]: e.currentTarget.value })} />
   </label>;
   const isDividend = investIsDividend(draft);
   const isCashDividend = draft.kind === 'dividend';
   const isSwitch = draft.kind === 'switch';
   const gen = canGenerateCash(draft) && draft.moneyMode !== 'linked';
+  const stockBuy = draft.kind === 'buy' && a?.kind === 'stock';
+  const fundBuy = draft.kind === 'buy' && a?.kind === 'fund';
+  const pricingCurrency = a?.currency ?? '';
+  const amounts = a && (stockBuy || fundBuy) ? investPurchaseAmounts(draft, a) : null;
+  const feeCurrency = draft.feeCurrency || pricingCurrency;
+  const entryCurrencies = [...new Set([...currencies, ...(money?.accounts.map((account) => account.currency) ?? []),
+    pricingCurrency, draft.cashCurrency].filter(Boolean))];
   const forecast = a && isCashDividend ? dividendEstimate(draft, dividendEligibility(draft, snap.assets, snap.events), a) : null;
   const implied = a && (investIsPurchase(draft) || investIsSale(draft)) ? impliedInvestPrice(draft, a) : null;
   const eligible = isDividend ? dividendEligibility(draft, snap.assets, snap.events) : null;
@@ -96,7 +138,8 @@ export function Editor({ initial, day, onDate, snap, money, busy, fromMoney, lin
           .map(([k, title]) => <option value={k} key={k}>{title}</option>)}</select></label>
       <div><label className="field">投資標的<select required value={draft.asset} onChange={(e) => {
         const asset = snap.assets.find((x) => x.id === e.currentTarget.value);
-        patch({ asset: asset?.id ?? '', category: '', cashCurrency: draft.cashAccount ? draft.cashCurrency : asset?.currency || 'TWD' });
+        patch({ asset: asset?.id ?? '', category: '',
+          cashCurrency: draft.cashAccount || pickedCashCurrency ? draft.cashCurrency : asset?.currency || 'TWD' });
       }}><option value="">選擇標的</option>{snap.assets.map((asset) => <option key={asset.id} value={asset.id}>
         {asset.symbol} {asset.name}{asset.account ? ` · ${asset.account}` : ''}{asset.kind === 'pending' ? '（類型待補）' : ''}
       </option>)}</select></label>
@@ -113,17 +156,48 @@ export function Editor({ initial, day, onDate, snap, money, busy, fromMoney, lin
       {isDividend && date('exDate', draft.kind === 'stockDividend' ? '除權日' : '除息日')}
       {!isCashDividend && date('tradeDate', isSwitch ? '換出日' : draft.kind === 'stockDividend' ? '實際入股日' : '成交／實際價格日')}
       {(gen || historic || isCashDividend) && date('cashDate', isCashDividend ? '發放／實際入帳日' : '扣款／入帳日')}
+      {(gen || historic || isCashDividend) && <label className="field">實收／扣款幣別
+        <select value={draft.cashCurrency} disabled={!!draft.cashAccount} onChange={(e) => {
+          setPickedCashCurrency(true);
+          patch({ cashCurrency: e.currentTarget.value });
+        }}>
+          {entryCurrencies.map((currency) => <option key={currency} value={currency}>{currencyName(currency)}</option>)}
+        </select>
+      </label>}
       {!isCashDividend && num('quantity', draft.kind === 'stockDividend' ? '實際配發股數' : isSwitch ? '換出單位數' : typePending ? '股數／單位數' : a?.kind === 'stock' ? '股數' : '單位數')}
-      {!isDividend && num('price', a?.kind === 'stock' ? '每股成交價' : isSwitch ? '換出淨值' : typePending ? '成交價／淨值' : '成交淨值')}
+      {!isDividend && num('price', unitLabel(a?.kind === 'stock' ? '每股成交價' : isSwitch ? '換出淨值'
+        : fundBuy ? '基金提供的淨值（選填）' : typePending ? '成交價／淨值' : '成交淨值', pricingCurrency))}
       {isDividend && num('eligible', '通知單上的符合資格股數／單位')}
       {isDividend && num('perUnit', isCashDividend ? '每股／單位配息' : '每股配發股數（選填）')}
-      {draft.kind !== 'stockDividend' && num('originalAmount', isCashDividend ? '原幣股利毛額' : isSwitch ? '原幣換出金額' : '原幣成交金額')}
-      {!isSwitch && draft.kind !== 'stockDividend' && num('fee', isCashDividend ? '匯費（選填）' : '手續費（選填）')}
+      {stockBuy ? <label className="field">{unitLabel('原幣成交金額', pricingCurrency)}
+        <input type="number" readOnly value={amounts?.stockAmount ?? draft.originalAmount ?? ''} />
+      </label> : draft.kind !== 'stockDividend' && !fundBuy &&
+        num('originalAmount', isCashDividend ? '原幣股利毛額' : isSwitch ? '原幣換出金額' : '原幣成交金額')}
+      {!isSwitch && (!fundBuy || !!initial.fee) && draft.kind !== 'stockDividend' &&
+        num('fee', isCashDividend ? '匯費（選填）' : unitLabel('手續費（選填）', stockBuy ? feeCurrency : ''))}
+      {stockBuy && pricingCurrency && <label className="field">手續費幣別
+        <select value={feeCurrency} onChange={(e) => patch({ feeCurrency: e.currentTarget.value })}>
+          {[...new Set([pricingCurrency, draft.cashCurrency].filter(Boolean))].map((currency) =>
+            <option key={currency} value={currency}>{currencyName(currency)}</option>)}
+        </select>
+      </label>}
       {(!isSwitch && (isCashDividend || investIsSale(draft))) && num('tax', isCashDividend ? '補扣繳稅額' : '交易稅')}
       {isCashDividend && num('healthFee', '二代健保補充保費')}
-      {!isSwitch && (gen || historic) && num('cashAmount', isCashDividend || investIsSale(draft) ? '實收金額' : '實際扣款金額')}
-      {(gen || historic || isCashDividend) && !showCash && text('cashCurrency', '實收／扣款幣別')}
-      {draft.kind !== 'stockDividend' && num('fx', isSwitch ? '換入幣別對台幣匯率（選填）' : '交易匯率（每單位原幣值多少台幣）')}
+      {!isSwitch && (gen || historic) && num('cashAmount',
+        unitLabel(isCashDividend || investIsSale(draft) ? '實收金額' : '實際扣款金額', draft.cashCurrency))}
+      {isSwitch && num('fx', '換入幣別對台幣匯率（選填）')}
+      {!isSwitch && draft.kind !== 'stockDividend' && <div>
+        <label className="field">交易匯率（每單位原幣值多少台幣）
+          <input type="number" step="any" min="0" readOnly={pricingCurrency === 'TWD'}
+            value={pricingCurrency === 'TWD' ? 1 : amounts?.inferredFx != null ? '' : draft.fx ?? ''}
+            onChange={(e) => patch({ fx: e.currentTarget.value ? e.currentTarget.valueAsNumber : null, fxSource: '', fxDate: '' })} />
+        </label>
+        {draft.fxSource === 'reference' && <p className="hint">參考匯率 · 報價日 {draft.fxDate}</p>}
+        {amounts?.inferredFx != null && <p className="hint">推算匯率 · 1 {pricingCurrency} = NT$ {format(amounts.inferredFx)}</p>}
+        {pricingCurrency && pricingCurrency !== 'TWD' &&
+          <ExchangeRateLookup key={`${pricingCurrency}:${draft.cashDate}`} currency={pricingCurrency} date={draft.cashDate}
+            onApply={(quote) => patch({ fx: quote.rate, fxSource: 'reference', fxDate: quote.date })} />}
+      </div>}
       {isSwitch && <>
         <label className="field">換入基金<select value={draft.secondAsset} onChange={(e) => patch({ secondAsset: e.currentTarget.value })}>
           <option value="">選擇換入基金</option>{snap.assets.filter((x) => (x.kind === 'fund' || x.kind === 'policy') && x.id !== draft.asset)
@@ -132,7 +206,9 @@ export function Editor({ initial, day, onDate, snap, money, busy, fromMoney, lin
         {num('secondAmount', '原幣換入金額')}{num('fee', '從換購金額內扣的費用')}{num('externalFee', '銀行另外扣款的換購手續費')}
       </>}
     </div>
-    {a && <p className="hint">計價幣別 {a.currency || '待補'}{implied != null && ` · ${investIsSale(draft) ? '推算每單位實收' : '推算淨值'} ${format(implied)}`}</p>}
+    {a && <p className="hint">計價幣別 {a.currency || '待補'}{implied != null &&
+      ` · ${investIsSale(draft) ? '推算每單位實收' : '推算淨值'} ${format(implied)} ${a.currency}`}</p>}
+    {amounts?.estimatedTwd != null && <p className="hint">預估台幣金額 NT$ {format(amounts.estimatedTwd)}</p>}
     {typePending && <p className="hint">類型待補。要產生記帳時，請先到「更多 → 標的與保單」補上類型。</p>}
     {isDividend && <p className={eligibleHint.startsWith('股數待核對') ? 'msg warn' : 'hint'}>
       依紀錄算出的符合資格股數 {format(eligible)}{eligibleHint && ` · ${eligibleHint}`}
@@ -160,7 +236,7 @@ export function Editor({ initial, day, onDate, snap, money, busy, fromMoney, lin
     {showCashFields && <div className="invest-grid">
       <label className="field">記帳帳戶<select required={showCash} value={draft.cashAccount} onChange={(e) => {
         const account = money?.accounts.find((x) => x.name === e.currentTarget.value);
-        patch({ cashAccount: account?.name ?? '', cashCurrency: account?.currency ?? 'TWD' });
+        patch({ cashAccount: account?.name ?? '', cashCurrency: account?.currency ?? draft.cashCurrency });
       }}><option value="">選擇實際收付款帳戶</option>{money?.accounts.filter((x) => !x.archived || x.name === draft.cashAccount)
         .map((x) => <option key={x.id} value={x.name}>{x.name}（{x.currency}）</option>)}</select></label>
       <label className="field">記帳分類<select value={draft.category || root} onChange={(e) => patch({ category: e.currentTarget.value })}>

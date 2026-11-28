@@ -1,6 +1,6 @@
 import { type Backend } from './backend';
 import {
-  dividendEligibility, dividendEstimate, INVEST_KINDS, investIsPurchase, investIsSale,
+  dividendEligibility, dividendEstimate, INVEST_KINDS, investFeeInCurrency, investIsPurchase, investIsSale,
   investOriginal, InvestStore, type InvestAsset, type InvestEvent,
 } from './invest';
 import { MoneyStore, roundMoney, type CategoryKind, type LineInput, type Txn, type TxnInput } from './money';
@@ -53,13 +53,13 @@ export function investmentCashInput(e: InvestEvent, a: InvestAsset): TxnInput {
   const lines: LineInput[] = [];
   const feeLabel = e.kind === 'redeem' ? '贖回手續費' : e.kind === 'switch' ? '換購手續費' : '交易手續費';
   if (e.kind !== 'dividend' && e.kind !== 'switch') {
-    for (const [raw, category, note] of [
-      [e.fee, '投資 / 投資手續費', feeLabel],
-      [e.tax, '投資 / 證券交易稅', '證券交易稅'],
+    for (const [raw, converted, category, note] of [
+      [e.fee, investFeeInCurrency(e, a, cur), '投資 / 投資手續費', feeLabel],
+      [e.tax, convert(e.tax), '投資 / 證券交易稅', '證券交易稅'],
     ] as const) {
       if (!raw) continue;
-      const amount = convert(raw);
-      if (amount == null) throw new Error('另外列出的外幣費用需要匯率才能產生記帳');
+      if (converted == null) throw new Error('另外列出的外幣費用需要匯率才能產生記帳');
+      const amount = round(converted);
       if (amount > 0) lines.push({ kind: '支出', amount, category, note: `${label} ${note}` });
     }
   }
@@ -237,6 +237,7 @@ export class InvestMoney {
       }
       if (isInvestmentCashBatch(linked.moneyId) && (linked.asset !== prior.asset || linked.quantity !== prior.quantity ||
         linked.price !== prior.price || linked.originalAmount !== prior.originalAmount || linked.fee !== prior.fee ||
+        linked.feeCurrency !== prior.feeCurrency ||
         linked.tax !== prior.tax || linked.fx !== prior.fx || linked.category !== prior.category)) {
         throw new Error('請先取消這組產生的記帳，再更新投資明細並重新產生');
       }
@@ -270,8 +271,9 @@ export class InvestMoney {
     if (!event.cashDate) throw new Error('請填扣款／入帳日');
     const matchCash = event.cashAccount === prior.cashAccount && event.cashCurrency === prior.cashCurrency &&
       event.cashAmount === prior.cashAmount && event.externalFee === prior.externalFee;
-    const matchLines = matchCash && event.fee === prior.fee && event.tax === prior.tax &&
-      (event.fx === prior.fx || (!event.fee && !event.tax) || asset.currency === event.cashCurrency);
+    const feeMatches = investFeeInCurrency(event, asset, event.cashCurrency) === investFeeInCurrency(prior, priorAsset, prior.cashCurrency);
+    const matchLines = matchCash && event.fee === prior.fee && feeMatches && event.tax === prior.tax &&
+      (event.fx === prior.fx || !event.tax || asset.currency === event.cashCurrency);
     if ((!matchCash && existing.payments?.length) || (!matchLines && existing.origCurrency)) {
       throw new Error('這筆有拆分付款或外幣記帳資料，請在一般記帳表單修改實收、實扣或付款帳戶');
     }
