@@ -1002,7 +1002,7 @@ export function EntryEditor({ api, snap, editing, onClose, onSavedDate, onCopy, 
         </ul>
       )}
 
-      <div className="editor-actions">
+      <div className="sticky-form-actions">
         {editable && (
           <button className="primary" onClick={save} disabled={api.busy}>
             儲存

@@ -6,15 +6,17 @@ import {
 } from '@life/db';
 import { AppSwitcher } from '@life/ui/app-switcher';
 import { AppTabs, type AppTabItem } from '@life/ui/app-tabs';
-import { Icon } from '@life/ui/icon';
+import { Icon, type IconName } from '@life/ui/icon';
 import { MonthCalendar } from '@life/ui/month-calendar';
+import { WeekDateStrip } from '@life/ui/week-date-strip';
 import { CashBatch } from './CashBatch';
 import { dividendHint, Editor, format } from './Editor';
+import { AssetDetail, AssetDirectory, assetKinds, DayInvestmentList, InvestmentAllocation, marketValueTwd } from './InvestmentViews';
 import { refreshQuotes } from './quotes';
 
 type Tab = 'add' | 'calendar' | 'stats' | 'more';
 const tabs: AppTabItem<Tab>[] = [
-  { key: 'add', label: '新增', icon: 'plus' }, { key: 'calendar', label: '月曆', icon: 'calendar' },
+  { key: 'add', label: '新增', icon: 'plus' }, { key: 'calendar', label: '日曆', icon: 'calendar' },
   { key: 'stats', label: '統計', icon: 'chart' }, { key: 'more', label: '更多', icon: 'more' },
 ];
 const params = new URLSearchParams(location.search);
@@ -50,6 +52,8 @@ export function App() {
   const [event, setEvent] = useState<InvestEvent | null>(null);
   const [editorVersion, setEditorVersion] = useState(0);
   const [asset, setAsset] = useState<InvestAsset | null>(null);
+  const [assetId, setAssetId] = useState('');
+  const [morePage, setMorePage] = useState<'assets' | 'import' | 'data' | null>(null);
   const [paste, setPaste] = useState<InvestImportRow[] | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [status, setStatus] = useState<'loading' | 'connect' | 'ready' | 'error'>('loading');
@@ -133,6 +137,9 @@ export function App() {
     if (investDate(row)) setDay(investDate(row));
     if ((row.moneyId || row.cashAccount) && !money) void run(async () => { await loadMoney(); });
   };
+  const openAsset = (row: InvestAsset) => {
+    setAsset(null); setAssetId(row.id); setMorePage('assets'); setTab('more');
+  };
   const after = async (id: string, warning?: string) => {
     await load();
     if (warning) { setNotice(warning); return; }
@@ -147,7 +154,7 @@ export function App() {
       setNotice('已儲存投資連結。可繼續補其他標的，或返回原記帳。');
       return;
     }
-    setEvent(null); setTab('calendar');
+    setEvent(null); setAddMode(null); setTab('calendar');
   };
   const save = (draft: InvestEvent, cash: boolean) => void run(async () => {
     if (oldMoney && !draft.moneyId) {
@@ -181,7 +188,7 @@ export function App() {
       if (row.moneyId && !money) await loadMoney();
       try { await bridge.remove(row); } finally { await load(); }
       if (viaMoney) { location.href = moneyUrl(); return; }
-      setEvent(null); setTab('calendar');
+      setEvent(null); setAddMode(null); setTab('calendar');
     });
   };
   const retry = (row: InvestEvent) => void run(async () => {
@@ -203,12 +210,8 @@ export function App() {
     setPaste(rows); setSelected(new Set(rows.filter((r) => !r.errors.length && !r.duplicate).map(pasteKey)));
   });
   const positions = snap && investPortfolio(snap.assets, snap.events);
-  const current = snap ? snap.events.filter((e) => !e.removePending && (
-    (e.kind === 'dividend' ? e.cashDate || e.tradeDate : investDate(e)) === day
-    || (e.kind === 'switch' && e.secondDate === day)
-  )) : [];
   const active = snap?.events.filter((e) => !e.removePending) ?? [];
-  const alerts = active.filter((e) => e.kind === 'dividend' && !e.moneyId || dividendHint(e, snap!).startsWith('股數待核對') || positions?.shortages.has(e.id));
+  const selectedAsset = snap?.assets.find((row) => row.id === assetId);
   const pendingBatches = new Set<string>();
   const pending = snap?.events.filter((e) => {
     if (!e.pending) return false;
@@ -235,6 +238,7 @@ export function App() {
         onChange={(next) => {
           setTab(next); setAsset(null);
           if (next !== 'add') { setEvent(null); setAddMode(null); }
+          if (next === 'more') { setMorePage(null); setAssetId(''); }
         }} />}
       <button type="button" className="icon-btn" aria-label="重新整理" title="重新整理"
         disabled={busy || status !== 'ready'} onClick={() => void run(load)}>
@@ -255,23 +259,37 @@ export function App() {
           : `${INVEST_KINDS[e.kind]} · ${snap.assets.find((a) => a.id === e.asset)?.symbol ?? ''}`}</span>
           <button className="btn" disabled={busy} onClick={() => retry(e)}>重試{e.removePending ? '刪除' : '同步'}</button></div>)}</section>}
       {tab === 'add' && <>
-        {!viaMoney && !oldMoney && <div className="invest-actions">
-          <button type="button" className="btn" disabled={busy} aria-pressed={addMode === 'investment'} onClick={() => {
+        {!addMode && <div className="invest-add-menu">
+          <WeekDateStrip selected={day} setDate={setDay} />
+          <h2>新增投資紀錄</h2>
+          <div className="entry-card-grid">
+          <button type="button" disabled={busy} onClick={() => {
             setEvent(null); setEditorVersion((n) => n + 1); setAddMode('investment');
-          }}>新增投資</button>
-          <button type="button" className="btn" disabled={busy} aria-pressed={addMode === 'cash'} onClick={() => {
+          }}><Icon name="trend" /><b>新增投資</b><small>填寫股票、基金或保單交易</small></button>
+          <button type="button" disabled={busy} onClick={() => {
             setEvent(null); setAddMode('cash');
             if (!money) void run(async () => { await loadMoney(); });
-          }}>產生記帳</button>
+          }}><Icon name="wallet" /><b>產生記帳</b><small>合併扣款或連到既有記帳</small></button>
+          </div>
         </div>}
+        {addMode && !viaMoney && !oldMoney && !event &&
+          <button type="button" className="link more-back" onClick={() => setAddMode(null)}><Icon name="left" size={18} /> 更換項目</button>}
         {addMode === 'cash' && <CashBatch key={batchVersion} snap={snap} money={money} busy={busy}
           onLoadMoney={() => void run(async () => { await loadMoney(); })}
           onEdit={(id) => { const row = active.find((e) => e.id === id); if (row) open(row); }}
-          onConfirm={(ids, date, account) => void run(async () => {
+          onConfirm={(ids, date, account, categories) => void run(async () => {
             try {
-              await bridge.generateCashBatch(ids, date, account);
+              await bridge.generateCashBatch(ids, date, account, categories);
               setBatchVersion((version) => version + 1);
               setNotice(`已將 ${ids.length} 筆投資產生為一筆記帳。`);
+            } finally { await load(); }
+            await loadMoney();
+          })}
+          onLink={(ids, date, id) => void run(async () => {
+            try {
+              await bridge.linkCashBatch(ids, id, date);
+              setBatchVersion((version) => version + 1);
+              setNotice(`已將 ${ids.length} 筆投資連到既有記帳。`);
             } finally { await load(); }
             await loadMoney();
           })} />}
@@ -311,9 +329,12 @@ export function App() {
             });
             return id;
           }}
-          onCancel={() => { setEvent(null); if (!oldMoney) setTab('calendar'); else setEditorVersion((n) => n + 1); }}
-          onCash={() => { if (!money) void run(async () => { await loadMoney(); }); }}
-          onMoney={(row, id) => void run(async () => { await bridge.link(row, id); await after(row.id); })}
+          onCancel={() => {
+            setEvent(null);
+            if (oldMoney) setEditorVersion((n) => n + 1);
+            else if (event || viaMoney) setTab('calendar');
+            else setAddMode(null);
+          }}
           onUnlink={(row) => void run(async () => { await bridge.unlink(row); await after(row.id); })}
           onRemove={remove} />}
         </>}
@@ -322,27 +343,41 @@ export function App() {
         <MonthCalendar selected={day} setDate={setDay} dayInfo={(d) => active.some((e) => (
           (e.kind === 'dividend' ? e.cashDate || e.tradeDate : investDate(e)) === d || (e.kind === 'switch' && e.secondDate === d)
         )) ? { marks: [{ color: 'var(--accent)', label: '有投資紀錄' }] } : null} />
-        <EventList title={day} rows={current} snap={snap} day={day} onOpen={open} />
-        {!!alerts.length && <EventList title="需要處理的資料" rows={alerts} snap={snap} day="" onOpen={open} />}
+        {positions && <DayInvestmentList day={day} snap={snap} shortages={positions.shortages} onOpen={open} />}
+        <button type="button" className="calendar-add-button" aria-label={`新增 ${day} 投資紀錄`} onClick={() => {
+          setEvent(null); setAddMode(null); setTab('add');
+        }}><Icon name="plus" size={28} /></button>
       </>}
       {tab === 'stats' && positions && <>
         <div className="invest-actions"><button className="btn" disabled={busy} onClick={() => void run(async () => {
           const result = await refreshQuotes(store, snap.assets, true); await load();
           setNotice(`已更新 ${result.updated} 檔；${result.failed} 檔未能更新。`);
         })}>更新估值</button></div>
-        <Positions snap={snap} portfolio={positions} onAsset={setAsset} />
+        <InvestmentAllocation positions={[...positions.positions.values()]} />
+        <Positions snap={snap} portfolio={positions} onAsset={openAsset} />
         <DividendTotals snap={snap} />
         <EventList title="已實現損益與配息" rows={active.filter((e) => e.kind === 'dividend' || e.kind === 'sell' || e.kind === 'redeem')}
           snap={snap} day="" onOpen={open} />
       </>}
       {tab === 'more' && <>
-        <section className="card"><h2>標的與保單</h2><button type="button" className="btn" onClick={() => setAsset({ ...blankAsset })}>新增標的</button>
-          <ul className="invest-list">{snap.assets.map((a) => <li key={a.id}><button onClick={() => setAsset(a)}>
-            {a.symbol} {a.name}<small>{a.kind === 'pending' ? '類型待補 · ' : ''}{a.account || '未填保管帳戶'} · {a.currency || '幣別待補'}</small></button></li>)}</ul>
-        </section>
-        <section className="card"><h2>資料與試算表</h2>
+        {!morePage && <div className="app-menu-rows">
+          <MoreRow icon="trend" label="標的與保單" detail="股票、基金和保單持有紀錄" onClick={() => setMorePage('assets')} />
+          <MoreRow icon="bookOpen" label="舊資料匯入" detail="預覽並匯入試算表貼上區" onClick={() => setMorePage('import')} />
+          <MoreRow icon="clipboard" label="資料與試算表" detail="查看投資資料和估值來源" onClick={() => setMorePage('data')} />
+        </div>}
+        {morePage && !assetId && !asset && <button type="button" className="link more-back" onClick={() => setMorePage(null)}>
+          <Icon name="left" size={18} /> 返回更多
+        </button>}
+        {morePage === 'assets' && positions && !asset && (selectedAsset
+          ? <AssetDetail key={selectedAsset.id} asset={selectedAsset} position={positions.positions.get(selectedAsset.id)} day={day}
+            snap={snap} shortages={positions.shortages} onOpen={open} onEdit={() => setAsset(selectedAsset)} onBack={() => setAssetId('')} />
+          : <AssetDirectory assets={snap.assets} positions={positions.positions} onOpen={openAsset} onNew={() => setAsset({ ...blankAsset })} />)}
+        {morePage === 'data' && <section className="card"><h2>資料與試算表</h2>
           {backend.fileUrl('invest') && <a className="invest-link" target="_blank" rel="noreferrer" href={backend.fileUrl('invest')!}>開啟投資試算表</a>}
           {backend.fileUrl('invest') && <p className="hint">首次自動查基金淨值時，若 investFundQuotes 顯示外部資料授權提示，可在試算表允許存取，再回來更新估值。</p>}
+          {!backend.fileUrl('invest') && <p className="hint">目前使用本機資料。</p>}
+        </section>}
+        {morePage === 'import' && <section className="card"><h2>舊資料匯入</h2>
           <p className="hint">將舊資料分別貼成純值，從第 2 列開始。代號欄使用純文字，保留前面的 0。</p>
           <details><summary>各種舊資料的工作表名稱</summary><ul>{Object.entries(INVEST_PASTE_SHEETS).filter(([, kind]) => kind)
             .map(([table, kind]) => <li key={table}>{kind}：{table}</li>)}</ul></details>
@@ -358,13 +393,19 @@ export function App() {
               const count = await importInvestRows(store, paste.filter((r) => selected.has(pasteKey(r))));
               setPaste(null); await load(); setNotice(`已補登 ${count} 筆投資紀錄。`);
             })}>匯入 {selected.size} 筆</button></>}
-        </section>
+        </section>}
       </>}
       {asset && <AssetForm key={asset.id || 'new'} initial={asset} close={() => setAsset(null)} busy={busy} save={(a) => void run(async () => {
-        await store.saveAsset(a); setAsset(null); await load();
+        const id = await store.saveAsset(a); setAssetId(id); setAsset(null); await load();
       })} />}
     </>}
   </div>;
+}
+
+function MoreRow({ icon, label, detail, onClick }: { icon: IconName; label: string; detail: string; onClick: () => void }) {
+  return <button type="button" onClick={onClick}><span className="more-label">
+    <Icon name={icon} /><span><b>{label}</b><small>{detail}</small></span>
+  </span><Icon name="right" /></button>;
 }
 
 function MoneySummary({ txn, money, group, assets, busy, onOpen, onAllocate }: {
@@ -453,20 +494,27 @@ function Positions({ snap, portfolio, onAsset }: {
   }
   return <>
     <section className="card"><h2>目前持有</h2>{!list.length && <p>還沒有持有部位</p>}
-      <ul className="invest-list">{list.map((p) => {
+      {assetKinds.map(({ kind, label }) => {
+        const group = list.filter((p) => p.asset.kind === kind);
+        return group.length > 0 && <section key={kind} className="invest-trade-group"><h3>{label}</h3>
+        <ul className="app-row-list">{group.map((p) => {
         const a = p.asset;
         const value = a.quote == null ? null : p.quantity * a.quote;
-        const twd = value != null && a.quoteFx ? value * a.quoteFx : null;
-        return <li key={a.id}><button type="button" onClick={() => onAsset(a)}>
-          <strong>{a.symbol} {a.name} · {format(p.quantity)} {a.kind === 'stock' ? '股' : '單位'}</strong>
+        const twd = marketValueTwd(p);
+        return <li key={a.id}><button type="button" className="app-row" onClick={() => onAsset(a)}>
+          <span className="app-row-main"><strong>{a.symbol} {a.name}</strong>
           <small>{a.currency || '幣別待補'} · 成本 {format(p.cost)} · 平均 {format(p.cost != null && p.quantity > 0 ? p.cost / p.quantity : null)} ·
             市值 {format(value)} · 帳面損益 {format(value == null || p.cost == null ? null : value - p.cost)}</small>
           {a.currency !== 'TWD' && <small>台幣成本 {format(p.twdCost)} · 台幣市值 {format(twd)} · 台幣損益 {format(twd == null || p.twdCost == null ? null : twd - p.twdCost)}</small>}
           <small>價格／淨值 {format(a.quote)} · {a.quoteDate || '未更新'} · {a.quoteSource || '無來源'}{a.kind === 'policy' && ` · 單位數更新至 ${p.lastDate}`}</small>
           {a.quoteFx != null && a.currency !== 'TWD' && <small>估值匯率 {a.quoteFx} · {a.quoteFxDate || '日期未填'}</small>}
           {p.incomplete && <span className="msg warn">買進資料待補</span>}
+          {p.quantity > 0 && (twd == null || a.kind === 'pending') && <small className="invest-row-alert">待估值</small>}
+          </span>
+          <span className="app-row-value">{format(p.quantity)} {a.kind === 'stock' ? '股' : '單位'}</span>
         </button></li>;
-      })}</ul>
+      })}</ul></section>;
+      })}
     </section>
     {[...policies].map(([name, ids]) => {
       const rows = snap.events.filter((e) => ids.includes(e.asset) && !e.removePending && investDate(e) <= todayKey());
@@ -513,7 +561,7 @@ function AssetForm({ initial, close, save, busy }: {
       {field('quoteFxDate', '估值匯率日期', 'date')}
     </div>
     {a.kind !== 'stock' && <p className="hint">請填對應基金級別的摩根或鉅亨公開頁。瀚亞可填公開淨值總表，名稱要和網站列出的完整級別及幣別相同。</p>}
-    <div className="invest-actions"><button className="btn primary" disabled={busy}>儲存標的</button>
+    <div className="sticky-form-actions"><button className="btn primary" disabled={busy}>儲存標的</button>
       <button type="button" className="btn" onClick={close}>取消</button></div>
   </form>;
 }

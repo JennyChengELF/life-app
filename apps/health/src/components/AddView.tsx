@@ -19,7 +19,7 @@ export function AddView({ snap, nav, date, setDate }: { snap: HealthSnapshot; na
     <div className="health-add">
       <WeekDateStrip selected={date} setDate={setDate} maxDate={todayKey()} />
       <h2>新增健康紀錄</h2>
-      <div className="health-entry-grid">
+      <div className="entry-card-grid">
         <button type="button" onClick={() => nav.newBody('calendar', at())}><Icon name="weight" /><b>體重紀錄</b><small>體重、體脂、肌肉、水分、BMI</small></button>
         <button type="button" onClick={() => nav.vital('bp', { rec: null, initialTime: at() }, 'calendar')}><Icon name="heartPulse" /><b>血壓</b><small>收縮壓、舒張壓與脈搏</small></button>
         <button type="button" onClick={() => nav.vital('glucose', { rec: null, initialTime: at() }, 'calendar')}><Icon name="candy" /><b>血糖</b><small>數值、時機與餐別</small></button>

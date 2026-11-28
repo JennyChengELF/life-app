@@ -58,8 +58,6 @@ select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .hint { font-size: 0.85rem; color: var(--muted); margin: 2px 0 8px; }
 .hint.warn { color: var(--warn); }
 .problems { color: var(--danger); }
-.editor-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; align-items: center; }
-.editor-actions .spacer { flex: 1; }
 .subbox { background: var(--bg); border-radius: 10px; padding: 10px; margin-bottom: 10px; }
 .funding-line { margin-bottom: 6px; }
 .funding-line select { flex: 2; min-width: 0; }
@@ -302,22 +300,9 @@ button.bt-row:hover, .bt-row.open { background: var(--bg); }
 @media (prefers-color-scheme: dark) { .badge.person { background: #2c2648; color: #b6a6f2; } }
 
 /* 右下角「＋」記一筆 */
-.fab {
-  position: fixed; right: max(18px, calc(50% - 380px + 18px)); bottom: calc(86px + env(safe-area-inset-bottom)); width: 60px; height: 60px;
-  border-radius: 20px; border: 0; background: var(--accent); color: #fff; box-shadow: 0 6px 18px rgba(31, 111, 209, 0.35); z-index: 9; padding: 0;
-}
-@media (min-width: 760px) { .fab { bottom: 28px; } }
+@media (max-width: 759px) { .calendar-add-button { --calendar-add-offset: 86px; } }
 
 /* 更多 */
-.more-list { padding: 4px 0; }
-.more-list button { width: 100%; border: 0; border-radius: 0; background: none; justify-content: flex-start; gap: 12px; padding: 14px 16px; font-size: 1rem; }
-.more-list button + button { border-top: 1px solid var(--line); }
-.more-list .grow { flex: 1; text-align: left; }
-.more-list .icon:last-child { color: var(--muted); }
-.more-list h2 { padding: 10px 16px 4px; margin: 0; font-size: .88rem; color: var(--muted); }
-.more-label { flex: 1; display: flex; align-items: center; gap: 12px; text-align: left; }
-.more-label span { display: flex; flex-direction: column; gap: 2px; }
-.more-label small { color: var(--muted); font-weight: 400; }
 .money-entry-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .money-entry-grid button { min-height: 112px; padding: 14px; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; text-align: left; background: var(--card); }
 .money-entry-grid button .icon { color: var(--accent); }
@@ -338,9 +323,7 @@ button.bt-row:hover, .bt-row.open { background: var(--bg); }
 .total-big { font-size: 2.3rem; font-weight: 700; line-height: 1.15; color: var(--out); }
 .total-big.in { color: var(--in); }
 .chip-add { border: 1px dashed var(--accent); color: var(--accent); background: none; border-radius: 999px; padding: 6px 14px; font-size: 0.9rem; margin-top: 6px; }
-.editor-actions { position: sticky; bottom: calc(60px + env(safe-area-inset-bottom)); background: var(--card); padding: 10px 0 4px; z-index: 4; }
-.editor-actions .primary { flex: 1; max-width: 320px; padding: 12px; font-size: 1.05rem; border-radius: 14px; }
-@media (min-width: 760px) { .editor-actions { bottom: 0; } }
+@media (max-width: 759px) { .editor > .sticky-form-actions { --form-actions-bottom: calc(60px + env(safe-area-inset-bottom)); } }
 
 /* 需要補齊的資料：整批補齊（2026-11-19） */
 .batch h3 { font-size: 1rem; margin: 0 0 8px; }

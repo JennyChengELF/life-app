@@ -55,7 +55,7 @@ describe('投資 APP', () => {
 
   it('股票以成交價重算原幣金額，同幣別扣款含手續費並依記帳幣別取位', () => {
     const buy = event({ quantity: 43, price: 91.93, originalAmount: 999, fee: 1 });
-    expect(investPurchaseAmounts(buy, stock)).toMatchObject({ stockAmount: 3952.99, suggestedCash: 3954, fx: 1 });
+    expect(investPurchaseAmounts(buy, stock)).toMatchObject({ stockAmount: 3953, suggestedCash: 3954, fx: 1 });
     const usdStock = { ...stock, currency: 'USD' };
     const usdBuy = event({ quantity: 2, price: 50, fee: 1, fx: 32, cashCurrency: 'USD' });
     expect(investPurchaseAmounts(usdBuy, usdStock)).toMatchObject({ stockAmount: 100, suggestedCash: 101, estimatedTwd: 3232 });
@@ -160,6 +160,35 @@ describe('投資 APP', () => {
     expect(ledger.txns).toHaveLength(1);
     expect(ledger.txns[0].amount).toBe(92);
     expect((await store.load()).events.map(({ pending }) => pending)).toEqual([false, false, false]);
+  });
+
+  it('在預覽設定個別分類，並依日期把另一組投資連到既有記帳', async () => {
+    const { bridge, store } = await setup();
+    const custom = '投資 / 股票 / 定期定額';
+    await bridge.money.ensureInvestmentCategories([{ path: custom, kind: '支出', invested: true }]);
+    for (const [id, price] of [['a', 40], ['b', 60], ['c', 70], ['d', 30], ['unused', 20]] as const) {
+      await store.saveEvent(event({ id, cashDate: date, quantity: 1, price }));
+    }
+    await bridge.generateCashBatch(['a', 'b'], date, '測試銀行', { a: custom });
+    const [generated] = (await bridge.money.load()).txns;
+    expect(generated.lines.map((line) => line.category)).toEqual([custom, '投資 / 股票']);
+    expect((await store.load()).events.find((row) => row.id === 'a')?.category).toBe(custom);
+
+    const existing = await bridge.money.saveTxn({
+      time: startOfDay(date), dateOnly: true, direction: '出', account: '測試銀行', amount: 100, paidBy: null,
+      currency: null, toAccount: null, toAmount: null, store: null, branch: null, statementText: null, note: '銀行扣款',
+      tagIds: [], lines: [{ kind: '支出', amount: 100, category: custom, note: '原始明細' }],
+    });
+    await expect(bridge.linkCashBatch(['c', 'd'], existing, '2020-07-02')).rejects.toThrow('選擇當天');
+    await bridge.linkCashBatch(['c', 'd'], existing, date);
+    const ledger = await bridge.money.load();
+    expect(ledger.txns).toHaveLength(2);
+    expect(ledger.txns.find((txn) => txn.id === existing)).toMatchObject({
+      amount: 100, note: '銀行扣款', investmentId: 'c',
+      lines: [{ amount: 100, category: custom, note: '原始明細' }],
+    });
+    expect((await store.load()).events.filter((row) => row.moneyId === existing).map((row) => row.id)).toEqual(['c', 'd']);
+    expect((await store.load()).events.find((row) => row.id === 'unused')?.moneyId).toBe('');
   });
 
   it('跨表失敗後重試使用同一筆，修改股數不重扣，刪除移除兩邊', async () => {

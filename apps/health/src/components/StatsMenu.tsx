@@ -6,7 +6,7 @@ export function StatsMenu({ nav }: { nav: Nav }) {
   return (
     <div className="health-stats-menu">
       <h2>健康統計</h2>
-      <div className="health-entry-grid">
+      <div className="entry-card-grid">
         <button type="button" onClick={() => nav.go('body')}><Icon name="weight" /><b>體重紀錄</b><small>依量測時段查看趨勢</small></button>
         <button type="button" onClick={() => nav.go('bp')}><Icon name="heartPulse" /><b>血壓</b><small>平均、趨勢與需注意紀錄</small></button>
         <button type="button" onClick={() => nav.go('glucose')}><Icon name="candy" /><b>血糖</b><small>依時機查看趨勢</small></button>

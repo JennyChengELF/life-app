@@ -87,6 +87,12 @@ export function investmentCashInput(e: InvestEvent, a: InvestAsset): TxnInput {
 const batchMoneyPrefix = 'invest-batch-';
 export const isInvestmentCashBatch = (moneyId: string) => moneyId.startsWith(batchMoneyPrefix);
 
+export function canLinkInvestmentCash(rows: InvestEvent[], txn: Txn) {
+  return rows.length > 0 && !txn.investmentGenerated &&
+    ((rows.length === 1 && !txn.investmentId) || rows.every((row) => row.kind === 'buy')) &&
+    rows.every((row) => canGenerateCash(row) && txn.direction === (investIsSale(row) || row.kind === 'dividend' ? '入' : '出'));
+}
+
 export function prepareInvestmentCashBatch(
   rows: InvestEvent[], assets: InvestAsset[], cashDate: string, cashAccount: string, cashCurrency: string,
 ) {
@@ -126,7 +132,8 @@ export function prepareInvestmentCashBatch(
   const amount = roundMoney(parts.reduce((total, { input }) => total + (input.amount ?? 0), 0), cashCurrency);
   const input: TxnInput = { ...first, amount, lines: parts.flatMap((part) => part.input.lines),
     note: rows[0].kind === 'buy' ? `${[...symbols].join(', ')} 扣款` : first.note };
-  return { input, events: parts.map((part) => part.event) };
+  return { input, events: parts.map((part) => part.event),
+    lineEvents: parts.flatMap(({ event, input }) => input.lines.map((_, index) => index === 0 ? event.id : null)) };
 }
 
 export class InvestMoney {
@@ -152,7 +159,7 @@ export class InvestMoney {
       ? locks.request(`life-invest-${draft.id}`, () => this.generateLocked(draft)) : this.generateLocked(draft));
   }
 
-  async generateCashBatch(ids: string[], cashDate: string, cashAccount: string) {
+  async generateCashBatch(ids: string[], cashDate: string, cashAccount: string, categories: Record<string, string> = {}) {
     return withMoneyLock('batch-generation', async () => {
       const { assets, events } = await this.investments.load();
       const byId = new Map(events.map((event) => [event.id, event]));
@@ -164,7 +171,20 @@ export class InvestMoney {
       const ledger = await this.money.load();
       const account = ledger.accounts.find((a) => a.name === cashAccount && !a.archived);
       if (!account) throw new Error('請選擇可用的記帳帳戶');
-      const batch = prepareInvestmentCashBatch(rows, assets, cashDate, account.name, account.currency);
+      const categorized = rows.map((row) => {
+        const category = categories[row.id];
+        if (!category) return row;
+        const asset = assets.find((item) => item.id === row.asset);
+        if (!asset) throw new Error('找不到投資標的');
+        const root = investCategory(row, asset);
+        const kind = investIsSale(row) || row.kind === 'dividend' ? '收入' : '支出';
+        if (category !== root && (!category.startsWith(`${root} / `) ||
+          !ledger.categories.some((item) => item.path === category && item.kind === kind && !item.archived))) {
+          throw new Error('選取的記帳分類已變更，請重新選擇');
+        }
+        return { ...row, category };
+      });
+      const batch = prepareInvestmentCashBatch(categorized, assets, cashDate, account.name, account.currency);
       const moneyId = `${batchMoneyPrefix}${newId()}~${batch.events[0].id}`;
       const pending = batch.events.map((row) => ({ ...row, moneyId, moneyMode: 'generated' as const, pending: true }));
       await this.investments.saveCashLinks(pending, assets);
@@ -235,8 +255,11 @@ export class InvestMoney {
         linked.cashDate !== prior.cashDate || linked.cashCurrency !== prior.cashCurrency) {
         throw new Error('這筆扣款有多檔投資，請在記帳 APP 編輯整筆扣款');
       }
+      const previousOriginal = investOriginal(prior);
+      const roundedOriginal = linked.kind === 'buy' && asset.kind === 'stock' && asset.currency === 'TWD' &&
+        previousOriginal != null && linked.originalAmount === roundMoney(previousOriginal, 'TWD');
       if (isInvestmentCashBatch(linked.moneyId) && (linked.asset !== prior.asset || linked.quantity !== prior.quantity ||
-        linked.price !== prior.price || linked.originalAmount !== prior.originalAmount || linked.fee !== prior.fee ||
+        linked.price !== prior.price || (!roundedOriginal && linked.originalAmount !== prior.originalAmount) || linked.fee !== prior.fee ||
         linked.feeCurrency !== prior.feeCurrency ||
         linked.tax !== prior.tax || linked.fx !== prior.fx || linked.category !== prior.category)) {
         throw new Error('請先取消這組產生的記帳，再更新投資明細並重新產生');
@@ -349,6 +372,33 @@ export class InvestMoney {
 
   async link(event: InvestEvent, moneyId: string) {
     return withMoneyLock('batch-generation', () => withMoneyLock(moneyId, () => this.linkLocked(event, moneyId)));
+  }
+
+  async linkCashBatch(ids: string[], moneyId: string, date: string) {
+    return withMoneyLock('batch-generation', () => withMoneyLock(moneyId, async () => {
+      const [{ assets, events }, ledger] = await Promise.all([this.investments.load(), this.money.load()]);
+      const txn = ledger.txns.find((item) => item.id === moneyId && item.date === date);
+      const rows = [...new Set(ids)].map((id) => {
+        const row = events.find((item) => item.id === id && !item.pending && !item.moneyId);
+        if (!row) throw new Error('勾選的投資已連結或已變更，請重新整理');
+        return row;
+      });
+      if (!txn || !canLinkInvestmentCash(rows, txn)) throw new Error('請選擇當天可連結的記帳交易');
+      const siblings = investmentsForMoney(events, moneyId);
+      if (siblings.length && [...siblings, ...rows].some((row) => row.kind !== 'buy')) {
+        throw new Error('同一筆記帳連結多筆投資時，請選擇買進紀錄');
+      }
+      const currency = ledger.accounts.find((account) => account.name === txn.account)?.currency ?? txn.currency;
+      const pending = rows.map((row) => ({
+        ...row, cashDate: row.cashDate || txn.date,
+        ...(row.kind === 'dividend' && txn.amount != null
+          ? { cashAmount: txn.amount, cashCurrency: currency || row.cashCurrency } : {}),
+        moneyId, moneyMode: 'linked' as const, pending: true,
+      }));
+      await this.investments.saveCashLinks(pending, assets);
+      if (!txn.investmentId) await this.money.setInvestmentLink(moneyId, rows[0].id, null);
+      await this.investments.saveCashLinks(pending.map((row) => ({ ...row, pending: false })), assets);
+    }));
   }
 
   private async linkLocked(event: InvestEvent, moneyId: string) {

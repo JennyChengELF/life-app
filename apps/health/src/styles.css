@@ -137,12 +137,6 @@ button.full { width: 100%; margin-bottom: 12px; }
 
 /* ── 新增／統計入口 ── */
 .health-add, .overview { padding-bottom: 72px; }
-.health-entry-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.health-entry-grid button { min-height: 118px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 5px; padding: 14px; text-align: left; background: var(--card); border-color: var(--line); }
-.health-entry-grid button > .icon { color: var(--accent); width: 28px; height: 28px; }
-.health-entry-grid button b { font-size: 1rem; }
-.health-entry-grid button small { color: var(--muted); line-height: 1.35; }
-@media (max-width: 420px) { .health-entry-grid { grid-template-columns: 1fr; } }
 
 .fab { position: fixed; right: max(18px, calc((100vw - 760px) / 2 + 18px)); bottom: calc(82px + env(safe-area-inset-bottom)); width: 56px; height: 56px; border: 0; border-radius: 18px; color: #fff; background: var(--accent); box-shadow: 0 6px 18px rgb(20 55 95 / 25%); z-index: 6; padding: 0; display: grid; place-items: center; }
 @media (min-width: 760px) { .fab { bottom: 28px; } }

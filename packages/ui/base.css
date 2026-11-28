@@ -266,3 +266,31 @@ button.link { border: 0; background: none; color: var(--accent); padding: 4px 6p
 @media (min-width: 760px) {
   .date-calendar-day { min-height: 57px; }
 }
+
+/* 共用新增卡片、選單列與底部操作 */
+.entry-card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.entry-card-grid button { min-height: 118px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 5px; padding: 14px; text-align: left; white-space: normal; background: var(--card); border-color: var(--line); }
+.entry-card-grid button > .icon { color: var(--accent); width: 28px; height: 28px; }
+.entry-card-grid button b { font-size: 1rem; }
+.entry-card-grid button small { color: var(--muted); line-height: 1.35; }
+@media (max-width: 420px) { .entry-card-grid { grid-template-columns: 1fr; } }
+.app-menu-rows { padding: 4px 0; }
+.app-menu-rows button { width: 100%; border: 0; border-radius: 0; background: none; justify-content: flex-start; gap: 12px; padding: 14px 16px; font-size: 1rem; }
+.app-menu-rows button + button { border-top: 1px solid var(--line); }
+.app-menu-rows .grow { flex: 1; text-align: left; }
+.app-menu-rows .icon:last-child { color: var(--muted); }
+.app-menu-rows h2 { padding: 10px 16px 4px; margin: 0; font-size: .88rem; color: var(--muted); }
+.app-menu-rows .more-label { flex: 1; display: flex; align-items: center; gap: 12px; text-align: left; }
+.app-menu-rows .more-label span { display: flex; flex-direction: column; gap: 2px; }
+.app-menu-rows .more-label small { color: var(--muted); font-weight: 400; }
+.sticky-form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; position: sticky; bottom: var(--form-actions-bottom, env(safe-area-inset-bottom)); background: var(--card); margin-top: 10px; padding: 10px 0 4px; z-index: 4; }
+.sticky-form-actions .primary { flex: 1; max-width: 320px; padding: 12px; font-size: 1.05rem; border-radius: 14px; }
+.sticky-form-actions .spacer { flex: 1; }
+.calendar-add-button { position: fixed; right: max(18px, calc(50% - var(--calendar-half-width, 380px) + 18px)); bottom: calc(var(--calendar-add-offset, 28px) + env(safe-area-inset-bottom)); width: 60px; height: 60px; border: 0; border-radius: 20px; background: var(--accent); color: #fff; box-shadow: 0 6px 18px rgba(31, 111, 209, .35); z-index: 9; padding: 0; }
+.app-row-list { list-style: none; padding: 0; margin: 0; }
+.app-row-list li + li { border-top: 1px solid var(--line); }
+.app-row { width: 100%; display: flex; justify-content: flex-start; align-items: center; gap: 10px; padding: 10px 4px; border: 0; border-radius: 0; background: transparent; text-align: left; white-space: normal; }
+.app-row:hover { background: var(--bg); }
+.app-row > .app-row-main { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.app-row small { display: block; color: var(--muted); }
+.app-row .app-row-value { margin-inline-start: auto; text-align: end; white-space: nowrap; font-variant-numeric: tabular-nums; }

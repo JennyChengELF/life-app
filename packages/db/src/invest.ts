@@ -110,7 +110,8 @@ export function investFeeInCurrency(e: InvestEvent, a: InvestAsset, currency: st
 export function investPurchaseAmounts(e: InvestEvent, a: InvestAsset) {
   const stock = a.kind === 'stock';
   const stockAmount = stock && e.quantity != null && e.price != null
-    ? round(e.quantity * e.price) : null;
+    ? a.currency === 'TWD' ? roundMoney(e.quantity * e.price, 'TWD') : round(e.quantity * e.price)
+    : null;
   const original = stock ? stockAmount ?? e.originalAmount
     : e.quantity != null && e.price != null ? round(e.quantity * e.price) : null;
   const pricingCurrency = a.currency;
@@ -370,9 +371,9 @@ export class InvestStore {
       validateInvest(event, assets);
       const row = rows.get(event.id);
       if (!row) throw new Error('找不到投資紀錄，請重新整理');
-      const { cashDate, cashAccount, cashCurrency, cashAmount, moneyId, moneyMode, pending } = event;
+      const { cashDate, cashAccount, cashCurrency, cashAmount, category, moneyId, moneyMode, pending } = event;
       return { rowNumber: row.rowNumber, expectId: event.id,
-        values: { cashDate, cashAccount, cashCurrency, cashAmount, moneyId, moneyMode, pending, updatedAt: now } };
+        values: { cashDate, cashAccount, cashCurrency, cashAmount, category, moneyId, moneyMode, pending, updatedAt: now } };
     });
     await this.backend.writeBatch([{ table: 'investEvents', update }]);
   }

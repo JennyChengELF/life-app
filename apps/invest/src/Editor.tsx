@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { WeekDateStrip } from '@life/ui/week-date-strip';
 import {
   blankInvestEvent, canGenerateCash, dividendEligibility, dividendEstimate, impliedInvestPrice, INVEST_KINDS, investCategory,
-  investIsDividend, investIsPurchase, investIsSale, investPurchaseAmounts, investmentMemo, isInvestmentCashBatch, type InvestEvent, type InvestKind,
+  investIsDividend, investIsPurchase, investIsSale, investPurchaseAmounts, investmentMemo, type InvestEvent, type InvestKind,
   type InvestSnapshot, type MoneySnapshot,
 } from '@life/db';
 import { ExchangeRateLookup } from './ExchangeRateLookup';
@@ -23,19 +23,15 @@ export function dividendHint(e: InvestEvent, snap: InvestSnapshot) {
     : `股數待核對：通知單比 APP ${diff > 0 ? '多' : '少'} ${format(Math.abs(diff))}，請檢查漏記交易或日期。`;
 }
 
-export function Editor({ initial, day, onDate, snap, money, busy, fromMoney, linking, onQuickAsset, onSave, onCash, onMoney, onRemove, onUnlink, onCancel }: {
+export function Editor({ initial, day, onDate, snap, money, busy, fromMoney, linking, onQuickAsset, onSave, onRemove, onUnlink, onCancel }: {
   day: string; onDate: (date: string) => void;
   initial: InvestEvent; snap: InvestSnapshot; money: MoneySnapshot | null; busy: boolean; fromMoney: boolean;
   linking?: boolean;
   onQuickAsset: (symbol: string) => Promise<string | undefined>;
-  onSave: (e: InvestEvent, cash: boolean) => void; onCash: () => void; onMoney: (e: InvestEvent, id: string) => void;
+  onSave: (e: InvestEvent, cash: boolean) => void;
   onRemove: (e: InvestEvent) => void; onUnlink: (e: InvestEvent) => void; onCancel: () => void;
 }) {
   const [draft, setDraft] = useState(initial);
-  const [showCashSettings, setShowCashSettings] = useState(!!initial.cashAccount && !linking);
-  const [link, setLink] = useState('');
-  const [linkDate, setLinkDate] = useState('');
-  const [showLink, setShowLink] = useState(false);
   const [showQuickAsset, setShowQuickAsset] = useState(false);
   const [symbol, setSymbol] = useState('');
   const [pickedCashCurrency, setPickedCashCurrency] = useState(!!initial.id || !!initial.cashAccount);
@@ -109,15 +105,9 @@ export function Editor({ initial, day, onDate, snap, money, busy, fromMoney, lin
     cat.kind === (investIsSale(draft) || isCashDividend ? '收入' : '支出')) ?? [];
   const generated = draft.moneyMode === 'generated';
   const showCash = gen && (fromMoney || generated) && !typePending;
-  const showCashFields = showCash || (gen && showCashSettings && !typePending && !linking);
+  const showCashFields = showCash && fromMoney && !initial.id && !linking;
   const historic = draft.moneyMode === 'linked';
   const linkedTxn = money?.txns.find((txn) => txn.id === draft.moneyId);
-  // （2026-11-28 使用者決定：按記帳日期篩選可連結的交易。）
-  const linkOptions = showLink && linkDate ? (money?.txns ?? []).filter((txn) =>
-    txn.date === linkDate && !isInvestmentCashBatch(txn.id) &&
-    (!txn.investmentId || (draft.kind === 'buy' && !txn.investmentGenerated)) &&
-    txn.direction === (isCashDividend || investIsSale(draft) ? '入' : '出')) : [];
-  const selectedLink = linkOptions.find((txn) => txn.id === link);
   async function addQuickAsset() {
     if (busy || !symbol.trim()) return;
     const id = await onQuickAsset(symbol);
@@ -126,7 +116,11 @@ export function Editor({ initial, day, onDate, snap, money, busy, fromMoney, lin
     setShowQuickAsset(false);
     setSymbol('');
   }
-  return <form className="card" onSubmit={(ev) => { ev.preventDefault(); onSave(draft, showCash); }}>
+  return <form className="card" onSubmit={(ev) => {
+    ev.preventDefault();
+    const stockAmount = amounts?.stockAmount;
+    onSave(stockBuy && pricingCurrency === 'TWD' && stockAmount != null ? { ...draft, originalAmount: stockAmount } : draft, showCash);
+  }}>
     <WeekDateStrip selected={(isCashDividend ? draft.cashDate : draft.tradeDate) || draft.cashDate || day} setDate={(date) => {
       patch(isCashDividend ? { cashDate: date } : { tradeDate: date });
       onDate(date);
@@ -219,20 +213,6 @@ export function Editor({ initial, day, onDate, snap, money, busy, fromMoney, lin
       <button type="button" className="btn" onClick={() => patch({ cashAmount: forecast })}>使用推算金額</button>
     </p>}
     {text('note', '補充備註')}
-    {gen && !fromMoney && !generated && !linking && <div className="invest-actions">
-      {!typePending && <button type="button" className="btn" disabled={busy} aria-expanded={showCashSettings} onClick={() => {
-        if (!showCashSettings) onCash();
-        setShowCashSettings(!showCashSettings);
-      }}>記帳帳戶與分類</button>}
-      {!!draft.id && <button type="button" className="btn" disabled={busy} aria-expanded={showLink} onClick={() => {
-        if (!showLink) {
-          setLinkDate(draft.cashDate || draft.tradeDate || day);
-          setLink('');
-          onCash();
-        }
-        setShowLink(!showLink);
-      }}>連到既有記帳</button>}
-    </div>}
     {showCashFields && <div className="invest-grid">
       <label className="field">記帳帳戶<select required={showCash} value={draft.cashAccount} onChange={(e) => {
         const account = money?.accounts.find((x) => x.name === e.currentTarget.value);
@@ -245,28 +225,8 @@ export function Editor({ initial, day, onDate, snap, money, busy, fromMoney, lin
       </select></label>
       {a && showCash && <label className="field">整筆自動備註<input readOnly value={investmentMemo(draft, a)} /></label>}
     </div>}
-    {showLink && <div>
-      <label className="field">記帳日期
-        <input type="date" value={linkDate} onChange={(e) => {
-          setLinkDate(e.currentTarget.value);
-          setLink('');
-        }} />
-      </label>
-      <label className="field">既有記帳交易
-        <select value={selectedLink?.id ?? ''} disabled={busy || !linkOptions.length} onChange={(e) => setLink(e.currentTarget.value)}>
-          <option value="">{!linkDate ? '請先選擇記帳日期' : busy ? '讀取中…' : !money ? '無法讀取記帳資料'
-            : linkOptions.length ? '選擇已入帳的紀錄' : '這一天沒有可連結的記帳交易'}</option>
-          {linkOptions.map((txn) => <option key={txn.id} value={txn.id}>
-            {txn.date} · {txn.account} · {format(txn.amount)} · {txn.note || txn.lines[0]?.category}
-          </option>)}
-        </select>
-      </label>
-      <button type="button" disabled={busy || !selectedLink} className="btn" onClick={() => {
-        if (selectedLink) onMoney(draft, selectedLink.id);
-      }}>確認連結</button>
-    </div>}
     {historic && <p className="hint">已連結既有記帳{linkedTxn && ` · ${linkedTxn.date} · ${format(linkedTxn.amount)}`}</p>}
-    <div className="invest-actions">
+    <div className="sticky-form-actions">
       <button className="btn primary" type="submit" disabled={busy || (showCash && !money) || (generated && typePending)}>{showCash ? '儲存並同步記帳' : '儲存投資紀錄'}</button>
       <button className="btn" type="button" onClick={onCancel}>取消</button>
       {historic && <button className="btn" type="button" onClick={() => onUnlink(draft)} disabled={busy}>解除連結</button>}

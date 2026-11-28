@@ -192,7 +192,7 @@ export function LedgerView({
     <>
       {/* 2026-11-19 改版：右下角「＋」記一筆，進去再選支出 / 收入 / 轉帳 / 還款 */}
       {!editing && (
-        <button className="fab" onClick={() => newEntry('支出')} aria-label="記一筆" title="記一筆">
+        <button className="calendar-add-button" onClick={() => newEntry('支出')} aria-label="記一筆" title="記一筆">
           <Icon name="plus" size={28} strokeWidth={2.2} />
         </button>
       )}

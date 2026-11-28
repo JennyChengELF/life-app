@@ -1,6 +1,9 @@
 @import '@life/ui/base.css';
 
-.invest-app { max-width: 860px; }
+.invest-app { max-width: 860px; --calendar-half-width: 430px; }
+.invest-add-menu > h2, .invest-day-list > h2 { margin: 16px 0 10px; }
+.invest-day-list { padding-bottom: 80px; }
+.invest-app .more-back { margin: 6px 0 10px; }
 .invest-topbar .tabs-top { display: flex; }
 @media (max-width: 759px) {
   .invest-topbar { flex-wrap: wrap; row-gap: 4px; }
@@ -28,6 +31,25 @@
 .invest-cash-list button { width: auto; padding: 6px; }
 .invest-cash-lines { list-style: none; padding: 0; }
 .invest-cash-lines li + li { border-top: 1px solid var(--line); }
+.invest-cash-lines li > span { min-width: 0; }
+.invest-cash-lines select { display: block; width: auto; max-width: 100%; margin-top: 4px; }
+.invest-row-icon { display: grid; flex: 0 0 40px; height: 40px; place-items: center; border-radius: 12px; color: var(--accent-strong); background: var(--accent-soft); }
+.invest-kind-fund { color: var(--ok); background: var(--ok-soft); }
+.invest-kind-policy { color: var(--warn); background: var(--warn-soft); }
+.invest-kind-pending { color: var(--muted); background: var(--bg); }
+.app-row .invest-row-alert, .invest-quantity-out { color: var(--danger); }
+.invest-quantity-in { color: var(--ok); }
+.invest-trade-group + .invest-trade-group { margin-top: 16px; }
+.invest-trade-group h3, .invest-trade-group h4, .invest-day-list h3 { margin: 0 0 6px; font-size: .95rem; }
+.invest-trade-group h4 { color: var(--muted); font-size: .85rem; }
+.invest-month { display: flex; justify-content: center; align-items: center; gap: 8px; margin-bottom: 12px; }
+.invest-month h2 { margin: 0; }
+.invest-allocation { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 14px 28px; }
+.invest-allocation > div:last-child { flex: 1 1 240px; max-width: 420px; }
+.invest-allocation-pie { width: min(160px, 60vw); aspect-ratio: 1; border-radius: 50%; }
+.invest-allocation-legend li { display: grid; grid-template-columns: 1fr auto minmax(4em, auto); gap: 8px; padding: 8px 0; }
+.invest-allocation-legend li > :last-child { text-align: end; }
+.invest-allocation-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--legend-color); margin-inline-end: 7px; }
 .invest-link { color: var(--accent-strong); }
 .invest-overflow { overflow-x: auto; }
 .invest-table { width: 100%; border-collapse: collapse; }
