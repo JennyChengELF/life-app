@@ -6,6 +6,7 @@ import {
 } from '@life/db';
 import { AppSwitcher } from '@life/ui/app-switcher';
 import { AppTabs, type AppTabItem } from '@life/ui/app-tabs';
+import { Icon } from '@life/ui/icon';
 import { MonthCalendar } from '@life/ui/month-calendar';
 import { dividendHint, Editor, format } from './Editor';
 import { refreshQuotes } from './quotes';
@@ -212,12 +213,17 @@ export function App() {
     cashCurrency: money?.accounts.find((a) => a.name === oldTxn?.account)?.currency ?? 'TWD',
   };
   return <div className="app invest-app">
-    <header className="app-header">
-      <AppSwitcher current={params.has('investEditor') ? 'money' : 'invest'} homeUrl={home} date={day} /><div><h1>{params.has('investEditor') ? '記帳 · 投資交易' : '投資'}</h1></div>
-      <button type="button" className="btn" disabled={busy || status !== 'ready'} onClick={() => void run(load)}>重新整理</button>
+    <header className="topbar invest-topbar">
+      <AppSwitcher current={params.has('investEditor') ? 'money' : 'invest'} homeUrl={home} date={day} />
+      <h1>{params.has('investEditor') ? '記帳 · 投資交易' : '投資'}</h1>
+      {/* 2026-11-28 使用者決定：四個分頁在桌面與手機都放在頁首。 */}
+      {status === 'ready' && <AppTabs items={tabs} current={tab} placement="top"
+        onChange={(next) => { setTab(next); setAsset(null); if (next !== 'add') setEvent(null); }} />}
+      <button type="button" className="icon-btn" aria-label="重新整理" title="重新整理"
+        disabled={busy || status !== 'ready'} onClick={() => void run(load)}>
+        <span className={busy ? 'spin' : ''}><Icon name="refresh" /></span>
+      </button>
     </header>
-    {status === 'ready' && <AppTabs items={tabs} current={tab} placement="top"
-      onChange={(next) => { setTab(next); setAsset(null); if (next !== 'add') setEvent(null); }} />}
     {error && <p role="alert" className="msg error">{error}</p>}
     {notice && <p role="status" className="msg warn">{notice}</p>}
     {status === 'loading' && <p className="card">讀取投資資料中…</p>}

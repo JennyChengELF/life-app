@@ -1,8 +1,20 @@
 @import '@life/ui/base.css';
 
 .invest-app { max-width: 860px; }
+.invest-topbar .tabs-top { display: flex; }
+@media (max-width: 759px) {
+  .invest-topbar { flex-wrap: wrap; row-gap: 4px; }
+  .invest-topbar .tabs-top { order: 1; flex-basis: 100%; }
+  .invest-topbar .tabs-top button { flex: 1; gap: 2px; padding-inline: 2px; }
+}
 .invest-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; }
 .invest-grid .field { min-width: 0; }
+.invest-app select {
+  font: inherit; color: var(--text); border: 1px solid var(--line); background: var(--bg);
+  border-radius: 10px; padding: 9px 11px; width: 100%; min-width: 0; text-overflow: ellipsis;
+}
+.invest-app select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.invest-app .field > select { display: block; margin-top: 4px; }
 .invest-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; }
 .invest-list { list-style: none; margin: 0; padding: 0; }
 .invest-list li + li { border-top: 1px solid var(--line); }

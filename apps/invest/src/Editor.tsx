@@ -29,6 +29,7 @@ export function Editor({ initial, day, onDate, snap, money, busy, fromMoney, lin
   const [draft, setDraft] = useState(initial);
   const [wantCash, setWantCash] = useState(fromMoney || initial.moneyMode === 'generated');
   const [link, setLink] = useState('');
+  const [linkDate, setLinkDate] = useState('');
   const [showLink, setShowLink] = useState(false);
   const [showQuickAsset, setShowQuickAsset] = useState(false);
   const [symbol, setSymbol] = useState('');
@@ -68,8 +69,11 @@ export function Editor({ initial, day, onDate, snap, money, busy, fromMoney, lin
   const showCash = gen && wantCash && !typePending;
   const historic = draft.moneyMode === 'linked';
   const linkedTxn = money?.txns.find((txn) => txn.id === draft.moneyId);
-  const linkOptions = (money?.txns ?? []).filter((txn) => (!txn.investmentId || (draft.kind === 'buy' && !txn.investmentGenerated)) &&
-    txn.direction === (isCashDividend || investIsSale(draft) ? '入' : '出')).sort((x, y) => y.date.localeCompare(x.date));
+  // （2026-11-28 使用者決定：按記帳日期篩選可連結的交易。）
+  const linkOptions = showLink && linkDate ? (money?.txns ?? []).filter((txn) =>
+    txn.date === linkDate && (!txn.investmentId || (draft.kind === 'buy' && !txn.investmentGenerated)) &&
+    txn.direction === (isCashDividend || investIsSale(draft) ? '入' : '出')) : [];
+  const selectedLink = linkOptions.find((txn) => txn.id === link);
   function enableCash() {
     if (!wantCash) {
       onCash();
@@ -146,7 +150,14 @@ export function Editor({ initial, day, onDate, snap, money, busy, fromMoney, lin
     {text('note', '補充備註')}
     {gen && !fromMoney && !generated && !linking && <div className="invest-actions">
       {!typePending && <button type="button" className="btn" onClick={enableCash}>{wantCash ? '先只存投資' : '產生記帳'}</button>}
-      {!!draft.id && <button type="button" className="btn" onClick={() => { onCash(); setShowLink((v) => !v); }}>連到既有記帳</button>}
+      {!!draft.id && <button type="button" className="btn" aria-expanded={showLink} onClick={() => {
+        if (!showLink) {
+          setLinkDate(draft.cashDate || draft.tradeDate || day);
+          setLink('');
+          onCash();
+        }
+        setShowLink(!showLink);
+      }}>連到既有記帳</button>}
     </div>}
     {showCash && <div className="invest-grid">
       <label className="field">記帳帳戶<select required value={draft.cashAccount} onChange={(e) => {
@@ -160,11 +171,25 @@ export function Editor({ initial, day, onDate, snap, money, busy, fromMoney, lin
       </select></label>
       {a && <label className="field">整筆自動備註<input readOnly value={investmentMemo(draft, a)} /></label>}
     </div>}
-    {showLink && <div className="invest-actions">
-      <select aria-label="選擇既有記帳" value={link} onChange={(e) => setLink(e.currentTarget.value)}>
-        <option value="">選擇已入帳的紀錄</option>{linkOptions.map((txn) =>
-          <option key={txn.id} value={txn.id}>{txn.date} · {txn.account} · {format(txn.amount)} · {txn.note || txn.lines[0]?.category}</option>)}
-      </select><button type="button" disabled={busy || !link} className="btn" onClick={() => onMoney(draft, link)}>確認連結</button>
+    {showLink && <div>
+      <label className="field">記帳日期
+        <input type="date" value={linkDate} onChange={(e) => {
+          setLinkDate(e.currentTarget.value);
+          setLink('');
+        }} />
+      </label>
+      <label className="field">既有記帳交易
+        <select value={selectedLink?.id ?? ''} disabled={busy || !linkOptions.length} onChange={(e) => setLink(e.currentTarget.value)}>
+          <option value="">{!linkDate ? '請先選擇記帳日期' : busy ? '讀取中…' : !money ? '無法讀取記帳資料'
+            : linkOptions.length ? '選擇已入帳的紀錄' : '這一天沒有可連結的記帳交易'}</option>
+          {linkOptions.map((txn) => <option key={txn.id} value={txn.id}>
+            {txn.date} · {txn.account} · {format(txn.amount)} · {txn.note || txn.lines[0]?.category}
+          </option>)}
+        </select>
+      </label>
+      <button type="button" disabled={busy || !selectedLink} className="btn" onClick={() => {
+        if (selectedLink) onMoney(draft, selectedLink.id);
+      }}>確認連結</button>
     </div>}
     {historic && <p className="hint">已連結既有記帳{linkedTxn && ` · ${linkedTxn.date} · ${format(linkedTxn.amount)}`}</p>}
     <div className="invest-actions">
