@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { WeekDateStrip } from '@life/ui/week-date-strip';
 import {
   blankInvestEvent, canGenerateCash, dividendEligibility, dividendEstimate, impliedInvestPrice, INVEST_KINDS, investCategory,
-  investIsDividend, investIsPurchase, investIsSale, investmentMemo, type InvestEvent, type InvestKind,
+  investIsDividend, investIsPurchase, investIsSale, investmentMemo, isInvestmentCashBatch, type InvestEvent, type InvestKind,
   type InvestSnapshot, type MoneySnapshot,
 } from '@life/db';
 
@@ -27,7 +27,7 @@ export function Editor({ initial, day, onDate, snap, money, busy, fromMoney, lin
   onRemove: (e: InvestEvent) => void; onUnlink: (e: InvestEvent) => void; onCancel: () => void;
 }) {
   const [draft, setDraft] = useState(initial);
-  const [wantCash, setWantCash] = useState(fromMoney || initial.moneyMode === 'generated');
+  const [showCashSettings, setShowCashSettings] = useState(!!initial.cashAccount && !linking);
   const [link, setLink] = useState('');
   const [linkDate, setLinkDate] = useState('');
   const [showLink, setShowLink] = useState(false);
@@ -66,21 +66,16 @@ export function Editor({ initial, day, onDate, snap, money, busy, fromMoney, lin
   const candidates = money?.categories.filter((cat) => !cat.archived && cat.path.startsWith(`${root} / `) &&
     cat.kind === (investIsSale(draft) || isCashDividend ? '收入' : '支出')) ?? [];
   const generated = draft.moneyMode === 'generated';
-  const showCash = gen && wantCash && !typePending;
+  const showCash = gen && (fromMoney || generated) && !typePending;
+  const showCashFields = showCash || (gen && showCashSettings && !typePending && !linking);
   const historic = draft.moneyMode === 'linked';
   const linkedTxn = money?.txns.find((txn) => txn.id === draft.moneyId);
   // （2026-11-28 使用者決定：按記帳日期篩選可連結的交易。）
   const linkOptions = showLink && linkDate ? (money?.txns ?? []).filter((txn) =>
-    txn.date === linkDate && (!txn.investmentId || (draft.kind === 'buy' && !txn.investmentGenerated)) &&
+    txn.date === linkDate && !isInvestmentCashBatch(txn.id) &&
+    (!txn.investmentId || (draft.kind === 'buy' && !txn.investmentGenerated)) &&
     txn.direction === (isCashDividend || investIsSale(draft) ? '入' : '出')) : [];
   const selectedLink = linkOptions.find((txn) => txn.id === link);
-  function enableCash() {
-    if (!wantCash) {
-      onCash();
-      if (isCashDividend && draft.cashAmount == null && forecast != null) return setWantCash(true);
-    }
-    setWantCash((v) => !v);
-  }
   async function addQuickAsset() {
     if (busy || !symbol.trim()) return;
     const id = await onQuickAsset(symbol);
@@ -127,7 +122,7 @@ export function Editor({ initial, day, onDate, snap, money, busy, fromMoney, lin
       {(!isSwitch && (isCashDividend || investIsSale(draft))) && num('tax', isCashDividend ? '補扣繳稅額' : '交易稅')}
       {isCashDividend && num('healthFee', '二代健保補充保費')}
       {!isSwitch && (gen || historic) && num('cashAmount', isCashDividend || investIsSale(draft) ? '實收金額' : '實際扣款金額')}
-      {(gen || historic || isCashDividend) && (!wantCash || historic) && text('cashCurrency', '實收／扣款幣別')}
+      {(gen || historic || isCashDividend) && !showCash && text('cashCurrency', '實收／扣款幣別')}
       {draft.kind !== 'stockDividend' && num('fx', isSwitch ? '換入幣別對台幣匯率（選填）' : '交易匯率（每單位原幣值多少台幣）')}
       {isSwitch && <>
         <label className="field">換入基金<select value={draft.secondAsset} onChange={(e) => patch({ secondAsset: e.currentTarget.value })}>
@@ -145,12 +140,15 @@ export function Editor({ initial, day, onDate, snap, money, busy, fromMoney, lin
         ` · 應配約 ${format(draft.perUnit * (draft.eligible ?? eligible)!)} 股`}
     </p>}
     {isCashDividend && draft.cashAmount == null && forecast != null && <p className="hint">推算實收 {format(forecast)} {draft.cashCurrency}，可填通知單或銀行確認的實收金額。
-      {showCash && <button type="button" className="btn" onClick={() => patch({ cashAmount: forecast })}>使用推算金額</button>}
+      <button type="button" className="btn" onClick={() => patch({ cashAmount: forecast })}>使用推算金額</button>
     </p>}
     {text('note', '補充備註')}
     {gen && !fromMoney && !generated && !linking && <div className="invest-actions">
-      {!typePending && <button type="button" className="btn" onClick={enableCash}>{wantCash ? '先只存投資' : '產生記帳'}</button>}
-      {!!draft.id && <button type="button" className="btn" aria-expanded={showLink} onClick={() => {
+      {!typePending && <button type="button" className="btn" disabled={busy} aria-expanded={showCashSettings} onClick={() => {
+        if (!showCashSettings) onCash();
+        setShowCashSettings(!showCashSettings);
+      }}>記帳帳戶與分類</button>}
+      {!!draft.id && <button type="button" className="btn" disabled={busy} aria-expanded={showLink} onClick={() => {
         if (!showLink) {
           setLinkDate(draft.cashDate || draft.tradeDate || day);
           setLink('');
@@ -159,8 +157,8 @@ export function Editor({ initial, day, onDate, snap, money, busy, fromMoney, lin
         setShowLink(!showLink);
       }}>連到既有記帳</button>}
     </div>}
-    {showCash && <div className="invest-grid">
-      <label className="field">記帳帳戶<select required value={draft.cashAccount} onChange={(e) => {
+    {showCashFields && <div className="invest-grid">
+      <label className="field">記帳帳戶<select required={showCash} value={draft.cashAccount} onChange={(e) => {
         const account = money?.accounts.find((x) => x.name === e.currentTarget.value);
         patch({ cashAccount: account?.name ?? '', cashCurrency: account?.currency ?? 'TWD' });
       }}><option value="">選擇實際收付款帳戶</option>{money?.accounts.filter((x) => !x.archived || x.name === draft.cashAccount)
@@ -169,7 +167,7 @@ export function Editor({ initial, day, onDate, snap, money, busy, fromMoney, lin
         <option value={root}>{root.replaceAll(' / ', '／')}</option>
         {candidates.map((x) => <option key={x.id} value={x.path}>{x.path.replaceAll(' / ', '／')}</option>)}
       </select></label>
-      {a && <label className="field">整筆自動備註<input readOnly value={investmentMemo(draft, a)} /></label>}
+      {a && showCash && <label className="field">整筆自動備註<input readOnly value={investmentMemo(draft, a)} /></label>}
     </div>}
     {showLink && <div>
       <label className="field">記帳日期

@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   AuthError, blankAsset, blankInvestEvent, dividendEligibility, dividendEstimate, GoogleAuth, importInvestRows, INVEST_KINDS, INVEST_PASTE_SHEETS, InvestMoney, investDate,
-  investPortfolio, investmentsForMoney, LocalBackend, parseDateText, previewInvestImport, SheetsBackend, todayKey,
+  investPortfolio, investmentsForMoney, isInvestmentCashBatch, LocalBackend, parseDateText, previewInvestImport, SheetsBackend, todayKey,
   type InvestAsset, type InvestEvent, type InvestImportRow, type InvestSnapshot, type MoneySnapshot, type Txn,
 } from '@life/db';
 import { AppSwitcher } from '@life/ui/app-switcher';
 import { AppTabs, type AppTabItem } from '@life/ui/app-tabs';
 import { Icon } from '@life/ui/icon';
 import { MonthCalendar } from '@life/ui/month-calendar';
+import { CashBatch } from './CashBatch';
 import { dividendHint, Editor, format } from './Editor';
 import { refreshQuotes } from './quotes';
 
@@ -43,6 +44,8 @@ export function App() {
   const [snap, setSnap] = useState<InvestSnapshot | null>(null);
   const [money, setMoney] = useState<MoneySnapshot | null>(null);
   const [tab, setTab] = useState<Tab>(viaMoney || oldMoney || requestedEvent ? 'add' : 'calendar');
+  const [addMode, setAddMode] = useState<'investment' | 'cash' | null>(viaMoney || oldMoney || requestedEvent ? 'investment' : null);
+  const [batchVersion, setBatchVersion] = useState(0);
   const [day, setDay] = useState(date);
   const [event, setEvent] = useState<InvestEvent | null>(null);
   const [editorVersion, setEditorVersion] = useState(0);
@@ -91,7 +94,7 @@ export function App() {
       const row = next.events.find((e) => e.id === requestedEvent);
       if (row) setEvent(row); else setError('找不到這筆投資紀錄');
     }
-    if (viaMoney || oldMoney || next.events.find((e) => e.id === requestedEvent)?.moneyId) await loadMoney();
+    if (viaMoney || oldMoney || next.events.some((e) => e.id === requestedEvent && (e.moneyId || e.cashAccount))) await loadMoney();
   }
 
   async function run(action: () => Promise<void>) {
@@ -126,9 +129,9 @@ export function App() {
   }, [tab, Boolean(snap)]);
 
   const open = (row: InvestEvent) => {
-    setEvent(row); setTab('add');
+    setEvent(row); setTab('add'); setAddMode('investment');
     if (investDate(row)) setDay(investDate(row));
-    if (row.moneyId && !money) void run(async () => { await loadMoney(); });
+    if ((row.moneyId || row.cashAccount) && !money) void run(async () => { await loadMoney(); });
   };
   const after = async (id: string, warning?: string) => {
     await load();
@@ -169,7 +172,7 @@ export function App() {
       }
       await after(result.id);
     } else {
-      await after(await store.saveEvent(draft));
+      await after(await bridge.saveStandalone(draft));
     }
   });
   const remove = (row: InvestEvent) => {
@@ -185,6 +188,10 @@ export function App() {
     await loadMoney();
     if (row.removePending) await bridge.remove(row);
     else if (row.moneyMode === 'linked') await bridge.link(row, row.moneyId);
+    else if (isInvestmentCashBatch(row.moneyId)) {
+      try { await bridge.retryCashBatch(row.moneyId); } finally { await load(); }
+      await loadMoney();
+    }
     else {
       const result = await bridge.generate(row);
       if (result.error) { setNotice(`仍待同步：${result.error}`); return; }
@@ -202,7 +209,14 @@ export function App() {
   )) : [];
   const active = snap?.events.filter((e) => !e.removePending) ?? [];
   const alerts = active.filter((e) => e.kind === 'dividend' && !e.moneyId || dividendHint(e, snap!).startsWith('股數待核對') || positions?.shortages.has(e.id));
-  const pending = snap?.events.filter((e) => e.pending) ?? [];
+  const pendingBatches = new Set<string>();
+  const pending = snap?.events.filter((e) => {
+    if (!e.pending) return false;
+    if (!isInvestmentCashBatch(e.moneyId)) return true;
+    if (pendingBatches.has(e.moneyId)) return false;
+    pendingBatches.add(e.moneyId);
+    return true;
+  }) ?? [];
   const oldTxn = money?.txns.find((txn) => txn.id === oldMoney);
   const linkedTxn = oldTxn ?? money?.txns.find((txn) => txn.id === event?.moneyId);
   const moneyGroup = linkedTxn ? investmentsForMoney(active, linkedTxn.id) : [];
@@ -218,7 +232,10 @@ export function App() {
       <h1>{params.has('investEditor') ? '記帳 · 投資交易' : '投資'}</h1>
       {/* 2026-11-28 使用者決定：四個分頁在桌面與手機都放在頁首。 */}
       {status === 'ready' && <AppTabs items={tabs} current={tab} placement="top"
-        onChange={(next) => { setTab(next); setAsset(null); if (next !== 'add') setEvent(null); }} />}
+        onChange={(next) => {
+          setTab(next); setAsset(null);
+          if (next !== 'add') { setEvent(null); setAddMode(null); }
+        }} />}
       <button type="button" className="icon-btn" aria-label="重新整理" title="重新整理"
         disabled={busy || status !== 'ready'} onClick={() => void run(load)}>
         <span className={busy ? 'spin' : ''}><Icon name="refresh" /></span>
@@ -234,9 +251,31 @@ export function App() {
     {status === 'ready' && snap && <>
       {viaMoney && <p className="hint"><a className="invest-link" href={moneyUrl()}>回記帳 APP</a></p>}
       {pending.length > 0 && <section className="card"><h2>待同步</h2>{pending.map((e) =>
-        <div className="invest-actions" key={e.id}><span>{INVEST_KINDS[e.kind]} · {snap.assets.find((a) => a.id === e.asset)?.symbol}</span>
+        <div className="invest-actions" key={e.id}><span>{isInvestmentCashBatch(e.moneyId) ? '合併記帳'
+          : `${INVEST_KINDS[e.kind]} · ${snap.assets.find((a) => a.id === e.asset)?.symbol ?? ''}`}</span>
           <button className="btn" disabled={busy} onClick={() => retry(e)}>重試{e.removePending ? '刪除' : '同步'}</button></div>)}</section>}
       {tab === 'add' && <>
+        {!viaMoney && !oldMoney && <div className="invest-actions">
+          <button type="button" className="btn" disabled={busy} aria-pressed={addMode === 'investment'} onClick={() => {
+            setEvent(null); setEditorVersion((n) => n + 1); setAddMode('investment');
+          }}>新增投資</button>
+          <button type="button" className="btn" disabled={busy} aria-pressed={addMode === 'cash'} onClick={() => {
+            setEvent(null); setAddMode('cash');
+            if (!money) void run(async () => { await loadMoney(); });
+          }}>產生記帳</button>
+        </div>}
+        {addMode === 'cash' && <CashBatch key={batchVersion} snap={snap} money={money} busy={busy}
+          onLoadMoney={() => void run(async () => { await loadMoney(); })}
+          onEdit={(id) => { const row = active.find((e) => e.id === id); if (row) open(row); }}
+          onConfirm={(ids, date, account) => void run(async () => {
+            try {
+              await bridge.generateCashBatch(ids, date, account);
+              setBatchVersion((version) => version + 1);
+              setNotice(`已將 ${ids.length} 筆投資產生為一筆記帳。`);
+            } finally { await load(); }
+            await loadMoney();
+          })} />}
+        {addMode === 'investment' && <>
         {linkedTxn && <MoneySummary txn={linkedTxn} money={money!} group={moneyGroup} assets={snap.assets}
           busy={busy} onOpen={open} onAllocate={() => {
             if (!window.confirm('依已連結的買進重建這筆扣款的支出明細？銀行實扣金額會保留。')) return;
@@ -250,7 +289,17 @@ export function App() {
             onClick={() => void run(async () => { await bridge.link(row, oldMoney); await after(row.id); })}>
             {investDate(row)} · {snap.assets.find((a) => a.id === row.asset)?.symbol} · {INVEST_KINDS[row.kind]}</button></li>)}
         </ul></section>}
-        {(!oldMoney || oldTxn) && <Editor key={event ? `${event.id}:${event.pending}:${event.moneyId}` : `new:${editorVersion}:${oldTxn?.id ?? ''}`}
+        {event && isInvestmentCashBatch(event.moneyId) && !event.pending && <div className="invest-actions">
+          <button className="btn danger" type="button" disabled={busy} onClick={() => {
+            if (!window.confirm('取消這組產生的記帳？投資紀錄會保留，可重新勾選。')) return;
+            void run(async () => {
+              await bridge.cancelCashBatch(event.moneyId);
+              await after(event.id);
+              await loadMoney();
+            });
+          }}>取消產生的記帳</button>
+        </div>}
+        {(!oldMoney || oldTxn) && !event?.pending && <Editor key={event ? `${event.id}:${event.pending}:${event.moneyId}` : `new:${editorVersion}:${oldTxn?.id ?? ''}`}
           initial={editor} day={day} onDate={setDay} snap={snap} money={money}
           busy={busy} fromMoney={viaMoney} linking={!!oldMoney} onSave={save}
           onQuickAsset={async (symbol) => {
@@ -267,6 +316,7 @@ export function App() {
           onMoney={(row, id) => void run(async () => { await bridge.link(row, id); await after(row.id); })}
           onUnlink={(row) => void run(async () => { await bridge.unlink(row); await after(row.id); })}
           onRemove={remove} />}
+        </>}
       </>}
       {tab === 'calendar' && <>
         <MonthCalendar selected={day} setDate={setDay} dayInfo={(d) => active.some((e) => (
@@ -336,7 +386,8 @@ function MoneySummary({ txn, money, group, assets, busy, onOpen, onAllocate }: {
     {oldMoney && txn.direction === '出' && <p className="hint">同一筆扣款買多檔時，請分別填各標的的實扣金額。</p>}
     <div className="invest-actions">
       <a className="invest-link" href={moneyUrl(txn.id)}>查看原記帳</a>
-      {group.length > 1 && txn.direction === '出' && <button className="btn" type="button" disabled={busy} onClick={onAllocate}>按標的分列記帳明細</button>}
+      {group.length > 1 && txn.direction === '出' && !isInvestmentCashBatch(txn.id) &&
+        <button className="btn" type="button" disabled={busy} onClick={onAllocate}>按標的分列記帳明細</button>}
     </div>
   </section>;
 }

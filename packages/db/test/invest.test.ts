@@ -66,6 +66,70 @@ describe('投資 APP', () => {
     expect(investPortfolio([stock], rows, end).positions.get(stock.id)).toMatchObject({ quantity: 1550, cost: 63000 });
   });
 
+  it('只合併勾選的買進，個別分列本金及手續費，取消後可重新選取', async () => {
+    const { bridge, store } = await setup();
+    const orders = [
+      { symbol: '0050', quantity: 2, price: 30 },
+      { symbol: '00878', quantity: 3, price: 10 },
+      { symbol: '00713', quantity: 4, price: 20 },
+      { symbol: '00999', quantity: 1, price: 25 },
+    ];
+    for (const { symbol, quantity, price } of orders) {
+      await store.saveAsset({ ...stock, id: symbol, symbol });
+      await store.saveEvent(event({ id: `buy-${symbol}`, asset: symbol, cashDate: date, quantity, price, fee: 1 }));
+    }
+    const ids = orders.slice(0, 3).map(({ symbol }) => `buy-${symbol}`);
+    const moneyId = await bridge.generateCashBatch(ids, date, '測試銀行');
+    const ledger = await bridge.money.load();
+    expect(ledger.txns).toHaveLength(1);
+    expect(ledger.txns[0]).toMatchObject({
+      id: moneyId, date, account: '測試銀行', amount: 173, note: '0050, 00878, 00713 扣款',
+    });
+    expect(ledger.txns[0].lines.map(({ amount, note, category }) => [amount, note, category])).toEqual([
+      [60, '0050：2 股 × 每股 30', '投資 / 股票'],
+      [1, '0050：手續費', '投資 / 投資手續費'],
+      [30, '00878：3 股 × 每股 10', '投資 / 股票'],
+      [1, '00878：手續費', '投資 / 投資手續費'],
+      [80, '00713：4 股 × 每股 20', '投資 / 股票'],
+      [1, '00713：手續費', '投資 / 投資手續費'],
+    ]);
+    const { events } = await store.load();
+    expect(events.filter((row) => row.moneyId === moneyId).map((row) => row.id)).toEqual(ids);
+    expect(events.find((row) => row.id === 'buy-00999')?.moneyId).toBe('');
+    await expect(bridge.generateCashBatch(ids, date, '測試銀行')).rejects.toThrow('已連結');
+    await bridge.cancelCashBatch(moneyId);
+    expect((await bridge.money.load()).txns).toHaveLength(0);
+    expect((await store.load()).events.every((row) => !row.moneyId)).toBe(true);
+    expect(await bridge.generateCashBatch(ids, date, '測試銀行')).not.toBe(moneyId);
+    expect((await bridge.money.load()).txns).toHaveLength(1);
+  });
+
+  it('合併記帳拒絕不同扣款日，跨試算表失敗時只重試原來勾選的投資', async () => {
+    const { backend, bridge, store } = await setup();
+    await store.saveEvent(event({ id: 'a', cashDate: date, quantity: 2, price: 30, fee: 1 }));
+    await store.saveEvent(event({ id: 'b', cashDate: date, quantity: 3, price: 10, fee: 1 }));
+    await store.saveEvent(event({ id: 'c', cashDate: '2020-07-02', quantity: 1, price: 25 }));
+    await expect(bridge.generateCashBatch(['a', 'c'], date, '測試銀行')).rejects.toThrow('扣款／入帳日不同');
+    const write = backend.writeBatch.bind(backend);
+    let fail = true;
+    backend.writeBatch = async (writes) => {
+      if (fail && writes.some((item) => item.table === 'moneyTransactions')) {
+        fail = false;
+        throw new Error('網路暫時中斷');
+      }
+      await write(writes);
+    };
+    await expect(bridge.generateCashBatch(['a', 'b'], date, '測試銀行')).rejects.toThrow('網路暫時中斷');
+    const before = (await store.load()).events;
+    expect(before.map(({ pending }) => pending)).toEqual([true, true, false]);
+    await bridge.retryCashBatch(before[0].moneyId);
+    await bridge.retryCashBatch(before[0].moneyId);
+    const ledger = await bridge.money.load();
+    expect(ledger.txns).toHaveLength(1);
+    expect(ledger.txns[0].amount).toBe(92);
+    expect((await store.load()).events.map(({ pending }) => pending)).toEqual([false, false, false]);
+  });
+
   it('跨表失敗後重試使用同一筆，修改股數不重扣，刪除移除兩邊', async () => {
     const { backend, bridge, store } = await setup();
     const actual = backend.writeBatch.bind(backend);

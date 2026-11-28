@@ -299,6 +299,21 @@ export class InvestStore {
     return this.save('investEvents', { ...event });
   }
 
+  async saveCashLinks(events: InvestEvent[], assets: InvestAsset[]) {
+    if (!this.backend.writeBatch) throw new Error('資料來源不支援合併記帳');
+    const rows = new Map((await this.backend.read('investEvents')).filter(isActive).map((row) => [row.values.id, row]));
+    const now = Date.now();
+    const update = events.map((event) => {
+      validateInvest(event, assets);
+      const row = rows.get(event.id);
+      if (!row) throw new Error('找不到投資紀錄，請重新整理');
+      const { cashDate, cashAccount, cashCurrency, cashAmount, moneyId, moneyMode, pending } = event;
+      return { rowNumber: row.rowNumber, expectId: event.id,
+        values: { cashDate, cashAccount, cashCurrency, cashAmount, moneyId, moneyMode, pending, updatedAt: now } };
+    });
+    await this.backend.writeBatch([{ table: 'investEvents', update }]);
+  }
+
   async saveQuotes(quotes: (Pick<InvestAsset, 'id'> & Partial<Pick<InvestAsset, 'quote' | 'quoteDate' | 'quoteSource' | 'quoteFx' | 'quoteFxDate'>>)[]) {
     const rows = await this.backend.read('investAssets');
     const updates = quotes.flatMap(({ id, ...values }) => {

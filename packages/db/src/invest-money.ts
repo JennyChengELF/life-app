@@ -5,7 +5,7 @@ import {
 } from './invest';
 import { MoneyStore, roundMoney, type CategoryKind, type LineInput, type Txn, type TxnInput } from './money';
 import { newId } from './ids';
-import { startOfDay, toDateKey } from './time';
+import { parseDateText, startOfDay, toDateKey } from './time';
 
 export function investCategory(e: InvestEvent, a: InvestAsset) {
   if (a.kind === 'pending') return '';
@@ -84,6 +84,51 @@ export function investmentCashInput(e: InvestEvent, a: InvestAsset): TxnInput {
   };
 }
 
+const batchMoneyPrefix = 'invest-batch-';
+export const isInvestmentCashBatch = (moneyId: string) => moneyId.startsWith(batchMoneyPrefix);
+
+export function prepareInvestmentCashBatch(
+  rows: InvestEvent[], assets: InvestAsset[], cashDate: string, cashAccount: string, cashCurrency: string,
+) {
+  if (!rows.length) throw new Error('請先勾選要產生記帳的投資');
+  if (!cashDate || parseDateText(cashDate) !== cashDate || !cashAccount || !cashCurrency) throw new Error('請選擇扣款／入帳日和記帳帳戶');
+  // （2026-11-28 使用者決定：只將勾選的同一筆扣款合併，各檔本金和手續費各列一筆。）
+  if (rows.length > 1 && rows.some((row) => row.kind !== 'buy')) throw new Error('一筆合併扣款只能勾選買進紀錄');
+  const symbols = new Set<string>();
+  const parts = rows.map((row) => {
+    const asset = assets.find((item) => item.id === row.asset);
+    if (!asset) throw new Error('找不到投資標的');
+    symbols.add(asset.symbol);
+    try {
+      if (row.cashDate && row.cashDate !== cashDate) throw new Error('扣款／入帳日不同');
+      if (row.cashAccount && row.cashAccount !== cashAccount) throw new Error('記帳帳戶不同');
+      if ((row.cashAccount || row.cashAmount != null || row.kind === 'switch') && row.cashCurrency !== cashCurrency) {
+        throw new Error('實際收付款幣別與記帳帳戶不同');
+      }
+      const event = { ...row, cashDate, cashAccount, cashCurrency };
+      const input = investmentCashInput(event, asset);
+      if (row.kind === 'buy') {
+        const unit = asset.kind === 'stock' ? '股' : '單位';
+        const price = asset.kind === 'stock' ? '每股' : '每單位';
+        input.lines[0].note = row.quantity != null && row.price != null
+          ? `${asset.symbol}：${row.quantity} ${unit} × ${price} ${row.price}${asset.currency !== cashCurrency ? ` ${asset.currency}` : ''}`
+          : asset.symbol;
+        for (const line of input.lines.slice(1)) {
+          line.note = `${asset.symbol}：${line.category === '投資 / 投資手續費' ? '手續費' : '證券交易稅'}`;
+        }
+      }
+      return { event: { ...event, cashAmount: row.kind === 'switch' ? row.cashAmount : input.amount }, input };
+    } catch (error) {
+      throw new Error(`${asset.symbol}：${error instanceof Error ? error.message : String(error)}`);
+    }
+  });
+  const first = parts[0].input;
+  const amount = roundMoney(parts.reduce((total, { input }) => total + (input.amount ?? 0), 0), cashCurrency);
+  const input: TxnInput = { ...first, amount, lines: parts.flatMap((part) => part.input.lines),
+    note: rows[0].kind === 'buy' ? `${[...symbols].join(', ')} 扣款` : first.note };
+  return { input, events: parts.map((part) => part.event) };
+}
+
 export class InvestMoney {
   readonly investments: InvestStore;
   readonly money: MoneyStore;
@@ -92,11 +137,87 @@ export class InvestMoney {
     this.money = new MoneyStore(backend, 'invest');
   }
 
+  async saveStandalone(event: InvestEvent) {
+    return withMoneyLock('batch-generation', async () => {
+      const current = event.id && (await this.investments.load()).events.find((row) => row.id === event.id);
+      if (current && (current.moneyId !== event.moneyId || current.pending)) throw new Error('投資連結已變更，請重新整理');
+      return this.investments.saveEvent(event);
+    });
+  }
+
   async generate(event: InvestEvent): Promise<{ id: string; error?: string }> {
     const draft = { ...event, id: event.id || newId() };
     const locks = globalThis.navigator?.locks;
-    if (locks) return locks.request(`life-invest-${draft.id}`, () => this.generateLocked(draft));
-    return this.generateLocked(draft);
+    return withMoneyLock('batch-generation', () => locks
+      ? locks.request(`life-invest-${draft.id}`, () => this.generateLocked(draft)) : this.generateLocked(draft));
+  }
+
+  async generateCashBatch(ids: string[], cashDate: string, cashAccount: string) {
+    return withMoneyLock('batch-generation', async () => {
+      const { assets, events } = await this.investments.load();
+      const byId = new Map(events.map((event) => [event.id, event]));
+      const rows = [...new Set(ids)].map((id) => {
+        const row = byId.get(id);
+        if (!row || row.moneyId || row.pending) throw new Error('勾選的投資已連結或已變更，請重新整理');
+        return row;
+      });
+      const ledger = await this.money.load();
+      const account = ledger.accounts.find((a) => a.name === cashAccount && !a.archived);
+      if (!account) throw new Error('請選擇可用的記帳帳戶');
+      const batch = prepareInvestmentCashBatch(rows, assets, cashDate, account.name, account.currency);
+      const moneyId = `${batchMoneyPrefix}${newId()}~${batch.events[0].id}`;
+      const pending = batch.events.map((row) => ({ ...row, moneyId, moneyMode: 'generated' as const, pending: true }));
+      await this.investments.saveCashLinks(pending, assets);
+      await this.finishCashBatch(pending, assets, batch.input);
+      return moneyId;
+    });
+  }
+
+  async retryCashBatch(moneyId: string) {
+    return withMoneyLock('batch-generation', async () => {
+      const { assets, events } = await this.investments.load();
+      const rows = investmentsForMoney(events, moneyId);
+      const first = rows.find((row) => row.id === moneyId.slice(moneyId.indexOf('~') + 1));
+      if (!first || !rows.every((row) => row.moneyMode === 'generated')) throw new Error('找不到這組待同步投資');
+      if (!rows.some((row) => row.pending)) return;
+      const ledger = await this.money.load();
+      const existing = ledger.txns.find((txn) => txn.id === moneyId);
+      if (existing) {
+        if (!existing.investmentGenerated || existing.investmentId !== first.id) throw new Error('這筆記帳已連到其他投資紀錄');
+        await this.investments.saveCashLinks(rows.map((row) => ({ ...row, pending: false })), assets);
+        return;
+      }
+      const account = ledger.accounts.find((a) => a.name === first.cashAccount && a.currency === first.cashCurrency);
+      if (!account) throw new Error('找不到原本的記帳帳戶，或帳戶幣別已變更');
+      const ordered = [first, ...rows.filter((row) => row.id !== first.id)];
+      const batch = prepareInvestmentCashBatch(ordered, assets, first.cashDate, account.name, account.currency);
+      await this.finishCashBatch(ordered, assets, batch.input);
+    });
+  }
+
+  private async finishCashBatch(rows: InvestEvent[], assets: InvestAsset[], input: TxnInput) {
+    const categories = input.lines.flatMap((line) => line.category ? [{
+      path: line.category, kind: line.kind as CategoryKind, invested: !input.investmentDeferred,
+    }] : []);
+    await this.money.ensureInvestmentCategories(categories);
+    await this.money.saveTxn(input, undefined, rows[0].moneyId);
+    await this.investments.saveCashLinks(rows.map((row) => ({ ...row, pending: false })), assets);
+  }
+
+  async cancelCashBatch(moneyId: string) {
+    return withMoneyLock('batch-generation', async () => {
+      const { assets, events } = await this.investments.load();
+      const rows = investmentsForMoney(events, moneyId);
+      if (!isInvestmentCashBatch(moneyId) || !rows.length || rows.some((row) => row.moneyMode !== 'generated' || row.pending)) {
+        throw new Error('請先完成這組投資的同步');
+      }
+      const txn = (await this.money.load()).txns.find((row) => row.id === moneyId);
+      if (txn) {
+        if (!txn.investmentGenerated || !rows.some((row) => row.id === txn.investmentId)) throw new Error('這筆記帳已連到其他投資紀錄');
+        await this.money.deleteTxn(txn);
+      }
+      await this.investments.saveCashLinks(rows.map((row) => ({ ...row, moneyId: '', moneyMode: '' })), assets);
+    });
   }
 
   private async generateLocked(event: InvestEvent): Promise<{ id: string; error?: string }> {
@@ -108,10 +229,16 @@ export class InvestMoney {
     if (!asset) throw new Error('找不到投資標的');
     if (asset.kind === 'pending') throw new Error('請先在「更多 → 標的與保單」補上標的類型，再同步記帳');
     const prior = events.find((e) => e.id === linked.id);
+    if (prior?.moneyId && prior.moneyId !== event.moneyId) throw new Error('投資連結已變更，請重新整理');
     if (investmentsForMoney(events, linked.moneyId).some((row) => row.id !== linked.id)) {
       if (!prior || linked.cashAmount !== prior.cashAmount || linked.cashAccount !== prior.cashAccount ||
         linked.cashDate !== prior.cashDate || linked.cashCurrency !== prior.cashCurrency) {
         throw new Error('這筆扣款有多檔投資，請在記帳 APP 編輯整筆扣款');
+      }
+      if (isInvestmentCashBatch(linked.moneyId) && (linked.asset !== prior.asset || linked.quantity !== prior.quantity ||
+        linked.price !== prior.price || linked.originalAmount !== prior.originalAmount || linked.fee !== prior.fee ||
+        linked.tax !== prior.tax || linked.fx !== prior.fx || linked.category !== prior.category)) {
+        throw new Error('請先取消這組產生的記帳，再更新投資明細並重新產生');
       }
       await this.investments.saveEvent({ ...linked, pending: false });
       return { id };
@@ -215,21 +342,25 @@ export class InvestMoney {
       return txnId;
     };
     const locks = globalThis.navigator?.locks;
-    return locks ? locks.request(`life-invest-${id}`, save) : save();
+    return withMoneyLock('batch-generation', () => locks ? locks.request(`life-invest-${id}`, save) : save());
   }
 
   async link(event: InvestEvent, moneyId: string) {
-    return withMoneyLock(moneyId, () => this.linkLocked(event, moneyId));
+    return withMoneyLock('batch-generation', () => withMoneyLock(moneyId, () => this.linkLocked(event, moneyId)));
   }
 
   private async linkLocked(event: InvestEvent, moneyId: string) {
     if (event.moneyMode === 'generated') throw new Error('這筆已有自動產生的記帳');
+    if (isInvestmentCashBatch(moneyId)) throw new Error('這筆記帳已由勾選的投資產生，請先取消後重新勾選');
     if (event.moneyId && event.moneyId !== moneyId) throw new Error('請先解除前一筆記帳連結');
     const id = event.id || newId();
     const snapshot = await this.money.load();
     const txn = snapshot.txns.find((t) => t.id === moneyId);
     if (!txn) throw new Error('找不到這筆記帳');
-    const siblings = investmentsForMoney((await this.investments.load()).events, moneyId).filter((e) => e.id !== id);
+    const { events } = await this.investments.load();
+    const current = events.find((row) => row.id === id);
+    if (current?.moneyId && current.moneyId !== moneyId) throw new Error('這筆投資已連結記帳，請重新整理');
+    const siblings = investmentsForMoney(events, moneyId).filter((e) => e.id !== id);
     // （2026-11-27 使用者決定：一筆定期定額扣款可對應多檔買進。）
     if (siblings.length && (event.kind !== 'buy' || siblings.some((e) => e.kind !== 'buy'))) {
       throw new Error('同一筆記帳連結多筆投資時，請選擇買進紀錄');
@@ -265,6 +396,12 @@ export class InvestMoney {
   }
 
   async remove(event: InvestEvent) {
+    return withMoneyLock('batch-generation', () => this.removeLocked(event));
+  }
+
+  private async removeLocked(event: InvestEvent) {
+    const current = (await this.investments.load(true)).events.find((row) => row.id === event.id);
+    if (current && current.moneyId !== event.moneyId) throw new Error('投資連結已變更，請重新整理');
     if (event.moneyMode === 'linked') await this.unlink(event);
     if (event.moneyMode === 'generated') {
       if (investmentsForMoney((await this.investments.load()).events, event.moneyId).some((row) => row.id !== event.id)) {
